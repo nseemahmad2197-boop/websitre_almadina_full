@@ -1,0 +1,430 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ApplicationShell } from "./components/application-shell";
+import { Authentication } from "./components/auth";
+import { Icon } from "./components/icon";
+import { Avatar, Button, Field, IconButton, Modal } from "./components/ui";
+import { AppContext, type ConfirmOptions, type ToastKind, type View } from "./lib/app-context";
+import { rememberAvailableAccount } from "./lib/available-accounts";
+import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type Preferences, type User } from "./lib/data";
+
+type Toast = { id: string; message: string; kind: ToastKind };
+type DetectorResult = { rawValue: string };
+type DetectorConstructor = new (options: { formats: string[] }) => { detect: (source: HTMLVideoElement) => Promise<DetectorResult[]> };
+type SharedSnapshot = { database: Database; revision: number; userId: string };
+type DatabaseUpdater = (current: Database) => Database;
+type ThemePreference = Preferences["theme"];
+
+const THEME_STORAGE_KEY = "almadina-express-theme";
+
+function rememberSnapshotAccount(snapshot: SharedSnapshot): void {
+  const account = snapshot.database.users.find((entry) => entry.id === snapshot.userId);
+  if (account) rememberAvailableAccount({ id: account.id, name: account.name, email: account.email, store: account.store, role: account.role, avatarColor: account.avatarColor });
+}
+
+function isThemePreference(value: unknown): value is ThemePreference {
+  return value === "light" || value === "dark" || value === "system";
+}
+
+class SharedApiError extends Error {
+  status: number;
+  snapshot?: SharedSnapshot;
+
+  constructor(message: string, status: number, snapshot?: SharedSnapshot) {
+    super(message);
+    this.status = status;
+    this.snapshot = snapshot;
+  }
+}
+
+async function sharedRequest(path: string, options: RequestInit = {}): Promise<SharedSnapshot> {
+  const response = await fetch(`/api/almadina/${path}`, {
+    ...options,
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json", ...options.headers },
+  });
+
+  const payload = await response.json() as Partial<SharedSnapshot> & { error?: string };
+  if (!response.ok) {
+    const snapshot = payload.database && typeof payload.revision === "number" && payload.userId
+      ? { database: payload.database, revision: payload.revision, userId: payload.userId }
+      : undefined;
+    throw new SharedApiError(payload.error ?? "تعذّر الاتصال بخادم المدينة إكسبرس.", response.status, snapshot);
+  }
+
+  if (!payload.database || typeof payload.revision !== "number" || !payload.userId) {
+    throw new SharedApiError("استجابة خادم المدينة إكسبرس غير مكتملة.", 500);
+  }
+
+  return { database: payload.database, revision: payload.revision, userId: payload.userId };
+}
+
+function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employeeMode?: boolean; onClose: () => void; onDetected: (value: string) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [manual, setManual] = useState("");
+  const [message, setMessage] = useState(employeeMode ? "امسح كود الطرد لتأكيد استلامه" : "وجّه الكاميرا إلى رمز الطرد");
+
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let timer: number | null = null;
+    let alive = true;
+
+    async function start() {
+      if (!navigator.mediaDevices?.getUserMedia) { setMessage("الكاميرا تحتاج HTTPS أو localhost — أدخل رقم التتبع يدويًا."); return; }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        if (!alive) { stream.getTracks().forEach((track) => track.stop()); return; }
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => undefined); }
+        const Detector = (window as Window & { BarcodeDetector?: DetectorConstructor }).BarcodeDetector;
+        if (Detector && videoRef.current) {
+          const detector = new Detector({ formats: ["qr_code", "code_128", "code_39"] });
+          timer = window.setInterval(async () => { if (!videoRef.current || videoRef.current.readyState < 2) return; try { const results = await detector.detect(videoRef.current); if (results[0]?.rawValue) { if (timer) window.clearInterval(timer); onDetected(results[0].rawValue); } } catch { /* Continue while the camera is adjusting focus. */ } }, 750);
+        }
+      } catch { setMessage("تعذّر الوصول للكاميرا — يمكنك إدخال الرقم يدويًا."); }
+    }
+
+    void start();
+    return () => { alive = false; if (timer) window.clearInterval(timer); stream?.getTracks().forEach((track) => track.stop()); };
+  }, [onDetected]);
+
+  return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2>{message}</h2><p>{employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام فقط الطرود الجاهزة للإرسال." : "ضع رمز QR أو الباركود داخل الإطار لمسحه تلقائيًا."}</p><div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetected(manual)}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div></div></div>;
+}
+
+function ConfirmModal({ options, onClose }: { options: ConfirmOptions; onClose: () => void }) {
+  return <Modal onClose={onClose} className={`confirm-modal ${options.danger ? "confirm-modal--danger" : ""}`}><span className="confirm-modal__icon"><Icon name={options.danger ? "alert" : "info"} size={29} /></span><h2>{options.title}</h2><p>{options.message}</p><div className="confirm-modal__actions"><Button variant={options.danger ? "danger" : "primary"} onClick={() => { onClose(); options.onConfirm(); }}>{options.confirmLabel ?? "تأكيد"}</Button><Button variant="secondary" onClick={onClose}>إلغاء</Button></div></Modal>;
+}
+
+export default function AlmadinaApplication() {
+  const [database, setDatabase] = useState<Database>(() => createSeedDatabase());
+  const [userId, setUserId] = useState<string | null>(null);
+  const [view, setViewState] = useState<View>("home");
+  const [anonymousPreferences, setAnonymousPreferences] = useState<Preferences>(defaultPreferences);
+  const [activeTheme, setActiveTheme] = useState<ThemePreference>(defaultPreferences.theme);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
+  const [accountSwitcher, setAccountSwitcher] = useState(false);
+  const [scanner, setScanner] = useState<{ callback?: (value: string) => void } | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const authoritativeDatabase = useRef<Database | null>(null);
+  const visibleDatabase = useRef<Database>(database);
+  const serverRevision = useRef(0);
+  const pendingUpdates = useRef<DatabaseUpdater[]>([]);
+  const savingUpdates = useRef(false);
+  const storedThemePreference = useRef<ThemePreference | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let hydratedTheme: ThemePreference | null = null;
+    try {
+      const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+      if (isThemePreference(storedTheme)) {
+        storedThemePreference.current = storedTheme;
+        hydratedTheme = storedTheme;
+      }
+      localStorage.removeItem("almadina-express-database-v2");
+      localStorage.removeItem("almadina-express-session-v2");
+    } catch { /* Browser storage is optional for appearance preferences. */ }
+
+    const preferenceHydration = window.setTimeout(() => {
+      if (!active || !hydratedTheme) return;
+      setActiveTheme(hydratedTheme);
+      setAnonymousPreferences((current) => ({ ...current, theme: hydratedTheme! }));
+    }, 0);
+
+    async function restoreSession() {
+      try {
+        const snapshot = await sharedRequest("session");
+        if (!active) return;
+        const account = snapshot.database.users.find((entry) => entry.id === snapshot.userId);
+        if (!account) return;
+        rememberSnapshotAccount(snapshot);
+
+        const accountTheme = snapshot.database.preferences[account.id]?.theme;
+        if (!storedThemePreference.current && isThemePreference(accountTheme)) {
+          storedThemePreference.current = accountTheme;
+          setActiveTheme(accountTheme);
+          setAnonymousPreferences((current) => ({ ...current, theme: accountTheme }));
+          try { localStorage.setItem(THEME_STORAGE_KEY, accountTheme); } catch { /* Browser storage is optional. */ }
+        }
+
+        authoritativeDatabase.current = snapshot.database;
+        visibleDatabase.current = snapshot.database;
+        serverRevision.current = snapshot.revision;
+        setDatabase(snapshot.database);
+        setUserId(account.id);
+        setViewState(account.role === "admin" ? "admin" : "home");
+      } catch {
+        // An anonymous visitor simply remains on the sign-in screen.
+      }
+    }
+
+    void restoreSession();
+    return () => { active = false; window.clearTimeout(preferenceHydration); };
+  }, []);
+
+  const user = useMemo(() => database.users.find((entry) => entry.id === userId) ?? null, [database.users, userId]);
+  const storedPreferences = user ? { ...defaultPreferences, ...(database.preferences[user.id] ?? {}) } : anonymousPreferences;
+  const preferences = { ...storedPreferences, theme: activeTheme };
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => { const dark = preferences.theme === "dark" || (preferences.theme === "system" && media.matches); document.documentElement.dataset.theme = dark ? "dark" : "light"; document.documentElement.style.colorScheme = dark ? "dark" : "light"; };
+    apply(); media.addEventListener("change", apply); return () => media.removeEventListener("change", apply);
+  }, [preferences.theme]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+
+    async function synchronize() {
+      if (!active || savingUpdates.current || pendingUpdates.current.length) return;
+
+      try {
+        const snapshot = await sharedRequest("database");
+        if (!active || savingUpdates.current || pendingUpdates.current.length || snapshot.revision === serverRevision.current) return;
+        rememberSnapshotAccount(snapshot);
+        authoritativeDatabase.current = snapshot.database;
+        visibleDatabase.current = snapshot.database;
+        serverRevision.current = snapshot.revision;
+        setDatabase(snapshot.database);
+      } catch (error) {
+        if (active && error instanceof SharedApiError && error.status === 401) {
+          authoritativeDatabase.current = null;
+          pendingUpdates.current = [];
+          setUserId(null);
+          setViewState("home");
+          setSelectedOrderId(null);
+        }
+      }
+    }
+
+    const timer = window.setInterval(() => { void synchronize(); }, 6_000);
+    const onVisible = () => { if (document.visibilityState === "visible") void synchronize(); };
+    const onFocus = () => { void synchronize(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [userId]);
+
+  async function savePendingUpdates(): Promise<void> {
+    if (savingUpdates.current || !authoritativeDatabase.current) return;
+    savingUpdates.current = true;
+
+    try {
+      while (pendingUpdates.current.length && authoritativeDatabase.current) {
+        const update = pendingUpdates.current[0];
+        const next = update(authoritativeDatabase.current);
+
+        try {
+          const snapshot = await sharedRequest("database", {
+            method: "PUT",
+            body: JSON.stringify({ database: next, revision: serverRevision.current }),
+          });
+
+          rememberSnapshotAccount(snapshot);
+          authoritativeDatabase.current = snapshot.database;
+          serverRevision.current = snapshot.revision;
+          pendingUpdates.current.shift();
+          visibleDatabase.current = pendingUpdates.current.reduce((current, pending) => pending(current), snapshot.database);
+          setDatabase(visibleDatabase.current);
+        } catch (error) {
+          if (error instanceof SharedApiError && error.status === 409 && error.snapshot) {
+            authoritativeDatabase.current = error.snapshot.database;
+            serverRevision.current = error.snapshot.revision;
+            visibleDatabase.current = pendingUpdates.current.reduce((current, pending) => pending(current), error.snapshot!.database);
+            setDatabase(visibleDatabase.current);
+            continue;
+          }
+
+          if (error instanceof SharedApiError && error.status === 401) {
+            pendingUpdates.current = [];
+            authoritativeDatabase.current = null;
+            setUserId(null);
+            setViewState("home");
+            showToast("انتهت الجلسة. سجّل الدخول مرة أخرى.", "error");
+            return;
+          }
+
+          showToast(error instanceof Error ? error.message : "تعذّر حفظ التغييرات على الخادم.", "error");
+          window.setTimeout(() => { void savePendingUpdates(); }, 2_500);
+          return;
+        }
+      }
+    } finally {
+      savingUpdates.current = false;
+    }
+  }
+
+  function updateDatabase(updater: DatabaseUpdater) {
+    if (!authoritativeDatabase.current) return showToast("يجب تسجيل الدخول قبل تعديل البيانات.", "error");
+    visibleDatabase.current = updater(visibleDatabase.current);
+    setDatabase(visibleDatabase.current);
+    pendingUpdates.current.push(updater);
+    void savePendingUpdates();
+  }
+
+  async function waitForPendingUpdates(): Promise<boolean> {
+    const deadline = Date.now() + 6_000;
+    while ((savingUpdates.current || pendingUpdates.current.length) && Date.now() < deadline) {
+      if (!savingUpdates.current && pendingUpdates.current.length) void savePendingUpdates();
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    }
+    return !savingUpdates.current && pendingUpdates.current.length === 0;
+  }
+
+  async function verifyCollectionCode(invoiceId: string, verificationCode: string): Promise<boolean> {
+    if (!await waitForPendingUpdates()) {
+      showToast("انتظر اكتمال حفظ التغييرات ثم أعد قراءة الكود.", "error");
+      return false;
+    }
+
+    try {
+      const snapshot = await sharedRequest("collections/verify", {
+        method: "POST",
+        body: JSON.stringify({ invoiceId, verificationCode }),
+      });
+      authoritativeDatabase.current = snapshot.database;
+      visibleDatabase.current = snapshot.database;
+      serverRevision.current = snapshot.revision;
+      pendingUpdates.current = [];
+      setDatabase(snapshot.database);
+      showToast("تم التحقق من الكود وتحديث حالة التحصيل إلى «مشحون».");
+      return true;
+    } catch (error) {
+      if (error instanceof SharedApiError) {
+        if (error.status === 401) logout();
+        showToast(error.message, "error");
+        return false;
+      }
+      showToast("تعذّر التحقق من الكود. حاول مجددًا.", "error");
+      return false;
+    }
+  }
+
+  async function shipScannedOrder(trackingNumber: string): Promise<boolean> {
+    try {
+      const snapshot = await sharedRequest("orders/scan", {
+        method: "POST",
+        body: JSON.stringify({ trackingNumber }),
+      });
+      authoritativeDatabase.current = snapshot.database;
+      visibleDatabase.current = snapshot.database;
+      serverRevision.current = snapshot.revision;
+      pendingUpdates.current = [];
+      setDatabase(snapshot.database);
+      showToast(`تم تحديث الطرد ${trackingNumber.trim().toUpperCase()} من «جاهز للإرسال» إلى «مشحون».`);
+      return true;
+    } catch (error) {
+      if (error instanceof SharedApiError) {
+        if (error.status === 401) logout();
+        showToast(error.message, "error");
+        return false;
+      }
+      showToast("تعذّر تحديث حالة الطرد. حاول مسح الكود مجددًا.", "error");
+      return false;
+    }
+  }
+
+  function showToast(message: string, kind: ToastKind = "success") {
+    const id = uid("toast"); setToasts((current) => [...current, { id, message, kind }]); window.setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 3_200);
+  }
+
+  function setView(next: View) { setViewState(next); window.scrollTo({ top: 0, behavior: "smooth" }); }
+
+  function activateSession(snapshot: SharedSnapshot, greeting: string) {
+    const account = snapshot.database.users.find((entry) => entry.id === snapshot.userId);
+    if (!account) throw new Error("تعذّر تحميل بيانات الحساب من الخادم.");
+    rememberSnapshotAccount(snapshot);
+
+    const accountTheme = snapshot.database.preferences[account.id]?.theme;
+    if (!storedThemePreference.current && isThemePreference(accountTheme)) {
+      storedThemePreference.current = accountTheme;
+      setActiveTheme(accountTheme);
+      setAnonymousPreferences((current) => ({ ...current, theme: accountTheme }));
+      try { localStorage.setItem(THEME_STORAGE_KEY, accountTheme); } catch { /* Browser storage is optional. */ }
+    }
+
+    authoritativeDatabase.current = snapshot.database;
+    visibleDatabase.current = snapshot.database;
+    serverRevision.current = snapshot.revision;
+    pendingUpdates.current = [];
+    setDatabase(snapshot.database);
+    setUserId(account.id);
+    setSelectedOrderId(null);
+    setViewState(account.role === "admin" ? "admin" : "home");
+    setAccountSwitcher(false);
+    showToast(greeting);
+  }
+
+  async function login(email: string, password: string): Promise<boolean> {
+    try {
+      const snapshot = await sharedRequest("login", { method: "POST", body: JSON.stringify({ email, password }) });
+      const account = snapshot.database.users.find((entry) => entry.id === snapshot.userId);
+      activateSession(snapshot, `أهلًا بك، ${account?.name ?? "بك"}.`);
+      return true;
+    } catch (error) {
+      if (error instanceof SharedApiError && error.status === 401) return false;
+      throw error;
+    }
+  }
+
+  function logout() {
+    void fetch("/api/almadina/logout", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
+    authoritativeDatabase.current = null;
+    pendingUpdates.current = [];
+    const anonymous = createSeedDatabase();
+    visibleDatabase.current = anonymous;
+    setDatabase(anonymous);
+    setUserId(null);
+    setViewState("home");
+    setSelectedOrderId(null);
+    setAccountSwitcher(false);
+  }
+
+  async function register(values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">): Promise<boolean> {
+    try {
+      const snapshot = await sharedRequest("register", { method: "POST", body: JSON.stringify(values) });
+      activateSession(snapshot, "تم إنشاء حسابك بنجاح. أهلًا بك!");
+      return true;
+    } catch (error) {
+      if (error instanceof SharedApiError && error.status === 409) return false;
+      throw error;
+    }
+  }
+
+  function updatePreferences(values: Partial<Preferences>) {
+    if (values.theme) {
+      storedThemePreference.current = values.theme;
+      setActiveTheme(values.theme);
+      try { localStorage.setItem(THEME_STORAGE_KEY, values.theme); } catch { /* Browser storage is optional. */ }
+      if (user) setAnonymousPreferences((current) => ({ ...current, theme: values.theme! }));
+    }
+    if (user) updateDatabase((current) => ({ ...current, preferences: { ...current.preferences, [user.id]: { ...defaultPreferences, ...(current.preferences[user.id] ?? {}), ...values } } }));
+    else setAnonymousPreferences((current) => ({ ...current, ...values }));
+  }
+
+  function notify(values: Omit<Notice, "id" | "read" | "createdAt">) {
+    const notice: Notice = { ...values, id: uid("notice"), read: false, createdAt: new Date().toISOString() };
+    updateDatabase((current) => ({ ...current, notices: [notice, ...current.notices] }));
+  }
+
+  function onScan(value: string) {
+    const currentScanner = scanner; setScanner(null);
+    if (currentScanner?.callback) return currentScanner.callback(value);
+    if (user?.role === "courier") { void shipScannedOrder(value.trim().toUpperCase()); return; }
+    const order = database.orders.find((entry) => entry.trackingNumber.toUpperCase() === value.trim().toUpperCase() && !entry.deleted);
+    if (!order) return showToast("لم نعثر على طرد بهذا الرقم.", "error");
+    if (user && user.role !== "admin" && order.merchantId !== user.id) return showToast("هذا الطرد غير مرتبط بحسابك.", "error");
+    if (user) { setSelectedOrderId(order.id); setView("order-detail"); showToast("تم العثور على الطرد."); } else showToast(`الطرد ${order.trackingNumber}: ${order.recipientName}.`, "info");
+  }
+
+  return <AppContext.Provider value={{ database, user, view, preferences, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, login, logout, register, verifyCollectionCode, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>{user ? <ApplicationShell /> : <Authentication />}{confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}{accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}{scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div></AppContext.Provider>;
+}

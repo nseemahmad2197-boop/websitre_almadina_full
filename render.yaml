@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: almadina-express
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.1
+      - key: DEPLOY_TARGET
+        value: render
+      - key: VINEXT_TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: almadina-express-db
+          property: connectionString
+
+databases:
+  - name: almadina-express-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "18"
+    ipAllowList: []

@@ -1,0 +1,169 @@
+"use client";
+
+import { useMemo, useState, type FormEvent } from "react";
+import { useApp } from "../lib/app-context";
+import { createTrackingEvent, getDeliveryFee, getMembershipPrices, getOversizeFee, governorates, money, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, type Order } from "../lib/data";
+import { Icon } from "./icon";
+import { Button, Field, PageHeader, SectionCard, SelectField } from "./ui";
+
+const orderTypes = [
+  { id: "standard", title: "طرد عادي", description: "توصيل منتج إلى المستلم وتحصيل المبلغ" },
+  { id: "exchange", title: "طرد تبديل", description: "استلام القديم من المستلم وتسليمه البديل" },
+  { id: "partial", title: "تجربة أو شراء", description: "معاينة المنتج والدفع عند الاستلام" },
+  { id: "return", title: "رجوع", description: "استلام بضاعة من العميل وإعادتها إليك" },
+];
+
+const weightOptions = ["0 - 5 كغم", "5 - 10 كغم", "10 - 20 كغم", "20 - 30 كغم", "أكثر من 30 كغم"];
+
+const blankForm = {
+  type: "standard",
+  phone: "",
+  name: "",
+  governorate: "",
+  city: "",
+  address: "",
+  deliveryDate: "",
+  pickup: "",
+  amount: "",
+  content: "",
+  weight: "0 - 5 كغم",
+  length: "",
+  width: "",
+  height: "",
+  reference: "",
+  notes: "",
+  privateNotes: "",
+  paymentBy: "recipient",
+  favorite: false,
+};
+
+export function NewOrder() {
+  const { database, user, updateDatabase, setView, setSelectedOrderId, showToast, confirm, notify } = useApp();
+  const [form, setForm] = useState(blankForm);
+  const [loading, setLoading] = useState(false);
+  const [usingSaved, setUsingSaved] = useState(false);
+  const region = resolveDeliveryRegion(form.governorate, form.city);
+  const membershipPrices = getMembershipPrices(user?.membership);
+  const baseDeliveryFee = getDeliveryFee(region, user?.membership);
+  const dimensionOversizeFee = getOversizeFee(form.length, form.width, form.height);
+  const oversizeFee = region ? dimensionOversizeFee : 0;
+  const deliveryFee = region ? baseDeliveryFee + oversizeFee : 0;
+  const deliveryZone = region?.name === "القدس" ? "jerusalem" : region?.name === "الداخل" ? "interior" : region ? "west-bank" : "";
+  const amount = Math.max(0, Number(form.amount) || 0);
+  const contentValue = Math.max(amount - deliveryFee, 0);
+  const savedRecipients = database.recipients.filter((recipient) => recipient.merchantId === user?.id);
+  const selectedType = orderTypes.find((type) => type.id === form.type) ?? orderTypes[0];
+  const totalCollection = amount;
+  const dimensions = [form.length, form.width, form.height].some(Boolean)
+    ? [form.length || "0", form.width || "0", form.height || "0"].join(" × ")
+    : "";
+  const dirty = useMemo(() => form.name || form.phone || form.amount || form.address, [form]);
+
+  function reset() {
+    if (!dirty) return setView("home");
+    confirm({ title: "مسح جميع الحقول؟", message: "سيتم تفريغ كل البيانات المدخلة في نموذج إنشاء الطرد.", confirmLabel: "نعم، امسح", onConfirm: () => { setForm(blankForm); showToast("تم مسح الحقول."); } });
+  }
+
+  function chooseSaved(id: string) {
+    const recipient = savedRecipients.find((item) => item.id === id);
+    if (!recipient) return;
+    const match = governorates.find((item) => item.name === recipient.city || item.cities.includes(recipient.city));
+    setForm({ ...form, name: recipient.name, phone: recipient.phone, governorate: match?.name ?? "", city: recipient.city, address: recipient.address, favorite: recipient.favorite });
+    showToast("تم تعبئة بيانات المستلم المحفوظ.");
+  }
+
+  function createOrder(event: FormEvent) {
+    event.preventDefault();
+    if (!user) return;
+    if (!/^05\d{8}$/.test(form.phone)) return showToast("أدخل رقم جوال صحيح مكوّن من 10 أرقام.", "error");
+    if (!form.name.trim()) return showToast("أدخل اسم المستلم.", "error");
+    if (!form.governorate.trim() || !form.city.trim()) return showToast("أدخل المحافظة والمدينة أو المنطقة للتوصيل.", "error");
+    if (!form.address.trim()) return showToast("أدخل عنوان التوصيل بالتفصيل.", "error");
+    if (!form.amount || Number(form.amount) < 0) return showToast("أدخل قيمة محتويات الطرد.", "error");
+
+    setLoading(true);
+    window.setTimeout(() => {
+      const trackingNumber = `ALX-${database.nextOrder}`;
+      const now = new Date().toISOString();
+      const order: Order = {
+        id: uid("order"), trackingNumber, merchantId: user.id, merchantName: user.name, merchantStore: user.store,
+        recipientName: form.name.trim(), recipientPhone: form.phone, governorate: form.governorate.trim(), city: form.city.trim(), address: form.address.trim(),
+        pickupAddress: form.pickup.trim() || `${user.store} - ${form.governorate.trim()}`, amount, deliveryFee,
+        preferredDeliveryDate: form.deliveryDate || undefined,
+        content: form.content.trim(), weight: form.weight, dimensions: dimensions ? `${dimensions} سم` : "غير محددة",
+        lengthCm: Number(form.length) || undefined, widthCm: Number(form.width) || undefined, heightCm: Number(form.height) || undefined, oversizeFee,
+        notes: form.notes.trim(), privateNotes: form.privateNotes.trim(), reference: form.reference.trim(),
+        type: selectedType.title, status: "draft", courierName: "بانتظار تعيين المندوب",
+        trackingEvents: [createTrackingEvent("draft", user.name, { location: "مع المرسل", note: "تم إنشاء الطرد وهو قيد الإنشاء.", createdAt: now })],
+        createdAt: now, updatedAt: now, deleted: false,
+      };
+      updateDatabase((current) => {
+        const alreadySaved = current.recipients.some((recipient) => recipient.merchantId === user.id && recipient.phone === form.phone);
+        const recipients = form.favorite && !alreadySaved ? [{ id: uid("recipient"), merchantId: user.id, name: form.name.trim(), phone: form.phone, city: form.city.trim(), address: form.address.trim(), favorite: true }, ...current.recipients] : current.recipients;
+        return { ...current, orders: [order, ...current.orders], recipients, nextOrder: current.nextOrder + 1 };
+      });
+      notify({ userId: user.id, title: "تم إنشاء طرد جديد", message: `تم إنشاء الطرد ${trackingNumber} وحالته قيد الإنشاء.`, icon: "edit" });
+      setSelectedOrderId(order.id);
+      setView("order-detail");
+      showToast(`تم إنشاء الطرد ${trackingNumber} بنجاح.`);
+      setLoading(false);
+    }, 450);
+  }
+
+  return (
+    <form className="page-content order-form-page animate-page" onSubmit={createOrder} noValidate>
+      <PageHeader title="إنشاء طرد جديد" subtitle="أدخل بيانات المستلم والطرد" onBack={() => dirty ? reset() : setView("home")} action={<Button variant="ghost" icon="trash" type="button" onClick={reset}>مسح الكل</Button>} />
+
+      <SectionCard title="نوع الطرد" icon="package"><div className="order-type-grid">{orderTypes.map((type) => <button type="button" key={type.id} className={`order-type ${form.type === type.id ? "is-selected" : ""}`} onClick={() => setForm({ ...form, type: type.id })}><span className="radio-indicator" /><div><strong>{type.title}</strong><small>{type.description}</small></div></button>)}</div></SectionCard>
+
+      <SectionCard title="بيانات المستلم" icon="user" action={<button type="button" className={`text-action ${usingSaved ? "is-active" : ""}`} onClick={() => setUsingSaved(!usingSaved)}><Icon name="users" size={16} />{usingSaved ? "إدخال يدوي" : "نسخ سابق"}</button>}>
+        {usingSaved && <SelectField label="اختر من المستلمين المحفوظين" defaultValue="" onChange={(event) => chooseSaved(event.target.value)}><option value="">اختر المستلم</option>{savedRecipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name} — {recipient.phone}</option>)}</SelectField>}
+        <div className="form-grid"><Field label="رقم المستلم (الجوال)" placeholder="05xxxxxxxx" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} inputMode="numeric" dir="ltr" /><Field label="اسم المستلم" placeholder="مثلًا: محمد أحمد" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></div>
+        <button type="button" className={`favorite-recipient ${form.favorite ? "is-selected" : ""}`} onClick={() => setForm({ ...form, favorite: !form.favorite })}><Icon name="star" size={18} />إضافة كمستلم مفضل لدي<span className="radio-indicator" /></button>
+      </SectionCard>
+
+      <SectionCard title="عنوان التوصيل" icon="mapPin" action={user?.membership === "premium" ? <span className="membership-badge membership-badge--premium"><Icon name="star" size={13} />أسعار بريميوم</span> : undefined}>
+        <div className="delivery-rates" aria-label="أسعار التوصيل حسب المنطقة">
+          <span className={deliveryZone === "west-bank" ? "delivery-rate is-active" : "delivery-rate"}>الضفة <strong>{membershipPrices.westBank} ₪</strong></span>
+          <span className={deliveryZone === "jerusalem" ? "delivery-rate is-active" : "delivery-rate"}>القدس <strong>{membershipPrices.jerusalem} ₪</strong></span>
+          <span className={deliveryZone === "interior" ? "delivery-rate is-active" : "delivery-rate"}>الداخل <strong>{membershipPrices.interior} ₪</strong></span>
+        </div>
+        <div className="form-grid">
+          <Field label="المحافظة" placeholder="اكتب المحافظة، مثلًا: الخليل أو القدس" value={form.governorate} onChange={(event) => setForm({ ...form, governorate: event.target.value })} autoComplete="address-level1" />
+          <Field label="المدينة أو المنطقة" placeholder="اكتب المدينة أو المنطقة" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} autoComplete="address-level2" />
+        </div>
+        <Field label="الشارع / وصف العنوان" placeholder="مثلًا: شارع نابلس، بالقرب من دوار الساعة" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} />
+        <Field
+          label="تاريخ التوصيل المفضل (اختياري)"
+          type="date"
+          min={new Date().toISOString().slice(0, 10)}
+          value={form.deliveryDate}
+          onChange={(event) => setForm({ ...form, deliveryDate: event.target.value })}
+          wrapperClassName={`preferred-date-field ${form.deliveryDate ? "has-value" : ""}`}
+          className="preferred-date-control"
+          dir="ltr"
+          lang="ar"
+          aria-label="تاريخ التوصيل المفضل بصيغة يوم شهر سنة"
+          suffix={!form.deliveryDate ? <span className="preferred-date-placeholder" aria-hidden="true">يوم / شهر / سنة</span> : undefined}
+          hint="اختر التاريخ من التقويم أو اكتبه بصيغة يوم / شهر / سنة."
+        />
+      </SectionCard>
+
+      <SectionCard title="تفاصيل الطرد" icon="receipt">
+        <div className="form-grid"><Field label="سعر الطرد (التحصيل)" placeholder="0" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value.replace(/[^\d.]/g, "") })} inputMode="decimal" suffix={<span className="field__unit">₪</span>} /><Field label="قيمة المحتويات بعد خصم التوصيل" placeholder="تُحسب تلقائيًا" value={form.amount ? money(contentValue) : ""} readOnly aria-live="polite" suffix={<span className="field__unit">₪</span>} /></div>
+        <p className={`form-note content-value-note ${amount > 0 && amount < deliveryFee ? "is-warning" : ""}`} aria-live="polite">{region ? form.amount ? `تم خصم ${money(deliveryFee)} ₪ للتوصيل${oversizeFee ? `، وتشمل ${money(oversizeFee)} ₪ رسوم حجم إضافية` : ""}: ${money(amount)} − ${money(deliveryFee)} = ${money(contentValue)} ₪.` : `أدخل سعر الطرد، وسيُخصم منه إجمالي توصيل ${region.name} البالغ ${money(deliveryFee)} ₪ تلقائيًا.` : "أدخل المحافظة أو المدينة أولًا لتحديد رسوم التوصيل وحساب قيمة المحتويات."}</p>
+        <Field label="وصف المحتوى" placeholder="مثلًا: ساعة، ملابس، إكسسوارات..." value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} />
+        <div className="field"><span className="field__label">الوزن التقديري</span><div className="weight-options">{weightOptions.map((weight) => <button type="button" key={weight} className={form.weight === weight ? "filter-chip is-active" : "filter-chip"} onClick={() => setForm({ ...form, weight })}>{weight}</button>)}</div></div>
+        <div className="dimensions-grid"><Field label="الطول (سم)" placeholder="20" value={form.length} onChange={(event) => setForm({ ...form, length: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /><Field label="العرض (سم)" placeholder="15" value={form.width} onChange={(event) => setForm({ ...form, width: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /><Field label="الارتفاع (سم)" placeholder="10" value={form.height} onChange={(event) => setForm({ ...form, height: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /></div>
+        <div className={`oversize-fee-notice ${dimensionOversizeFee ? "is-active" : ""}`} aria-live="polite">
+          <span><Icon name="info" size={18} /></span>
+          <div><strong>{dimensionOversizeFee ? "حجم الطرد مقبول مع رسوم إضافية" : `الحد القياسي لكل بُعد هو ${OVERSIZE_DIMENSION_LIMIT_CM} سم`}</strong><small>{dimensionOversizeFee ? region ? `تجاوز أحد الأبعاد ${OVERSIZE_DIMENSION_LIMIT_CM} سم، لذلك تُضاف ${OVERSIZE_FEE} ₪ مرة واحدة فقط.` : `تجاوز أحد الأبعاد ${OVERSIZE_DIMENSION_LIMIT_CM} سم، وستُضاف ${OVERSIZE_FEE} ₪ مرة واحدة بعد تحديد منطقة التوصيل.` : `إذا تجاوز أي بُعد ${OVERSIZE_DIMENSION_LIMIT_CM} سم تُضاف ${OVERSIZE_FEE} ₪ مرة واحدة.`}</small></div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="تعليمات إضافية" icon="file"><Field label="رقم المرجع (اختياري)" placeholder="ORD-00000" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} hint="رقم الطلب في متجرك ليسهل عليك ربط التقارير." /><Field label="التعليمات (تظهر للمندوب فقط)" placeholder="مثلًا: الاتصال قبل الوصول بساعة" value={form.notes} maxLength={500} onChange={(event) => setForm({ ...form, notes: event.target.value })} hint="تظهر هذه التعليمات في حساب المندوب الموظف بعد استلامه الطرد." /><Field label="الملاحظة الخاصة (تظهر للمسؤول فقط)" placeholder="ملاحظة داخلية للإدارة..." value={form.privateNotes} maxLength={1000} onChange={(event) => setForm({ ...form, privateNotes: event.target.value })} hint="لن تظهر للمندوب أو في التتبع العام." /></SectionCard>
+
+      <div className="order-summary"><div><span>سعر الطرد (التحصيل)</span><strong>{money(totalCollection)} ₪</strong></div><div><span>رسوم التوصيل الأساسية المخصومة</span><strong>- {money(baseDeliveryFee)} ₪</strong></div>{oversizeFee > 0 && <div className="order-summary__oversize"><span>رسوم الحجم الإضافية</span><strong>- {money(oversizeFee)} ₪</strong></div>}<div className="order-summary__total"><span>قيمة المحتويات بعد الخصم</span><strong>{money(contentValue)} ₪</strong></div></div><Button type="submit" icon="package" full loading={loading} className="create-order-button">إنشاء الطرد</Button>
+    </form>
+  );
+}
