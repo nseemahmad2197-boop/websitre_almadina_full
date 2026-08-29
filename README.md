@@ -150,3 +150,4 @@ git push
 - صلاحية الكاميرا تتطلب `localhost` أو اتصال HTTPS. إذا رفض المتصفح الإذن، استخدم إدخال رقم التتبع يدويًا.
 # websitre_almadina_full
 # full_webite
+# full_webite
