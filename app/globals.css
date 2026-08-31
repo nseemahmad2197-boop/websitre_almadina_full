@@ -663,6 +663,36 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .settings-row > svg:last-child { color: var(--muted); }
 .settings-row--danger { color: var(--danger); }
 .settings-row--danger .settings-row__icon { background: var(--danger-soft); color: var(--danger); }
+.application--delete-account { padding-bottom: 34px; }
+.delete-account-page { width: min(calc(100% - clamp(30px, 8vw, 120px)), 780px); min-height: calc(100svh - 104px); grid-template-rows: auto minmax(0, 1fr) auto; }
+.delete-account-panel { display: grid; align-content: start; overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow); }
+.delete-account-intro { display: flex; align-items: flex-start; gap: 13px; padding: 22px 21px 19px; border-bottom: 1px solid var(--line); }
+.delete-account-intro > span { display: grid; width: 47px; height: 47px; flex: 0 0 auto; place-items: center; border-radius: 15px; background: var(--danger-soft); color: var(--danger); }
+.delete-account-intro > div { display: grid; gap: 7px; }
+.delete-account-intro h2 { font-size: 19px; }
+.delete-account-intro p { color: var(--muted); font-size: 12px; line-height: 1.9; }
+.delete-account-requirements { display: grid; padding: 0 21px; margin: 0; list-style: none; counter-reset: delete-requirement; }
+.delete-account-requirements > li { display: grid; min-height: 82px; grid-template-columns: 27px minmax(0, 1fr) 34px; align-items: center; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); counter-increment: delete-requirement; }
+.delete-account-requirements > li::before { grid-column: 1; grid-row: 1; align-self: start; padding-top: 7px; color: var(--muted); content: counter(delete-requirement) "."; font-size: 12px; font-weight: 850; }
+.delete-account-requirements > li > p { grid-column: 2; grid-row: 1; color: var(--text); font-size: 12px; font-weight: 650; line-height: 1.95; }
+.delete-account-requirements > li > span { display: grid; width: 32px; height: 32px; grid-column: 3; grid-row: 1; place-items: center; border-radius: 10px; background: var(--surface-muted); color: var(--muted); }
+.delete-account-requirements > li.is-complete > span { background: var(--green-pale); color: var(--green); }
+.delete-account-requirements > li.is-blocked > span { background: var(--danger-soft); color: var(--danger); }
+.delete-account-status { display: flex; align-items: flex-start; gap: 10px; padding: 13px 14px; margin: 18px 21px 21px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-muted); }
+.delete-account-status > svg { flex: 0 0 auto; margin-top: 1px; }
+.delete-account-status > div { display: grid; gap: 4px; }
+.delete-account-status strong { font-size: 12px; }
+.delete-account-status small { color: var(--muted); font-size: 10px; line-height: 1.8; }
+.delete-account-status.is-ready { border-color: color-mix(in srgb, var(--green), var(--line) 66%); background: color-mix(in srgb, var(--green-pale), var(--surface) 62%); color: var(--green); }
+.delete-account-status.is-blocked { border-color: color-mix(in srgb, var(--danger), var(--line) 72%); background: color-mix(in srgb, var(--danger-soft), var(--surface) 58%); color: var(--danger); }
+.delete-account-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.delete-account-actions > .button { min-height: 50px; }
+.delete-account-confirmation-modal { width: min(100%, 500px); }
+.delete-account-confirmation { display: grid; gap: 13px; }
+.delete-account-confirmation__warning { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--danger), var(--line) 70%); border-radius: 13px; background: var(--danger-soft); color: var(--danger); }
+.delete-account-confirmation__warning > svg { flex: 0 0 auto; }
+.delete-account-confirmation__warning > p { font-size: 10px; font-weight: 650; line-height: 1.8; }
+.delete-account-confirmation__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 3px; }
 .toggle { display: flex; width: 44px; height: 26px; flex: 0 0 auto; align-items: center; padding: 3px; border: 0; border-radius: 20px; background: var(--line); cursor: pointer; transition: background-color .2s; }
 .toggle > span { width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgb(0 0 0 / 12%); transition: transform .2s; }
 .toggle--on { background: var(--green); }
@@ -895,6 +925,23 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .topbar__actions .icon-button svg { width: 19px; height: 19px; }
   .topbar__brand .brand__mark { width: 33px; height: 33px; }
   .page-content { width: calc(100% - 22px); gap: 13px; padding-top: 15px; }
+  .delete-account-page { min-height: calc(100svh - 73px); }
+  .delete-account-panel { border-radius: 17px; box-shadow: none; }
+  .delete-account-intro { gap: 10px; padding: 17px 14px 15px; }
+  .delete-account-intro > span { width: 42px; height: 42px; border-radius: 13px; }
+  .delete-account-intro h2 { font-size: 17px; }
+  .delete-account-intro p { font-size: 10px; }
+  .delete-account-requirements { padding-right: 14px; padding-left: 14px; }
+  .delete-account-requirements > li { min-height: 74px; grid-template-columns: 23px minmax(0, 1fr) 30px; gap: 8px; padding: 12px 0; }
+  .delete-account-requirements > li::before { font-size: 10px; }
+  .delete-account-requirements > li > p { font-size: 10px; }
+  .delete-account-requirements > li > span { width: 29px; height: 29px; border-radius: 9px; }
+  .delete-account-status { padding: 11px; margin: 14px; }
+  .delete-account-actions { grid-template-columns: 1fr; }
+  .delete-account-actions > .button { min-height: 48px; }
+  .delete-account-confirmation-modal { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+  .delete-account-confirmation input { font-size: 16px; }
+  .delete-account-confirmation__actions { grid-template-columns: 1fr; }
   .page-header h1 { font-size: 18px; }
   .page-header p { max-width: 220px; font-size: 10px; }
   .page-header > .button { min-height: 36px; padding: 0 10px; font-size: 10px; }

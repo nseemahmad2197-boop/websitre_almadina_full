@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useApp, type View } from "../lib/app-context";
 import { Icon, type IconName } from "./icon";
-import { Button, PageHeader, SectionCard, Toggle } from "./ui";
+import { Button, Field, Modal, PageHeader, SectionCard, Toggle } from "./ui";
 
 function SettingsRow({ icon, title, subtitle, onClick, action, danger = false }: { icon: IconName; title: string; subtitle?: string; onClick?: () => void; action?: ReactNode; danger?: boolean }) {
   return <div className={`settings-row ${danger ? "settings-row--danger" : ""}`} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined} onClick={onClick} onKeyDown={(event) => { if (onClick && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onClick(); } }}><span className="settings-row__icon"><Icon name={icon} size={20} /></span><div><strong>{title}</strong>{subtitle && <small>{subtitle}</small>}</div>{action ?? <Icon name="chevronLeft" size={19} />}</div>;
@@ -16,7 +16,7 @@ export function SettingsPage() {
 }
 
 export function SecurityPage() {
-  const { user, preferences, updatePreferences, setView, updateDatabase, logout, showToast, confirm } = useApp();
+  const { user, preferences, updatePreferences, setView, showToast } = useApp();
   const [pin, setPin] = useState("");
 
   function press(value: string) {
@@ -27,12 +27,80 @@ export function SecurityPage() {
     if (next.length === 4) { updatePreferences({ pin: next }); showToast("تم تفعيل رمز قفل التطبيق."); window.setTimeout(() => setPin(""), 300); }
   }
 
-  function deleteAccount() {
-    if (!user) return;
-    confirm({ title: "حذف الحساب نهائيًا؟", message: "سيتم حذف حسابك وجميع بياناتك وطرودك المحفوظة. لا يمكن التراجع عن هذا الإجراء.", confirmLabel: "حذف حسابي", danger: true, onConfirm: () => { updateDatabase((current) => ({ ...current, users: current.users.filter((entry) => entry.id !== user.id), orders: current.orders.filter((order) => order.merchantId !== user.id), recipients: current.recipients.filter((entry) => entry.merchantId !== user.id), collections: current.collections.filter((invoice) => invoice.merchantId !== user.id), notices: current.notices.filter((notice) => notice.userId !== user.id), preferences: Object.fromEntries(Object.entries(current.preferences).filter(([accountId]) => accountId !== user.id)) })); logout(); showToast("تم حذف الحساب وبياناته."); } });
+  return <div className="page-content animate-page"><PageHeader title="الأمان والخصوصية" onBack={() => setView("settings")} /><div className="settings-group"><SettingsRow icon="lock" title="قفل التطبيق" subtitle={preferences.pin ? "رمز القفل مفعّل" : "احمِ حسابك برمز دخول"} action={<Toggle checked={Boolean(preferences.pin)} onChange={(value) => { if (!value) { updatePreferences({ pin: "" }); showToast("تم إيقاف قفل التطبيق."); } else showToast("أدخل رمزًا جديدًا من 4 أرقام.", "info"); }} label="قفل التطبيق" />} /><SettingsRow icon="fingerprint" title="الدخول بالبصمة" subtitle="تسجيل دخول أسرع وأكثر أمانًا" action={<Toggle checked={preferences.biometric} onChange={(value) => { updatePreferences({ biometric: value }); showToast(value ? "تم تفعيل الدخول بالبصمة." : "تم إيقاف الدخول بالبصمة."); }} label="الدخول بالبصمة" />} /></div><SectionCard title="أدخل رمز قفل جديد (4 أرقام)" className="pin-card"><div className="pin-dots">{[0, 1, 2, 3].map((index) => <span key={index} className={index < pin.length ? "is-filled" : ""} />)}</div><div className="pin-keypad">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "delete"].map((value) => <button key={value} onClick={() => press(value)}>{value === "clear" ? "C" : value === "delete" ? <Icon name="arrowLeft" size={20} /> : value}</button>)}</div></SectionCard>{user?.role !== "admin" && <div className="settings-group"><SettingsRow icon="trash" title="حذف الحساب" subtitle="راجع الشروط قبل الحذف النهائي" danger onClick={() => setView("delete-account")} /></div>}</div>;
+}
+
+export function DeleteAccountPage() {
+  const { database, user, setView, deleteAccount } = useApp();
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const accountId = user?.id ?? "";
+  const assignedOrders = database.orders.filter((order) => !order.deleted && (
+    user?.role === "merchant" ? order.merchantId === accountId : order.courierId === accountId
+  ));
+  const activeOrderCount = assignedOrders.filter((order) => order.status !== "delivered" && order.status !== "returned").length;
+  const merchantCollections = user?.role === "merchant" ? database.collections.filter((invoice) => invoice.merchantId === accountId) : [];
+  const paidOrderIds = new Set(merchantCollections.filter((invoice) => invoice.status === "paid").flatMap((invoice) => invoice.orderIds));
+  const unsettledCollectionCount = merchantCollections.filter((invoice) => invoice.status !== "paid").length;
+  const unsettledOrderCount = user?.role === "merchant" ? assignedOrders.filter((order) => (
+    (order.status === "delivered" || order.status === "returned") && !paidOrderIds.has(order.id)
+  )).length : 0;
+  const eligible = Boolean(user && user.role !== "admin" && activeOrderCount === 0 && unsettledCollectionCount === 0 && unsettledOrderCount === 0);
+
+  async function submitDeletion(event: FormEvent) {
+    event.preventDefault();
+    if (!eligible || submitting || !password || confirmation !== "حذف حسابي") return;
+    setSubmitting(true);
+    const deleted = await deleteAccount(password, confirmation);
+    if (!deleted) setSubmitting(false);
   }
 
-  return <div className="page-content animate-page"><PageHeader title="الأمان والخصوصية" onBack={() => setView("settings")} /><div className="settings-group"><SettingsRow icon="lock" title="قفل التطبيق" subtitle={preferences.pin ? "رمز القفل مفعّل" : "احمِ حسابك برمز دخول"} action={<Toggle checked={Boolean(preferences.pin)} onChange={(value) => { if (!value) { updatePreferences({ pin: "" }); showToast("تم إيقاف قفل التطبيق."); } else showToast("أدخل رمزًا جديدًا من 4 أرقام.", "info"); }} label="قفل التطبيق" />} /><SettingsRow icon="fingerprint" title="الدخول بالبصمة" subtitle="تسجيل دخول أسرع وأكثر أمانًا" action={<Toggle checked={preferences.biometric} onChange={(value) => { updatePreferences({ biometric: value }); showToast(value ? "تم تفعيل الدخول بالبصمة." : "تم إيقاف الدخول بالبصمة."); }} label="الدخول بالبصمة" />} /></div><SectionCard title="أدخل رمز قفل جديد (4 أرقام)" className="pin-card"><div className="pin-dots">{[0, 1, 2, 3].map((index) => <span key={index} className={index < pin.length ? "is-filled" : ""} />)}</div><div className="pin-keypad">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "delete"].map((value) => <button key={value} onClick={() => press(value)}>{value === "clear" ? "C" : value === "delete" ? <Icon name="arrowLeft" size={20} /> : value}</button>)}</div></SectionCard>{user?.role !== "admin" && <div className="settings-group"><SettingsRow icon="trash" title="حذف الحساب" subtitle="حذف نهائي لجميع بياناتك وطلباتك" danger onClick={deleteAccount} /></div>}</div>;
+  function closeConfirmation() {
+    if (submitting) return;
+    setConfirmationOpen(false);
+    setPassword("");
+    setConfirmation("");
+  }
+
+  if (!user || user.role === "admin") {
+    return <div className="page-content animate-page"><PageHeader title="حذف الحساب" onBack={() => setView("settings")} /><SectionCard><p>حذف حساب المسؤول غير متاح من داخل التطبيق.</p></SectionCard></div>;
+  }
+
+  return <div className="page-content delete-account-page animate-page">
+    <PageHeader title="حذف الحساب" onBack={() => setView("security")} />
+    <section className="delete-account-panel">
+      <header className="delete-account-intro">
+        <span><Icon name="trash" size={26} /></span>
+        <div><h2>قبل حذف حسابك</h2><p>نحترم حقك في التحكم ببياناتك. قبل حذف الحساب نهائيًا، تأكد من استكمال الخطوات التالية:</p></div>
+      </header>
+      <ol className="delete-account-requirements">
+        <li className={unsettledCollectionCount === 0 ? "is-complete" : "is-blocked"}><span><Icon name={unsettledCollectionCount === 0 ? "check" : "alert"} size={18} /></span><p>إكمال جميع معاملات التحصيل والحسابات المالية المعلّقة.</p></li>
+        <li className={activeOrderCount === 0 ? "is-complete" : "is-blocked"}><span><Icon name={activeOrderCount === 0 ? "check" : "alert"} size={18} /></span><p>ألا توجد طرود نشطة؛ يجب أن تكون جميع الطرود واصلة أو راجعة.</p></li>
+        {user.role === "merchant" && <li className={unsettledOrderCount === 0 ? "is-complete" : "is-blocked"}><span><Icon name={unsettledOrderCount === 0 ? "check" : "alert"} size={18} /></span><p>إدراج كل طرد مكتمل في فاتورة تحصيل مدفوعة واستلام مستحقاته.</p></li>}
+        <li><span><Icon name="download" size={18} /></span><p>تنزيل أي فواتير أو سجلات تحتاج إليها؛ لن تتمكن من استعادتها بعد الحذف.</p></li>
+        <li><span><Icon name="shield" size={18} /></span><p>الحذف نهائي وفوري بعد التأكيد، ويزيل الحساب وبياناته المرتبطة ولا يمكن التراجع عنه.</p></li>
+      </ol>
+      <div className={`delete-account-status ${eligible ? "is-ready" : "is-blocked"}`} role="status">
+        <Icon name={eligible ? "check" : "alert"} size={20} />
+        <div>{eligible ? <><strong>يمكنك حذف الحساب الآن</strong><small>ستحتاج إلى كلمة المرور وكتابة عبارة التأكيد.</small></> : <><strong>لا يمكن حذف الحساب الآن</strong><small>{activeOrderCount > 0 && `${activeOrderCount} طرد نشط`}{activeOrderCount > 0 && (unsettledCollectionCount > 0 || unsettledOrderCount > 0) ? " · " : ""}{unsettledCollectionCount > 0 && `${unsettledCollectionCount} فاتورة غير مدفوعة`}{unsettledCollectionCount > 0 && unsettledOrderCount > 0 ? " · " : ""}{unsettledOrderCount > 0 && `${unsettledOrderCount} طرد بلا تحصيل مكتمل`}</small></>}</div>
+      </div>
+    </section>
+    <div className="delete-account-actions">
+      <Button variant="danger" icon="trash" full disabled={!eligible} onClick={() => setConfirmationOpen(true)}>حذف الحساب</Button>
+      <Button variant="outline" icon="phone" full onClick={() => setView("help")}>اتصل بنا</Button>
+    </div>
+    {confirmationOpen && <Modal title="تأكيد حذف الحساب" className="delete-account-confirmation-modal" closeDisabled={submitting} onClose={closeConfirmation}>
+      <form className="delete-account-confirmation" onSubmit={submitDeletion}>
+        <div className="delete-account-confirmation__warning"><Icon name="alert" size={22} /><p>سيُحذف حسابك وبياناته المرتبطة نهائيًا. لن تستطيع استعادتها بعد إتمام العملية.</p></div>
+        <Field label="كلمة المرور" icon="lock" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="أدخل كلمة مرور حسابك" autoFocus />
+        <Field label="اكتب «حذف حسابي» للتأكيد" icon="edit" autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="حذف حسابي" />
+        <div className="delete-account-confirmation__actions"><Button type="submit" variant="danger" icon="trash" loading={submitting} disabled={!password || confirmation !== "حذف حسابي"}>حذف حسابي نهائيًا</Button><Button type="button" variant="secondary" disabled={submitting} onClick={closeConfirmation}>إلغاء</Button></div>
+      </form>
+    </Modal>}
+  </div>;
 }
 
 export function NotificationSettings() {

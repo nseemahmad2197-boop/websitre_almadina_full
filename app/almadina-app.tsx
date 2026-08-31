@@ -7,7 +7,7 @@ import { Authentication } from "./components/auth";
 import { Icon } from "./components/icon";
 import { Avatar, Button, Field, IconButton, Modal } from "./components/ui";
 import { AppContext, type ConfirmOptions, type ToastKind, type View } from "./lib/app-context";
-import { rememberAvailableAccount } from "./lib/available-accounts";
+import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/available-accounts";
 import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type NoticeAudience, type Preferences, type User } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
@@ -474,8 +474,7 @@ export default function AlmadinaApplication() {
     }
   }
 
-  function logout() {
-    void fetch("/api/almadina/logout", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
+  function clearLocalSession() {
     authoritativeDatabase.current = null;
     pendingUpdates.current = [];
     broadcastRequestIds.current.clear();
@@ -486,6 +485,52 @@ export default function AlmadinaApplication() {
     setViewState("home");
     setSelectedOrderId(null);
     setAccountSwitcher(false);
+  }
+
+  function logout() {
+    void fetch("/api/almadina/logout", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
+    clearLocalSession();
+  }
+
+  async function deleteAccount(password: string, confirmation: string): Promise<boolean> {
+    if (!user || user.role === "admin") {
+      showToast("لا يمكن حذف حساب المسؤول من داخل التطبيق.", "error");
+      return false;
+    }
+    if (!await waitForPendingUpdates()) {
+      showToast("انتظر اكتمال حفظ التغييرات ثم حاول حذف الحساب.", "error");
+      return false;
+    }
+
+    remoteMutationInFlight.current = true;
+    try {
+      const response = await fetch("/api/almadina/account/delete", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, confirmation }),
+      });
+      const payload = await response.json() as { success?: boolean; error?: string };
+      if (!response.ok || !payload.success) {
+        throw new SharedApiError(payload.error ?? "تعذّر حذف الحساب.", response.status);
+      }
+
+      forgetAvailableAccount(user.id);
+      clearLocalSession();
+      showToast("تم حذف حسابك وبياناته المرتبطة نهائيًا.");
+      return true;
+    } catch (error) {
+      if (error instanceof SharedApiError) {
+        if (error.status === 401) clearLocalSession();
+        showToast(error.message, "error");
+        return false;
+      }
+      showToast("تعذّر حذف الحساب. حاول مجددًا بعد قليل.", "error");
+      return false;
+    } finally {
+      remoteMutationInFlight.current = false;
+    }
   }
 
   async function register(values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">): Promise<boolean> {
@@ -525,5 +570,5 @@ export default function AlmadinaApplication() {
     if (user) { setSelectedOrderId(order.id); setView("order-detail"); showToast("تم العثور على الطرد."); } else showToast(`الطرد ${order.trackingNumber}: ${order.recipientName}.`, "info");
   }
 
-  return <AppContext.Provider value={{ database, user, view, preferences, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, login, logout, register, verifyCollectionCode, broadcastNotice, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>{user ? <ApplicationShell /> : <Authentication />}{confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}{accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}{scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div></AppContext.Provider>;
+  return <AppContext.Provider value={{ database, user, view, preferences, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, login, logout, register, deleteAccount, verifyCollectionCode, broadcastNotice, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>{user ? <ApplicationShell /> : <Authentication />}{confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}{accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}{scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div></AppContext.Provider>;
 }

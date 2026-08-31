@@ -60,3 +60,15 @@ export function rememberAvailableAccount(account: Omit<AvailableAccount, "lastUs
     // The shortcut is optional when browser storage is unavailable.
   }
 }
+
+export function forgetAvailableAccount(accountId: string): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    const remaining = readAvailableAccounts().filter((entry) => entry.id !== accountId);
+    localStorage.setItem(AVAILABLE_ACCOUNTS_STORAGE_KEY, JSON.stringify(remaining));
+    window.dispatchEvent(new Event(AVAILABLE_ACCOUNTS_EVENT));
+  } catch {
+    // The shortcut is optional when browser storage is unavailable.
+  }
+}

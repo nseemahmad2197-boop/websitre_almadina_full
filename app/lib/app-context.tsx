@@ -13,6 +13,7 @@ export type View =
   | "recipients"
   | "settings"
   | "security"
+  | "delete-account"
   | "notification-settings"
   | "preferences"
   | "help"
@@ -46,6 +47,7 @@ export type AppContextValue = {
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   register: (values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">) => Promise<boolean>;
+  deleteAccount: (password: string, confirmation: string) => Promise<boolean>;
   verifyCollectionCode: (invoiceId: string, verificationCode: string) => Promise<boolean>;
   shipScannedOrder: (trackingNumber: string) => Promise<boolean>;
   showToast: (message: string, kind?: ToastKind) => void;

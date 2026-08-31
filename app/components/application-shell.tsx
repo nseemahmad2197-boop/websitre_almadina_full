@@ -7,7 +7,7 @@ import { Dashboard, OrderDetail, Shipments } from "./dashboard";
 import { EmployeeDashboard } from "./employee";
 import { CollectionsPage, ImportPage, NotificationsPage, ProfilePage, RecipientsPage, ReturnsPage, TrashPage } from "./management-pages";
 import { NewOrder } from "./order-form";
-import { HelpPage, NotificationSettings, PreferencesPage, PrivacyPage, SecurityPage, SettingsPage } from "./settings-pages";
+import { DeleteAccountPage, HelpPage, NotificationSettings, PreferencesPage, PrivacyPage, SecurityPage, SettingsPage } from "./settings-pages";
 import { Icon, type IconName } from "./icon";
 import { Avatar, Brand, EmptyState, Field, IconButton, Modal, StatusPill } from "./ui";
 
@@ -69,6 +69,7 @@ function CurrentPage() {
     case "recipients": return <RecipientsPage />;
     case "settings": return <SettingsPage />;
     case "security": return <SecurityPage />;
+    case "delete-account": return <DeleteAccountPage />;
     case "notification-settings": return <NotificationSettings />;
     case "preferences": return <PreferencesPage />;
     case "help": return <HelpPage />;
@@ -82,8 +83,8 @@ function CurrentPage() {
 }
 
 export function ApplicationShell() {
-  const { user, preferences } = useApp();
+  const { user, view, preferences } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  return <main className={`application ${user?.role === "admin" ? "application--admin" : ""} ${user?.role === "courier" ? "application--employee" : ""} ${preferences.compact ? "application--compact" : ""}`}><TopBar onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} /><CurrentPage />{user?.role === "merchant" && <BottomNavigation />}{menuOpen && <NavigationDrawer onClose={() => setMenuOpen(false)} />}{searchOpen && user?.role !== "courier" && <GlobalSearch onClose={() => setSearchOpen(false)} />}</main>;
+  return <main className={`application ${user?.role === "admin" ? "application--admin" : ""} ${user?.role === "courier" ? "application--employee" : ""} ${view === "delete-account" ? "application--delete-account" : ""} ${preferences.compact ? "application--compact" : ""}`}><TopBar onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} /><CurrentPage />{user?.role === "merchant" && view !== "delete-account" && <BottomNavigation />}{menuOpen && <NavigationDrawer onClose={() => setMenuOpen(false)} />}{searchOpen && user?.role !== "courier" && <GlobalSearch onClose={() => setSearchOpen(false)} />}</main>;
 }

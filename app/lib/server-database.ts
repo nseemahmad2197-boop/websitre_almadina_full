@@ -574,6 +574,90 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
     : json({ error: "لم يعد حساب المسؤول متاحًا." }, 403);
 }
 
+type AccountDeletionEligibility = {
+  activeOrderCount: number;
+  unsettledCollectionCount: number;
+  unsettledOrderCount: number;
+};
+
+function accountDeletionEligibility(database: Database, account: User): AccountDeletionEligibility {
+  const assignedOrders = database.orders.filter((order) => !order.deleted && (
+    account.role === "merchant" ? order.merchantId === account.id : order.courierId === account.id
+  ));
+  const activeOrderCount = assignedOrders.filter((order) => order.status !== "delivered" && order.status !== "returned").length;
+
+  if (account.role !== "merchant") {
+    return { activeOrderCount, unsettledCollectionCount: 0, unsettledOrderCount: 0 };
+  }
+
+  const merchantCollections = database.collections.filter((invoice) => invoice.merchantId === account.id);
+  const paidOrderIds = new Set(merchantCollections.filter((invoice) => invoice.status === "paid").flatMap((invoice) => invoice.orderIds));
+  const unsettledCollectionCount = merchantCollections.filter((invoice) => invoice.status !== "paid").length;
+  const unsettledOrderCount = assignedOrders.filter((order) => (
+    (order.status === "delivered" || order.status === "returned") && !paidOrderIds.has(order.id)
+  )).length;
+
+  return { activeOrderCount, unsettledCollectionCount, unsettledOrderCount };
+}
+
+async function deleteOwnAccount(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  if (session.account.role === "admin") return json({ error: "لا يمكن حذف حساب المسؤول من داخل التطبيق." }, 403);
+
+  const submitted = await request.json() as unknown;
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) {
+    return json({ error: "بيانات تأكيد حذف الحساب غير صالحة." }, 400);
+  }
+
+  const payload = submitted as Record<string, unknown>;
+  const password = typeof payload.password === "string" ? payload.password : "";
+  const confirmation = typeof payload.confirmation === "string" ? payload.confirmation.trim() : "";
+  if (confirmation !== "حذف حسابي") return json({ error: "اكتب عبارة «حذف حسابي» كما هي للتأكيد." }, 400);
+  if (!password) return json({ error: "أدخل كلمة مرور الحساب للتأكيد." }, 400);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const account = state.database.users.find((entry) => entry.id === session.account.id);
+    if (!account) {
+      return json({ error: "لم يعد الحساب متاحًا." }, 401, { "Set-Cookie": sessionCookie(request, "", 0) });
+    }
+    if (account.role === "admin") return json({ error: "لا يمكن حذف حساب المسؤول من داخل التطبيق." }, 403);
+    if (!await verifyPassword(password, account.password)) return json({ error: "كلمة المرور غير صحيحة." }, 403);
+
+    const eligibility = accountDeletionEligibility(state.database, account);
+    if (eligibility.activeOrderCount || eligibility.unsettledCollectionCount || eligibility.unsettledOrderCount) {
+      return json({
+        error: "لا يمكن حذف الحساب قبل إكمال جميع الطرود والتحصيلات المالية.",
+        ...eligibility,
+      }, 409);
+    }
+
+    const isMerchant = account.role === "merchant";
+    const next: Database = removeLegacyDemoData({
+      ...state.database,
+      users: state.database.users.filter((entry) => entry.id !== account.id),
+      orders: isMerchant
+        ? state.database.orders.filter((order) => order.merchantId !== account.id)
+        : state.database.orders.map((order) => order.courierId === account.id ? {
+          ...order,
+          courierId: undefined,
+          courierName: "مندوب سابق",
+          trackingEvents: order.trackingEvents?.map((event) => event.actor === account.name ? { ...event, actor: "مندوب سابق" } : event),
+        } : order),
+      recipients: isMerchant ? state.database.recipients.filter((recipient) => recipient.merchantId !== account.id) : state.database.recipients,
+      collections: isMerchant ? state.database.collections.filter((invoice) => invoice.merchantId !== account.id) : state.database.collections,
+      notices: state.database.notices.filter((notice) => notice.userId !== account.id),
+      preferences: Object.fromEntries(Object.entries(state.database.preferences).filter(([accountId]) => accountId !== account.id)),
+    });
+
+    if (!await saveState(database, next, state.revision)) continue;
+
+    await database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(account.id).run();
+    return json({ success: true }, 200, { "Set-Cookie": sessionCookie(request, "", 0) });
+  }
+
+  return json({ error: "تم تحديث بيانات الحساب من جهاز آخر. راجع الشروط ثم حاول مجددًا." }, 409);
+}
+
 async function login(database: D1Database, request: Request): Promise<Response> {
   const payload = await request.json() as { email?: string; password?: string };
   const email = payload.email?.trim().toLowerCase() ?? "";
@@ -773,6 +857,10 @@ export async function handleAlmadinaApi(request: Request, database: D1Database):
 
     if (url.pathname === "/api/almadina/notices/broadcast" && request.method === "POST") {
       return broadcastNotice(database, request, session);
+    }
+
+    if (url.pathname === "/api/almadina/account/delete" && request.method === "POST") {
+      return deleteOwnAccount(database, request, session);
     }
 
     if (url.pathname === "/api/almadina/collections/verify" && request.method === "POST") {
