@@ -351,7 +351,13 @@ test("lets courier employees scan a ready parcel with the camera and mark it shi
   assert.match(appSources, /(?:موظف|مندوب)[\s\S]{0,180}(?:مسح|كاميرا)|(?:مسح|كاميرا)[\s\S]{0,180}(?:موظف|مندوب)/);
   assert.match(appSources, /مسح (?:كود|رمز) الطرد(?: بالكاميرا)?/);
   assert.match(appSources, /openScanner\(/);
-  assert.match(application, /BarcodeDetector/);
+  assert.match(application, /import\("@zxing\/browser"\)/);
+  assert.match(application, /BrowserQRCodeReader/);
+  assert.match(application, /decodeFromConstraints/);
+  assert.match(application, /facingMode:\s*\{ ideal: "environment" \}/);
+  assert.match(application, /controls\?\.stop\(\)/);
+  assert.match(application, /handledRef\.current/);
+  assert.doesNotMatch(application, /BarcodeDetector/);
   assert.match(context, /scan[^:\n]*Parcel|scan[^:\n]*Order|mark[^:\n]*Shipped/i);
   assert.match(application, /sharedRequest\("orders\/scan"/);
   assert.match(application, /body:\s*JSON\.stringify\(\{ trackingNumber \}\)/);

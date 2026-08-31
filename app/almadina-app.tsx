@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { IScannerControls } from "@zxing/browser";
 import { ApplicationShell } from "./components/application-shell";
 import { Authentication } from "./components/auth";
 import { Icon } from "./components/icon";
@@ -10,8 +11,6 @@ import { rememberAvailableAccount } from "./lib/available-accounts";
 import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type Preferences, type User } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
-type DetectorResult = { rawValue: string };
-type DetectorConstructor = new (options: { formats: string[] }) => { detect: (source: HTMLVideoElement) => Promise<DetectorResult[]> };
 type SharedSnapshot = { database: Database; revision: number; userId: string };
 type DatabaseUpdater = (current: Database) => Database;
 type ThemePreference = Preferences["theme"];
@@ -63,33 +62,78 @@ async function sharedRequest(path: string, options: RequestInit = {}): Promise<S
 
 function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employeeMode?: boolean; onClose: () => void; onDetected: (value: string) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const onDetectedRef = useRef(onDetected);
+  const handledRef = useRef(false);
   const [manual, setManual] = useState("");
-  const [message, setMessage] = useState(employeeMode ? "امسح كود الطرد لتأكيد استلامه" : "وجّه الكاميرا إلى رمز الطرد");
+  const [message, setMessage] = useState("جارٍ تشغيل الكاميرا...");
 
   useEffect(() => {
-    let stream: MediaStream | null = null;
-    let timer: number | null = null;
-    let alive = true;
+    onDetectedRef.current = onDetected;
+  }, [onDetected]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    let controls: IScannerControls | null = null;
+    let active = true;
+    handledRef.current = false;
 
     async function start() {
       if (!navigator.mediaDevices?.getUserMedia) { setMessage("الكاميرا تحتاج HTTPS أو localhost — أدخل رقم التتبع يدويًا."); return; }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-        if (!alive) { stream.getTracks().forEach((track) => track.stop()); return; }
-        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => undefined); }
-        const Detector = (window as Window & { BarcodeDetector?: DetectorConstructor }).BarcodeDetector;
-        if (Detector && videoRef.current) {
-          const detector = new Detector({ formats: ["qr_code", "code_128", "code_39"] });
-          timer = window.setInterval(async () => { if (!videoRef.current || videoRef.current.readyState < 2) return; try { const results = await detector.detect(videoRef.current); if (results[0]?.rawValue) { if (timer) window.clearInterval(timer); onDetected(results[0].rawValue); } } catch { /* Continue while the camera is adjusting focus. */ } }, 750);
+        if (!video) return;
+        const { BrowserQRCodeReader } = await import("@zxing/browser");
+        if (!active) return;
+
+        const reader = new BrowserQRCodeReader(undefined, {
+          delayBetweenScanAttempts: 180,
+          delayBetweenScanSuccess: 500,
+          tryPlayVideoTimeout: 5_000,
+        });
+        const nextControls = await reader.decodeFromConstraints({
+          audio: false,
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        }, video, (result, _error, scannerControls) => {
+          if (!active || handledRef.current || !result) return;
+          const value = result.getText().trim();
+          if (!value) return;
+          handledRef.current = true;
+          scannerControls.stop();
+          onDetectedRef.current(value);
+        });
+
+        if (!active) { nextControls.stop(); return; }
+        controls = nextControls;
+        setMessage(employeeMode ? "ضع كود QR للطرد داخل الإطار" : "ضع رمز QR داخل الإطار");
+      } catch (error) {
+        if (!active) return;
+        const errorName = error instanceof DOMException ? error.name : "";
+        if (errorName === "NotAllowedError" || errorName === "SecurityError") {
+          setMessage("تم رفض إذن الكاميرا — اسمح للموقع باستخدامها ثم حاول مجددًا.");
+        } else if (errorName === "NotFoundError" || errorName === "OverconstrainedError") {
+          setMessage("لم يتم العثور على كاميرا مناسبة — أدخل رقم التتبع يدويًا.");
+        } else if (errorName === "NotReadableError") {
+          setMessage("الكاميرا مستخدمة في تطبيق آخر — أغلقه ثم حاول مجددًا.");
+        } else {
+          setMessage("تعذّر تشغيل قارئ QR — يمكنك إدخال الرقم يدويًا.");
         }
-      } catch { setMessage("تعذّر الوصول للكاميرا — يمكنك إدخال الرقم يدويًا."); }
+      }
     }
 
     void start();
-    return () => { alive = false; if (timer) window.clearInterval(timer); stream?.getTracks().forEach((track) => track.stop()); };
-  }, [onDetected]);
+    return () => {
+      active = false;
+      controls?.stop();
+      const stream = video?.srcObject;
+      if (stream instanceof MediaStream) stream.getTracks().forEach((track) => track.stop());
+      if (video) video.srcObject = null;
+    };
+  }, [employeeMode]);
 
-  return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2>{message}</h2><p>{employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام فقط الطرود الجاهزة للإرسال." : "ضع رمز QR أو الباركود داخل الإطار لمسحه تلقائيًا."}</p><div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetected(manual)}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div></div></div>;
+  return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2 aria-live="polite">{message}</h2><p>{employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام فقط الطرود الجاهزة للإرسال." : "ضع رمز QR داخل الإطار ليُقرأ تلقائيًا."}</p><div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetectedRef.current(manual.trim())}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div></div></div>;
 }
 
 function ConfirmModal({ options, onClose }: { options: ConfirmOptions; onClose: () => void }) {
