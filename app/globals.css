@@ -136,7 +136,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .button--outline { border-color: rgb(8 124 69 / 28%); background: transparent; color: var(--green); }
 .button--full { width: 100%; }
 .icon-button { position: relative; display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 11px; background: transparent; color: var(--text); cursor: pointer; transition: background-color .18s, color .18s; }
-.icon-button:hover { background: var(--surface-muted); }
+.icon-button:hover:not(:disabled) { background: var(--surface-muted); }
+.icon-button:disabled { cursor: not-allowed; opacity: .45; }
 .icon-button.is-danger { color: var(--danger); }
 .icon-button__badge { position: absolute; top: 0; right: -1px; display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border: 2px solid var(--surface); border-radius: 12px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 800; }
 .spinner { width: 18px; height: 18px; border: 2px solid rgb(255 255 255 / 45%); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
@@ -700,8 +701,23 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 
 /* Administration */
 .admin-page { gap: 14px; padding-top: 18px; }
-.admin-title > h1 { font-size: 19px; }
-.admin-title > p { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.admin-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-title > div > h1 { font-size: 19px; }
+.admin-title > div > p { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.admin-notification-button { min-height: 40px; flex: 0 0 auto; padding-right: 13px; padding-left: 13px; }
+.admin-notification-modal { width: min(100%, 540px); }
+.admin-notification-intro { display: flex; align-items: flex-start; gap: 11px; padding: 12px; border: 1px solid color-mix(in srgb, var(--green), transparent 80%); border-radius: 14px; background: color-mix(in srgb, var(--green-pale), var(--surface) 62%); }
+.admin-notification-intro > span { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: 13px; background: var(--green); color: #fff; }
+.admin-notification-intro > div { display: grid; gap: 4px; }
+.admin-notification-intro h3 { font-size: 13px; }
+.admin-notification-intro p { color: var(--muted); font-size: 10px; line-height: 1.8; }
+.admin-notification-message .field__control { height: auto; min-height: 130px; padding: 0; align-items: stretch; }
+.admin-notification-message textarea { width: 100%; min-height: 128px; padding: 12px; border: 0; outline: 0; resize: vertical; background: transparent; color: var(--text); font: inherit; font-size: 11px; line-height: 1.8; }
+.admin-notification-message textarea::placeholder { color: var(--muted); }
+.admin-notification-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-muted); }
+.admin-notification-summary > div { display: grid; gap: 2px; }
+.admin-notification-summary > div > strong { color: var(--green); font-size: 18px; line-height: 1; }
+.admin-notification-summary > div > span { color: var(--muted); font-size: 9px; }
 .admin-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; }
 .admin-stat { display: grid; min-height: 105px; justify-items: center; align-content: center; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); cursor: pointer; }
 .admin-stat > span { display: grid; width: 35px; height: 35px; place-items: center; border-radius: 11px; }
@@ -1045,6 +1061,15 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .admin-user-card__identity { gap: 5px; }
   .admin-user-card__identity > .membership-badge { min-height: 22px; padding: 3px 7px; font-size: 8px; }
   .admin-page { gap: 11px; padding-top: 13px; }
+  .admin-title { align-items: flex-start; }
+  .admin-notification-button { min-height: 44px; gap: 5px; padding-right: 10px; padding-left: 10px; font-size: 10px; }
+  .admin-notification-button svg { width: 16px; height: 16px; }
+  .admin-notification-modal { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+  .admin-notification-intro { padding: 10px; }
+  .admin-notification-intro > span { width: 38px; height: 38px; border-radius: 11px; }
+  .admin-notification-modal input, .admin-notification-modal select, .admin-notification-message textarea { font-size: 16px; }
+  .admin-notification-summary { align-items: stretch; flex-direction: column; }
+  .admin-notification-summary .button { width: 100%; }
   .admin-stat { min-height: 93px; }
   .admin-stat > span { width: 32px; height: 32px; }
   .admin-stat > strong { font-size: 18px; }

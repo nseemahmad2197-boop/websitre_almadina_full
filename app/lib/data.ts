@@ -107,6 +107,8 @@ export type CollectionInvoice = {
   paidAt?: string;
 };
 
+export type NoticeAudience = "all" | "merchants" | "couriers";
+
 export type Notice = {
   id: string;
   userId: string | "all";
@@ -115,6 +117,8 @@ export type Notice = {
   icon: IconName;
   read: boolean;
   createdAt: string;
+  broadcastId?: string;
+  audience?: NoticeAudience;
 };
 
 export type Preferences = {

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { Database, Notice, Preferences, User } from "./data";
+import type { Database, Notice, NoticeAudience, Preferences, User } from "./data";
 
 export type View =
   | "home"
@@ -51,6 +51,7 @@ export type AppContextValue = {
   showToast: (message: string, kind?: ToastKind) => void;
   confirm: (options: ConfirmOptions) => void;
   notify: (notice: Omit<Notice, "id" | "read" | "createdAt">) => void;
+  broadcastNotice: (notice: { audience: NoticeAudience; title: string; message: string }) => Promise<number | null>;
   openScanner: (callback?: (value: string) => void) => void;
   openAccountSwitcher: () => void;
 };

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { appendOrderTrackingEvent, formatDate, getStatus, money, relativeDate, statusDefinitions, uid, type Membership, type OrderStatus, type User } from "../lib/data";
+import { appendOrderTrackingEvent, formatDate, getStatus, money, relativeDate, statusDefinitions, uid, type Membership, type NoticeAudience, type OrderStatus, type User } from "../lib/data";
 import { Icon } from "./icon";
 import { TrackingNoteComposer } from "./tracking-history";
 import { Avatar, Button, EmptyState, Field, IconButton, Modal, Segmented, SelectField, StatusPill } from "./ui";
@@ -11,7 +11,7 @@ type AdminTab = "orders" | "users" | "collections" | "couriers";
 type AccountEditor = { id: string; name: string; email: string; phone: string; store: string; role: "merchant" | "courier" };
 
 export function AdminDashboard() {
-  const { database, user, updateDatabase, verifyCollectionCode, confirm, showToast, notify, setView, setSelectedOrderId } = useApp();
+  const { database, user, updateDatabase, verifyCollectionCode, broadcastNotice, confirm, showToast, notify, setView, setSelectedOrderId } = useApp();
   const [tab, setTab] = useState<AdminTab>("orders");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -20,7 +20,10 @@ export function AdminDashboard() {
   const [collectionVerification, setCollectionVerification] = useState<{ invoiceId: string; invoiceNumber: string; code: string } | null>(null);
   const [verifyingCollection, setVerifyingCollection] = useState(false);
   const [editingAccount, setEditingAccount] = useState<AccountEditor | null>(null);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", store: "", password: "User@123", role: "merchant" as "merchant" | "courier", membership: "standard" as Membership });
+  const [announcement, setAnnouncement] = useState({ title: "", message: "", audience: "all" as NoticeAudience });
   const merchants = database.users.filter((user) => user.role === "merchant");
   const couriers = database.users.filter((user) => user.role === "courier");
   const orders = database.orders.filter((order) => !order.deleted);
@@ -123,9 +126,45 @@ export function AdminDashboard() {
     if (verified) setCollectionVerification(null);
   }
 
-  const searchPlaceholders = { orders: "بحث برقم التتبع أو المستلم...", users: "بحث باسم أو بريد المستخدم...", couriers: "بحث باسم أو رقم المندوب...", collections: "بحث برقم الفاتورة أو اسم التاجر..." };
+  function submitAnnouncement(event: FormEvent) {
+    event.preventDefault();
+    const title = announcement.title.trim();
+    const message = announcement.message.trim();
+    const audience = announcement.audience;
+    const recipients = database.users.filter((account) => account.role !== "admin" && (
+      audience === "all"
+        || (audience === "merchants" && account.role === "merchant")
+        || (audience === "couriers" && account.role === "courier")
+    ));
 
-  return <div className="page-content admin-page animate-page"><header className="admin-title"><h1>لوحة الإدارة</h1><p>المدينة إكسبرس — تحكم كامل</p></header><div className="admin-stats"><button className="admin-stat" onClick={() => setTab("users")}><span style={{ color: "#187a50", background: "#e6f4ed" }}><Icon name="users" size={21} /></span><strong>{merchants.length}</strong><small>تاجر</small></button><button className="admin-stat" onClick={() => setTab("orders")}><span style={{ color: "#6257ad", background: "#efedff" }}><Icon name="package" size={21} /></span><strong>{orders.length}</strong><small>طرد</small></button><button className="admin-stat" onClick={() => setTab("collections")}><span style={{ color: "#bf862d", background: "#fff4dc" }}><Icon name="receipt" size={21} /></span><strong>{money(collectionAmount)}</strong><small>تحصيلات مستحقة</small></button><button className="admin-stat admin-stat--courier" onClick={() => setTab("couriers")}><span style={{ color: "#218391", background: "#e4f4f5" }}><Icon name="bike" size={21} /></span><strong>{couriers.length}</strong><small>مندوب</small></button></div><Segmented className="admin-tabs" value={tab} onChange={(value) => { setTab(value as AdminTab); setQuery(""); setStatus("all"); }} items={[{ value: "orders", label: "الطرود" }, { value: "users", label: "المستخدمون" }, { value: "collections", label: "التحصيلات" }, { value: "couriers", label: "المندوبون" }]} /><div className="admin-toolbar"><Field icon="search" placeholder={searchPlaceholders[tab]} value={query} onChange={(event) => setQuery(event.target.value)} wrapperClassName="admin-search" />{(tab === "users" || tab === "couriers") && <IconButton name="plus" label={tab === "users" ? "إضافة مستخدم" : "إضافة مندوب"} className="admin-add-button" onClick={() => { setForm({ ...form, role: tab === "couriers" ? "courier" : "merchant" }); setAddUserOpen(true); }} />}</div>
+    if (title.length < 3) return showToast("أدخل عنوانًا واضحًا للإشعار.", "error");
+    if (message.length < 5) return showToast("أدخل تفاصيل التحديث قبل الإرسال.", "error");
+    if (!recipients.length) return showToast("لا توجد حسابات ضمن الفئة المحددة.", "error");
+
+    const audienceLabel = audience === "merchants" ? "التجار" : audience === "couriers" ? "المندوبين" : "جميع المستخدمين";
+    confirm({
+      title: "إرسال إشعار التحديث؟",
+      message: `سيصل الإشعار إلى ${audienceLabel} (${recipients.length.toLocaleString("ar-EG")} حسابات).`,
+      confirmLabel: "إرسال الآن",
+      onConfirm: () => { void sendAnnouncement(audience, title, message); },
+    });
+  }
+
+  async function sendAnnouncement(audience: NoticeAudience, title: string, message: string) {
+    setSendingAnnouncement(true);
+    const recipientCount = await broadcastNotice({ audience, title, message });
+    setSendingAnnouncement(false);
+    if (recipientCount === null) return;
+
+    setNotificationOpen(false);
+    setAnnouncement({ title: "", message: "", audience: "all" });
+    showToast(`تم إرسال الإشعار إلى ${recipientCount.toLocaleString("ar-EG")} حسابًا.`);
+  }
+
+  const searchPlaceholders = { orders: "بحث برقم التتبع أو المستلم...", users: "بحث باسم أو بريد المستخدم...", couriers: "بحث باسم أو رقم المندوب...", collections: "بحث برقم الفاتورة أو اسم التاجر..." };
+  const announcementRecipientCount = announcement.audience === "merchants" ? merchants.length : announcement.audience === "couriers" ? couriers.length : merchants.length + couriers.length;
+
+  return <div className="page-content admin-page animate-page"><header className="admin-title"><div><h1>لوحة الإدارة</h1><p>المدينة إكسبرس — تحكم كامل</p></div><Button type="button" icon="send" className="admin-notification-button" onClick={() => setNotificationOpen(true)}>إرسال تحديث</Button></header><div className="admin-stats"><button className="admin-stat" onClick={() => setTab("users")}><span style={{ color: "#187a50", background: "#e6f4ed" }}><Icon name="users" size={21} /></span><strong>{merchants.length}</strong><small>تاجر</small></button><button className="admin-stat" onClick={() => setTab("orders")}><span style={{ color: "#6257ad", background: "#efedff" }}><Icon name="package" size={21} /></span><strong>{orders.length}</strong><small>طرد</small></button><button className="admin-stat" onClick={() => setTab("collections")}><span style={{ color: "#bf862d", background: "#fff4dc" }}><Icon name="receipt" size={21} /></span><strong>{money(collectionAmount)}</strong><small>تحصيلات مستحقة</small></button><button className="admin-stat admin-stat--courier" onClick={() => setTab("couriers")}><span style={{ color: "#218391", background: "#e4f4f5" }}><Icon name="bike" size={21} /></span><strong>{couriers.length}</strong><small>مندوب</small></button></div><Segmented className="admin-tabs" value={tab} onChange={(value) => { setTab(value as AdminTab); setQuery(""); setStatus("all"); }} items={[{ value: "orders", label: "الطرود" }, { value: "users", label: "المستخدمون" }, { value: "collections", label: "التحصيلات" }, { value: "couriers", label: "المندوبون" }]} /><div className="admin-toolbar"><Field icon="search" placeholder={searchPlaceholders[tab]} value={query} onChange={(event) => setQuery(event.target.value)} wrapperClassName="admin-search" />{(tab === "users" || tab === "couriers") && <IconButton name="plus" label={tab === "users" ? "إضافة مستخدم" : "إضافة مندوب"} className="admin-add-button" onClick={() => { setForm({ ...form, role: tab === "couriers" ? "courier" : "merchant" }); setAddUserOpen(true); }} />}</div>
 
   {tab === "orders" && <><div className="filter-scroll admin-filters"><button className={status === "all" ? "filter-chip is-active" : "filter-chip"} onClick={() => setStatus("all")}>الكل</button>{statusDefinitions.map((entry) => <button className={status === entry.id ? "filter-chip is-active" : "filter-chip"} key={entry.id} onClick={() => setStatus(entry.id)}>{entry.label}</button>)}</div>{visibleOrders.length ? <div className="admin-order-list">{visibleOrders.map((order) => <article className="admin-order-card" key={order.id}><button className="admin-order-card__headline" onClick={() => { setSelectedOrderId(order.id); setView("order-detail"); }}><div><strong>{order.merchantName}</strong><span dir="ltr">{order.trackingNumber}</span></div><StatusPill status={order.status} /></button><div className="admin-order-card__meta"><span><Icon name="user" size={14} />{order.recipientName}</span><span><Icon name="mapPin" size={14} />{order.city}</span><span>{money(order.amount)} ₪</span><span>{relativeDate(order.createdAt)}</span></div><div className="admin-status-buttons">{statusDefinitions.map((entry) => <button key={entry.id} className={order.status === entry.id ? "is-active" : ""} disabled={order.status === entry.id} style={{ "--status-color": entry.color } as CSSProperties} onClick={() => changeOrderStatus(order.id, entry.id)}>{entry.label}</button>)}<button className="admin-delete-order" onClick={() => confirm({ title: "حذف الطرد؟", message: `سيُنقل الطرد ${order.trackingNumber} إلى المحذوفات.`, confirmLabel: "حذف الطرد", danger: true, onConfirm: () => { updateDatabase((current) => ({ ...current, orders: current.orders.map((entry) => entry.id === order.id ? { ...entry, deleted: true } : entry) })); showToast("تم نقل الطرد إلى المحذوفات."); } })}><Icon name="trash" size={13} />حذف</button></div></article>)}</div> : <EmptyState icon="package" title="لا توجد طرود" description="ستظهر هنا جميع الطرود التي ينشئها التجار." />}</>}
 
@@ -195,6 +234,8 @@ export function AdminDashboard() {
       })}
     </div>
   ) : <EmptyState icon="receipt" title="لا توجد فواتير تحصيل" description="ستظهر هنا الفواتير التي ينشئها التجار بعد وصول طرودهم." />)}
+
+  {notificationOpen && <Modal title="إرسال إشعار تحديث" onClose={() => setNotificationOpen(false)} closeDisabled={sendingAnnouncement} className="admin-notification-modal" sheet><form className="modal-form" onSubmit={submitAnnouncement} aria-busy={sendingAnnouncement}><div className="admin-notification-intro"><span><Icon name="sparkles" size={24} /></span><div><h3>أخبر المستخدمين بآخر تحديثات التطبيق</h3><p>سيظهر الإشعار في أيقونة الجرس وصفحة الإشعارات لكل حساب تختاره.</p></div></div><Field icon="bell" label="عنوان الإشعار" placeholder="مثال: تحديث جديد في المدينة إكسبرس" value={announcement.title} onChange={(event) => setAnnouncement({ ...announcement, title: event.target.value.slice(0, 80) })} minLength={3} maxLength={80} required hint={<bdi dir="ltr">{announcement.title.length.toLocaleString("ar-EG")} / ٨٠</bdi>} autoFocus /><label className="field admin-notification-message"><span className="field__label">تفاصيل التحديث</span><span className="field__control"><textarea aria-label="تفاصيل التحديث" placeholder="اكتب تفاصيل الميزة أو التحديث الجديد..." value={announcement.message} onChange={(event) => setAnnouncement({ ...announcement, message: event.target.value.slice(0, 500) })} minLength={5} maxLength={500} rows={5} required /></span><span className="field__hint" dir="ltr">{announcement.message.length.toLocaleString("ar-EG")} / ٥٠٠</span></label><SelectField label="المستلمون" value={announcement.audience} onChange={(event) => setAnnouncement({ ...announcement, audience: event.target.value as NoticeAudience })}><option value="all">جميع المستخدمين</option><option value="merchants">التجار فقط</option><option value="couriers">المندوبون فقط</option></SelectField><footer className="admin-notification-summary" aria-live="polite"><div><strong>{announcementRecipientCount.toLocaleString("ar-EG")}</strong><span>عدد الحسابات المستلمة</span></div><Button type="submit" icon="send" loading={sendingAnnouncement} disabled={!announcementRecipientCount}>{sendingAnnouncement ? "جارٍ الإرسال…" : "مراجعة وإرسال"}</Button></footer></form></Modal>}
 
   {statusUpdate && <Modal title="تحديث حالة الطرد" onClose={() => setStatusUpdate(null)} className="tracking-status-modal" sheet><p className="modal-description">اخترت حالة «{getStatus(statusUpdate.status).label}». أضف ملاحظة اختيارية توضح هذا التحديث للمستخدم.</p><TrackingNoteComposer status={statusUpdate.status} value={statusUpdate.note} onChange={(note) => setStatusUpdate({ ...statusUpdate, note })} onSubmit={saveOrderStatus} submitLabel="حفظ الحالة والملاحظة" optional /></Modal>}
 

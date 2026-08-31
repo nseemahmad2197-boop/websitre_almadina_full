@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { useEffect, useRef, type CSSProperties, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icon";
 import { getStatus, type OrderStatus } from "../lib/data";
@@ -21,7 +21,7 @@ type FieldProps = InputHTMLAttributes<HTMLInputElement> & {
   icon?: IconName;
   label?: string;
   suffix?: ReactNode;
-  hint?: string;
+  hint?: ReactNode;
   wrapperClassName?: string;
 };
 
@@ -129,13 +129,69 @@ export function SectionCard({ title, subtitle, icon, action, children, className
   );
 }
 
-export function Modal({ children, onClose, title, ariaLabel, className = "", sheet = false }: { children: ReactNode; onClose: () => void; title?: string; ariaLabel?: string; className?: string; sheet?: boolean }) {
+export function Modal({ children, onClose, title, ariaLabel, className = "", sheet = false, closeDisabled = false }: { children: ReactNode; onClose: () => void; title?: string; ariaLabel?: string; className?: string; sheet?: boolean; closeDisabled?: boolean }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  const closeDisabledRef = useRef(closeDisabled);
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => { closeDisabledRef.current = closeDisabled; }, [closeDisabled]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusableSelector = "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])";
+    const isTopmost = () => {
+      const backdrops = Array.from(document.querySelectorAll<HTMLElement>(".modal-backdrop"));
+      return backdrops.at(-1)?.contains(dialog) ?? false;
+    };
+    const focusTimer = window.setTimeout(() => {
+      if (dialog.contains(document.activeElement)) return;
+      const firstFocusable = dialog.querySelector<HTMLElement>(focusableSelector);
+      if (firstFocusable) firstFocusable.focus();
+      else dialog.focus();
+    }, 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isTopmost()) return;
+      if (event.key === "Escape") {
+        if (closeDisabledRef.current) return;
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", onKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className={`modal ${sheet ? "modal--sheet" : ""} ${className}`} role="dialog" aria-modal="true" aria-label={ariaLabel ?? title}>
-        {title && <header className="modal__header"><h2>{title}</h2><IconButton name="close" label="إغلاق" onClick={onClose} /></header>}
+    <div className="modal-backdrop" onMouseDown={(event) => { if (!closeDisabled && event.target === event.currentTarget) onClose(); }}>
+      <section ref={dialogRef} tabIndex={-1} className={`modal ${sheet ? "modal--sheet" : ""} ${className}`} role="dialog" aria-modal="true" aria-label={ariaLabel ?? title}>
+        {title && <header className="modal__header"><h2>{title}</h2><IconButton name="close" label="إغلاق" onClick={onClose} disabled={closeDisabled} /></header>}
         {children}
       </section>
     </div>,

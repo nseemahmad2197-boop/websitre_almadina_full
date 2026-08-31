@@ -508,6 +508,72 @@ function mergeCourierDatabase(current: Database, submitted: Database, account: U
   });
 }
 
+async function broadcastNotice(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  if (session.account.role !== "admin") return json({ error: "هذه الميزة متاحة للمسؤول فقط." }, 403);
+
+  const submitted = await request.json() as unknown;
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) return json({ error: "بيانات الإشعار غير صالحة." }, 400);
+  const payload = submitted as Record<string, unknown>;
+  const requestId = typeof payload.requestId === "string" ? payload.requestId.trim() : "";
+  const audience = payload.audience;
+  const title = typeof payload.title === "string" ? payload.title.trim() : "";
+  const message = typeof payload.message === "string" ? payload.message.trim() : "";
+
+  if (!/^[a-zA-Z0-9_-]{8,120}$/.test(requestId)) return json({ error: "معرّف طلب الإشعار غير صالح." }, 400);
+  if (audience !== "all" && audience !== "merchants" && audience !== "couriers") return json({ error: "فئة مستلمي الإشعار غير صالحة." }, 400);
+  if (title.length < 3 || title.length > 80) return json({ error: "يجب أن يكون عنوان الإشعار بين 3 و80 حرفًا." }, 400);
+  if (message.length < 5 || message.length > 500) return json({ error: "يجب أن تكون تفاصيل الإشعار بين 5 و500 حرف." }, 400);
+
+  const createdAt = new Date().toISOString();
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const administrator = state.database.users.find((account) => account.id === session.account.id);
+    if (!administrator || administrator.role !== "admin") return json({ error: "لم يعد حساب المسؤول متاحًا." }, 403);
+
+    const previousRequestNotices = state.database.notices.filter((notice) => notice.broadcastId === requestId);
+    if (previousRequestNotices.some((notice) => notice.title !== title || notice.message !== message || notice.audience !== audience)) {
+      return json({ error: "استُخدم معرّف هذا الإرسال سابقًا لمحتوى مختلف. أعد المحاولة.", ...snapshot(state, administrator) }, 409);
+    }
+
+    const recipients = state.database.users.filter((account) => account.role !== "admin" && (
+      audience === "all"
+        || (audience === "merchants" && account.role === "merchant")
+        || (audience === "couriers" && account.role === "courier")
+    ));
+    if (!recipients.length) return json({ error: "لا توجد حسابات ضمن الفئة المحددة." }, 422);
+
+    const notices = await Promise.all(recipients.map(async (account): Promise<Notice> => ({
+      id: `notice-${(await sha256(`${requestId}:${account.id}`)).slice(0, 28)}`,
+      userId: account.id,
+      title,
+      message,
+      icon: "sparkles",
+      read: false,
+      createdAt,
+      broadcastId: requestId,
+      audience,
+    })));
+    const existingIds = new Set(state.database.notices.map((notice) => notice.id));
+    const missingNotices = notices.filter((notice) => !existingIds.has(notice.id));
+
+    if (!missingNotices.length) {
+      return json({ ...snapshot(state, administrator), recipientCount: recipients.length });
+    }
+
+    const next: Database = { ...state.database, notices: [...missingNotices, ...state.database.notices] };
+    if (await saveState(database, next, state.revision)) {
+      return json({ ...snapshot({ database: next, revision: state.revision + 1 }, administrator), recipientCount: recipients.length });
+    }
+  }
+
+  const latest = await readState(database);
+  const administrator = latest.database.users.find((account) => account.id === session.account.id);
+  return administrator
+    ? json({ error: "تم تحديث البيانات من جهاز آخر. أعد إرسال الإشعار.", ...snapshot(latest, administrator) }, 409)
+    : json({ error: "لم يعد حساب المسؤول متاحًا." }, 403);
+}
+
 async function login(database: D1Database, request: Request): Promise<Response> {
   const payload = await request.json() as { email?: string; password?: string };
   const email = payload.email?.trim().toLowerCase() ?? "";
@@ -704,6 +770,10 @@ export async function handleAlmadinaApi(request: Request, database: D1Database):
     }
 
     if (!session) return json({ error: "يجب تسجيل الدخول أولًا." }, 401, { "Set-Cookie": sessionCookie(request, "", 0) });
+
+    if (url.pathname === "/api/almadina/notices/broadcast" && request.method === "POST") {
+      return broadcastNotice(database, request, session);
+    }
 
     if (url.pathname === "/api/almadina/collections/verify" && request.method === "POST") {
       return verifyCollection(database, request, session);

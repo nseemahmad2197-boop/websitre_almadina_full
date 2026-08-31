@@ -8,10 +8,10 @@ import { Icon } from "./components/icon";
 import { Avatar, Button, Field, IconButton, Modal } from "./components/ui";
 import { AppContext, type ConfirmOptions, type ToastKind, type View } from "./lib/app-context";
 import { rememberAvailableAccount } from "./lib/available-accounts";
-import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type Preferences, type User } from "./lib/data";
+import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type NoticeAudience, type Preferences, type User } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
-type SharedSnapshot = { database: Database; revision: number; userId: string };
+type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number };
 type DatabaseUpdater = (current: Database) => Database;
 type ThemePreference = Preferences["theme"];
 
@@ -57,7 +57,12 @@ async function sharedRequest(path: string, options: RequestInit = {}): Promise<S
     throw new SharedApiError("استجابة خادم المدينة إكسبرس غير مكتملة.", 500);
   }
 
-  return { database: payload.database, revision: payload.revision, userId: payload.userId };
+  return {
+    database: payload.database,
+    revision: payload.revision,
+    userId: payload.userId,
+    ...(typeof payload.recipientCount === "number" ? { recipientCount: payload.recipientCount } : {}),
+  };
 }
 
 function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employeeMode?: boolean; onClose: () => void; onDetected: (value: string) => void }) {
@@ -155,6 +160,8 @@ export default function AlmadinaApplication() {
   const visibleDatabase = useRef<Database>(database);
   const serverRevision = useRef(0);
   const pendingUpdates = useRef<DatabaseUpdater[]>([]);
+  const broadcastRequestIds = useRef<Map<string, string>>(new Map());
+  const remoteMutationInFlight = useRef(false);
   const savingUpdates = useRef(false);
   const storedThemePreference = useRef<ThemePreference | null>(null);
 
@@ -223,11 +230,11 @@ export default function AlmadinaApplication() {
     let active = true;
 
     async function synchronize() {
-      if (!active || savingUpdates.current || pendingUpdates.current.length) return;
+      if (!active || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) return;
 
       try {
         const snapshot = await sharedRequest("database");
-        if (!active || savingUpdates.current || pendingUpdates.current.length || snapshot.revision === serverRevision.current) return;
+        if (!active || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length || snapshot.revision === serverRevision.current) return;
         rememberSnapshotAccount(snapshot);
         authoritativeDatabase.current = snapshot.database;
         visibleDatabase.current = snapshot.database;
@@ -259,7 +266,7 @@ export default function AlmadinaApplication() {
   }, [userId]);
 
   async function savePendingUpdates(): Promise<void> {
-    if (savingUpdates.current || !authoritativeDatabase.current) return;
+    if (savingUpdates.current || remoteMutationInFlight.current || !authoritativeDatabase.current) return;
     savingUpdates.current = true;
 
     try {
@@ -353,6 +360,53 @@ export default function AlmadinaApplication() {
     }
   }
 
+  async function broadcastNotice(values: { audience: NoticeAudience; title: string; message: string }): Promise<number | null> {
+    if (!user || user.role !== "admin") {
+      showToast("هذه الميزة متاحة للمسؤول فقط.", "error");
+      return null;
+    }
+    if (!await waitForPendingUpdates()) {
+      showToast("انتظر اكتمال حفظ التغييرات ثم أعد إرسال الإشعار.", "error");
+      return null;
+    }
+
+    const requestKey = JSON.stringify([values.audience, values.title.trim(), values.message.trim()]);
+    const requestId = broadcastRequestIds.current.get(requestKey) ?? uid("broadcast");
+    broadcastRequestIds.current.set(requestKey, requestId);
+    remoteMutationInFlight.current = true;
+
+    try {
+      const snapshot = await sharedRequest("notices/broadcast", {
+        method: "POST",
+        body: JSON.stringify({ requestId, ...values }),
+      });
+      authoritativeDatabase.current = snapshot.database;
+      serverRevision.current = snapshot.revision;
+      visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), snapshot.database);
+      setDatabase(visibleDatabase.current);
+      const recipientCount = snapshot.recipientCount ?? snapshot.database.notices.filter((notice) => notice.broadcastId === requestId).length;
+      broadcastRequestIds.current.delete(requestKey);
+      return recipientCount;
+    } catch (error) {
+      if (error instanceof SharedApiError) {
+        if (error.snapshot) {
+          authoritativeDatabase.current = error.snapshot.database;
+          serverRevision.current = error.snapshot.revision;
+          visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), error.snapshot.database);
+          setDatabase(visibleDatabase.current);
+        }
+        if (error.status === 401) logout();
+        showToast(error.message, "error");
+        return null;
+      }
+      showToast("تعذّر إرسال الإشعار. حاول مجددًا.", "error");
+      return null;
+    } finally {
+      remoteMutationInFlight.current = false;
+      if (pendingUpdates.current.length) void savePendingUpdates();
+    }
+  }
+
   async function shipScannedOrder(trackingNumber: string): Promise<boolean> {
     try {
       const snapshot = await sharedRequest("orders/scan", {
@@ -424,6 +478,7 @@ export default function AlmadinaApplication() {
     void fetch("/api/almadina/logout", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
     authoritativeDatabase.current = null;
     pendingUpdates.current = [];
+    broadcastRequestIds.current.clear();
     const anonymous = createSeedDatabase();
     visibleDatabase.current = anonymous;
     setDatabase(anonymous);
@@ -470,5 +525,5 @@ export default function AlmadinaApplication() {
     if (user) { setSelectedOrderId(order.id); setView("order-detail"); showToast("تم العثور على الطرد."); } else showToast(`الطرد ${order.trackingNumber}: ${order.recipientName}.`, "info");
   }
 
-  return <AppContext.Provider value={{ database, user, view, preferences, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, login, logout, register, verifyCollectionCode, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>{user ? <ApplicationShell /> : <Authentication />}{confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}{accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}{scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div></AppContext.Provider>;
+  return <AppContext.Provider value={{ database, user, view, preferences, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, login, logout, register, verifyCollectionCode, broadcastNotice, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>{user ? <ApplicationShell /> : <Authentication />}{confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}{accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}{scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div></AppContext.Provider>;
 }
