@@ -270,7 +270,7 @@ test("gates secure mobile biometric unlock behind an encrypted four-digit app lo
   assert.match(server, /allowCredentials: \[\]/);
   assert.match(server, /SameSite=Strict/);
   assert.match(server, /INNER JOIN almadina_passkey_login_credentials/);
-  assert.match(server, /const sessionToken = await createSession\(database, credential\.user_id\)/);
+  assert.match(server, /const sessionToken = await createSession\(database, credential\.user_id, request\)/);
   assert.match(client, /window\.isSecureContext/);
   assert.match(client, /navigator\.maxTouchPoints > 0/);
   assert.match(client, /shortestScreenSide > 1024/);
@@ -1185,4 +1185,40 @@ test("shows a responsive reference-style password change flow backed only by the
   assert.match(styles, /\.password-visibility-button\s*\{/);
   assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.change-password-form/);
   assert.match(styles, /env\(safe-area-inset-bottom\)/);
+});
+
+test("shows linked device names and safely revokes only another session", async () => {
+  const [application, context, server, shell, settings, styles, schema, migration] = await Promise.all([
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0004_blushing_doctor_strange.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(schema, /sqliteTable\("almadina_session_devices"/);
+  assert.match(migration, /CREATE TABLE `almadina_session_devices`/);
+  assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM|ALTER TABLE/);
+  assert.match(context, /\| "linked-devices"/);
+  assert.match(context, /listLinkedDevices:\s*\(\) => Promise<LinkedDevice\[\] \| null>/);
+  assert.match(context, /revokeLinkedDevice:\s*\(deviceId: string\) => Promise<LinkedDevice\[\] \| null>/);
+  assert.match(shell, /case "linked-devices": return <LinkedDevicesPage \/>/);
+  assert.match(shell, /view === "linked-devices"/);
+  assert.match(settings, /title="الأجهزة المرتبطة"/);
+  assert.match(settings, /export function LinkedDevicesPage\(\)/);
+  assert.match(settings, /هذا الجهاز/);
+  assert.match(settings, /لن تُحذف بيانات الحساب أو الطرود أو التحصيلات/);
+  assert.match(application, /fetch\("\/api\/almadina\/security\/devices"/);
+  assert.match(application, /fetch\("\/api\/almadina\/security\/devices\/revoke"/);
+  assert.match(server, /async function readLinkedDevices/);
+  assert.match(server, /linked-device:\$\{tokenHash\}/);
+  assert.match(server, /selectedTokenHash === session\.tokenHash/);
+  assert.match(server, /DELETE FROM almadina_sessions WHERE token_hash = \? AND user_id = \?/);
+  assert.doesNotMatch(server, /ip_address|raw_user_agent/);
+  assert.match(styles, /\.linked-devices-page\s*\{/);
+  assert.match(styles, /\.linked-device-card\s*\{/);
+  assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.linked-device-card/);
 });

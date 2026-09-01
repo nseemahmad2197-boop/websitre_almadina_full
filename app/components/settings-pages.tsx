@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useApp, type View } from "../lib/app-context";
+import { formatDate, relativeDate, type LinkedDevice } from "../lib/data";
 import { Icon, type IconName } from "./icon";
 import { Button, Field, Modal, PageHeader, SectionCard, Toggle } from "./ui";
 
@@ -65,12 +66,85 @@ export function SecurityPage() {
   return <div className="page-content animate-page"><PageHeader title="الأمان والخصوصية" onBack={() => setView("settings")} />
     <div className="settings-group">
       <SettingsRow icon="key" title="تغيير كلمة المرور" subtitle="أنشئ كلمة مرور قوية لحسابك" onClick={() => setView("change-password")} />
+      <SettingsRow icon="monitor" title="الأجهزة المرتبطة" subtitle="عرض عدد الأجهزة وأسمائها وآخر نشاط" onClick={() => setView("linked-devices")} />
       <SettingsRow icon="lock" title="قفل التطبيق" subtitle={appLock.enabled ? "رمز القفل مفعّل ومشفّر" : "احمِ حسابك برمز دخول"} action={<Toggle checked={appLock.enabled} disabled={!appLock.ready || submitting} onChange={(value) => { setPin(""); setPinMode(value ? "setup" : "disable-lock"); showToast(value ? "أدخل رمزًا جديدًا من 4 أرقام." : "أدخل رمز القفل الحالي للتأكيد.", "info"); }} label="قفل التطبيق" />} />
       <SettingsRow icon="fingerprint" title="الدخول بالبصمة" subtitle={biometricSubtitle} action={<Toggle checked={appLock.biometricEnabled} disabled={!appLock.ready || !appLock.enabled || submitting || (!appLock.biometricAvailable && !appLock.biometricEnabled)} onChange={(value) => { setPin(""); setPinMode(value ? "enable-biometric" : "disable-biometric"); if (value) showToast("أدخل رمز قفل التطبيق لتأكيد ربط حماية الجهاز.", "info"); }} label="الدخول بالبصمة" />} />
     </div>
     {pinMode && <SectionCard title={pinTitle} className="pin-card" action={<Button type="button" variant="ghost" disabled={submitting} onClick={() => { setPinMode(null); setPin(""); }}>إلغاء</Button>}><div className="pin-dots">{[0, 1, 2, 3].map((index) => <span key={index} className={index < pin.length ? "is-filled" : ""} />)}</div><div className="pin-keypad">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "delete"].map((value) => <button type="button" disabled={submitting} key={value} onClick={() => press(value)}>{value === "clear" ? "C" : value === "delete" ? <Icon name="arrowLeft" size={20} /> : value}</button>)}</div>{submitting && <p className="pin-card__status"><span className="spinner" /> جارٍ حفظ إعدادات الأمان...</p>}</SectionCard>}
     <SectionCard className="security-note"><p><Icon name="shield" size={18} /> عند تفعيل البصمة وربطها بهذا الجهاز، يمكنك تسجيل الدخول بها بعد الخروج للحسابات العادية والبريميوم والماسية والموظف والمسؤول. تبقى كلمة المرور متاحة دائمًا.</p></SectionCard>
     {user?.role !== "admin" && <div className="settings-group"><SettingsRow icon="trash" title="حذف الحساب" subtitle="راجع الشروط قبل الحذف النهائي" danger onClick={() => setView("delete-account")} /></div>}
+  </div>;
+}
+
+function linkedDeviceCountLabel(count: number): string {
+  const written = count.toLocaleString("ar-PS");
+  if (count === 0) return "لا توجد أجهزة مرتبطة";
+  if (count === 1) return "جهاز واحد مرتبط";
+  if (count === 2) return "جهازان مرتبطان";
+  if (count >= 3 && count <= 10) return `${written} أجهزة مرتبطة`;
+  return `${written} جهازًا مرتبطًا`;
+}
+
+function linkedDeviceIcon(device: LinkedDevice): IconName {
+  return device.type === "mobile" || device.type === "tablet" ? "phone" : "monitor";
+}
+
+export function LinkedDevicesPage() {
+  const { setView, listLinkedDevices, revokeLinkedDevice, confirm } = useApp();
+  const [devices, setDevices] = useState<LinkedDevice[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  async function loadDevices() {
+    setLoading(true);
+    setFailed(false);
+    const result = await listLinkedDevices();
+    setLoading(false);
+    if (!result) return setFailed(true);
+    setDevices(result);
+  }
+
+  useEffect(() => {
+    let active = true;
+    void listLinkedDevices().then((result) => {
+      if (!active) return;
+      setLoading(false);
+      if (!result) return setFailed(true);
+      setDevices(result);
+    });
+    return () => { active = false; };
+    // The initial request intentionally runs once when this page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function requestRevoke(device: LinkedDevice) {
+    confirm({
+      title: `تسجيل خروج ${device.name}؟`,
+      message: "ستنتهي جلسة هذا الجهاز فقط، ولن تُحذف بيانات الحساب أو الطرود أو التحصيلات.",
+      confirmLabel: "تسجيل خروج الجهاز",
+      danger: true,
+      onConfirm: async () => {
+        const result = await revokeLinkedDevice(device.id);
+        if (!result) return false;
+        setDevices(result);
+        return true;
+      },
+    });
+  }
+
+  const count = devices?.length ?? 0;
+  return <div className="page-content linked-devices-page animate-page">
+    <PageHeader title="الأجهزة المرتبطة" subtitle="الجلسات المسجّل دخولها إلى حسابك" onBack={() => setView("security")} action={<Button type="button" variant="ghost" icon="refresh" loading={loading} disabled={loading} onClick={() => { void loadDevices(); }}>تحديث</Button>} />
+    <section className="linked-devices-summary" aria-live="polite"><span><Icon name="monitor" size={25} /></span><div><strong>{loading && !devices ? "جارٍ حساب الأجهزة..." : linkedDeviceCountLabel(count)}</strong><small>يمكنك مراجعة آخر نشاط وتسجيل خروج أي جهاز آخر.</small></div></section>
+    {loading && !devices ? <div className="linked-devices-loading" role="status"><span className="spinner" /><p>جارٍ تحميل الأجهزة المرتبطة...</p></div>
+      : failed ? <section className="linked-devices-error" role="alert"><Icon name="alert" size={30} /><h2>تعذّر تحميل الأجهزة</h2><p>تحقق من الاتصال ثم أعد المحاولة.</p><Button type="button" variant="outline" icon="refresh" onClick={() => { void loadDevices(); }}>إعادة المحاولة</Button></section>
+        : devices?.length ? <div className="linked-device-list">{devices.map((device) => <article className={`linked-device-card ${device.current ? "is-current" : ""}`} key={device.id}>
+          <span className="linked-device-card__icon"><Icon name={linkedDeviceIcon(device)} size={24} /></span>
+          <div className="linked-device-card__details"><div><strong>{device.name}</strong>{device.current && <span className="linked-device-current"><Icon name="check" size={13} />هذا الجهاز</span>}</div><p>{device.browser === "غير معروف" ? "جلسة قديمة؛ سيُحدّث اسمها عند استخدامها" : `${device.browser} · آخر نشاط ${relativeDate(device.lastActiveAt)}`}</p><small>تم تسجيل الدخول في {formatDate(device.createdAt)}</small></div>
+          {!device.current && <Button type="button" variant="outline" icon="logout" onClick={() => requestRevoke(device)}>تسجيل الخروج</Button>}
+        </article>)}</div>
+          : <section className="linked-devices-error"><Icon name="monitor" size={34} /><h2>لا توجد أجهزة مرتبطة</h2><p>ستظهر جلسات تسجيل الدخول النشطة هنا.</p></section>}
+    <SectionCard className="security-note"><p><Icon name="shield" size={18} /> لا نعرض عنوان IP أو معلومات الجهاز الخام. الاسم تقريبي ويعتمد على نوع الجهاز والمتصفح حفاظًا على الخصوصية.</p></SectionCard>
   </div>;
 }
 

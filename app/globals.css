@@ -754,6 +754,28 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .security-note { padding-top: 12px; padding-bottom: 12px; }
 .security-note > p { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 10px; line-height: 1.8; }
 .security-note > p > svg { flex: 0 0 auto; margin-top: 1px; color: var(--green); }
+.linked-devices-page { width: min(calc(100% - clamp(30px, 8vw, 120px)), 780px); min-height: calc(100svh - 104px); align-content: start; }
+.linked-devices-summary { display: flex; min-height: 94px; align-items: center; gap: 14px; padding: 18px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 68%); border-radius: 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--green-pale), var(--surface) 50%), var(--surface)); box-shadow: var(--shadow); }
+.linked-devices-summary > span { display: grid; width: 50px; height: 50px; flex: 0 0 auto; place-items: center; border-radius: 16px; background: var(--green); color: #fff; }
+.linked-devices-summary > div { display: grid; gap: 5px; }
+.linked-devices-summary strong { font-size: 18px; }
+.linked-devices-summary small { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.linked-device-list { display: grid; gap: 11px; }
+.linked-device-card { display: grid; min-height: 112px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); box-shadow: 0 7px 20px rgb(24 32 28 / 5%); }
+.linked-device-card.is-current { border-color: color-mix(in srgb, var(--green), var(--line) 55%); box-shadow: inset 4px 0 0 var(--green), 0 7px 20px rgb(24 32 28 / 5%); }
+.linked-device-card__icon { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 15px; background: var(--green-pale); color: var(--green); }
+.linked-device-card__details { display: grid; min-width: 0; gap: 6px; }
+.linked-device-card__details > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.linked-device-card__details strong { overflow-wrap: anywhere; font-size: 15px; }
+.linked-device-card__details p { color: var(--muted); font-size: 12px; line-height: 1.65; }
+.linked-device-card__details small { color: var(--muted); font-size: 11px; }
+.linked-device-current { display: inline-flex; min-height: 25px; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 999px; background: var(--green-pale); color: var(--green); font-size: 10px; font-weight: 800; white-space: nowrap; }
+.linked-device-card > .button { min-height: 42px; white-space: nowrap; }
+.linked-devices-loading, .linked-devices-error { display: grid; min-height: 230px; justify-items: center; align-content: center; gap: 10px; padding: 22px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); text-align: center; }
+.linked-devices-loading .spinner { border-color: color-mix(in srgb, var(--green), transparent 72%); border-top-color: var(--green); }
+.linked-devices-loading p, .linked-devices-error p { color: var(--muted); font-size: 12px; line-height: 1.75; }
+.linked-devices-error > svg { color: var(--green); }
+.linked-devices-error h2 { font-size: 17px; }
 
 /* Session hydration and application lock */
 .session-loading, .app-lock-screen { display: grid; min-height: 100svh; place-items: center; padding: max(24px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); background: radial-gradient(circle at 50% -15%, color-mix(in srgb, var(--green-pale), transparent 8%), transparent 48%), var(--background); }
@@ -1015,6 +1037,19 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .topbar__brand .brand__mark { width: 33px; height: 33px; }
   .page-content { width: calc(100% - 22px); gap: 13px; padding-top: 15px; }
   .change-password-page { min-height: calc(100svh - 73px); }
+  .linked-devices-page { min-height: calc(100svh - 73px); padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+  .linked-devices-summary { min-height: 88px; gap: 11px; padding: 14px; border-radius: 16px; box-shadow: none; }
+  .linked-devices-summary > span { width: 44px; height: 44px; border-radius: 14px; }
+  .linked-devices-summary strong { font-size: 17px; }
+  .linked-devices-summary small { font-size: 12px; }
+  .linked-device-card { min-height: 0; grid-template-columns: auto minmax(0, 1fr); gap: 11px; padding: 14px; border-radius: 16px; box-shadow: none; }
+  .linked-device-card.is-current { box-shadow: inset 3px 0 0 var(--green); }
+  .linked-device-card__icon { width: 43px; height: 43px; border-radius: 13px; }
+  .linked-device-card__details strong { font-size: 15px; }
+  .linked-device-card__details p { font-size: 12px; }
+  .linked-device-card__details small { font-size: 11px; }
+  .linked-device-card > .button { width: 100%; min-height: 46px; grid-column: 1 / -1; }
+  .linked-devices-loading, .linked-devices-error { min-height: 210px; border-radius: 16px; }
   .change-password-panel { border-radius: 17px; box-shadow: none; }
   .change-password-intro { gap: 10px; padding: 18px 14px 15px; }
   .change-password-intro > span { width: 42px; height: 42px; border-radius: 13px; }

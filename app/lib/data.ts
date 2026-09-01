@@ -3,6 +3,16 @@ import { INTERIOR_LOCALITIES, WEST_BANK_LOCALITIES } from "./palestine-locations
 
 export type Role = "admin" | "merchant" | "courier";
 export type Membership = "standard" | "premium" | "diamond";
+export type LinkedDeviceType = "mobile" | "tablet" | "desktop" | "unknown";
+export type LinkedDevice = {
+  id: string;
+  name: string;
+  type: LinkedDeviceType;
+  browser: string;
+  current: boolean;
+  createdAt: string;
+  lastActiveAt: string;
+};
 export type OrderStatus =
   | "draft"
   | "ready"

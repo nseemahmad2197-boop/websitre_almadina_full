@@ -10,7 +10,7 @@ import { Avatar, Brand, Button, Field, IconButton, Modal } from "./components/ui
 import { AppContext, type ConfirmOptions, type ToastKind, type View } from "./lib/app-context";
 import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/available-accounts";
 import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiometricAvailability, getAppLockStatus, registerBiometricUnlock, removeAppLock, removeBiometricUnlock, startSignedOutBiometricAuthentication, verifyAppLockPin, verifySignedOutBiometricAuthentication, type AppLockState } from "./lib/app-lock-client";
-import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type NoticeAudience, type Preferences, type User } from "./lib/data";
+import { createSeedDatabase, defaultPreferences, uid, type Database, type LinkedDevice, type Notice, type NoticeAudience, type Preferences, type User } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
 type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number; removedCount?: number };
@@ -905,6 +905,62 @@ export default function AlmadinaApplication() {
     }
   }
 
+  async function listLinkedDevices(): Promise<LinkedDevice[] | null> {
+    try {
+      const response = await fetch("/api/almadina/security/devices", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const payload = await response.json() as { devices?: LinkedDevice[]; error?: string };
+      if (!response.ok || !Array.isArray(payload.devices)) {
+        throw new SharedApiError(payload.error ?? "تعذّر تحميل الأجهزة المرتبطة.", response.status);
+      }
+      return payload.devices;
+    } catch (error) {
+      if (error instanceof SharedApiError) {
+        if (error.status === 401) clearLocalSession();
+        showToast(error.message, "error");
+      } else {
+        showToast("تعذّر تحميل الأجهزة المرتبطة. تحقق من الاتصال.", "error");
+      }
+      return null;
+    }
+  }
+
+  async function revokeLinkedDevice(deviceId: string): Promise<LinkedDevice[] | null> {
+    if (!await waitForPendingUpdates()) {
+      showToast("انتظر اكتمال حفظ التغييرات ثم حاول تسجيل خروج الجهاز.", "error");
+      return null;
+    }
+
+    remoteMutationInFlight.current = true;
+    try {
+      const response = await fetch("/api/almadina/security/devices/revoke", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId }),
+      });
+      const payload = await response.json() as { success?: boolean; devices?: LinkedDevice[]; error?: string };
+      if (!response.ok || !payload.success || !Array.isArray(payload.devices)) {
+        throw new SharedApiError(payload.error ?? "تعذّر تسجيل خروج الجهاز.", response.status);
+      }
+      showToast("تم تسجيل خروج الجهاز من حسابك.");
+      return payload.devices;
+    } catch (error) {
+      if (error instanceof SharedApiError) {
+        if (error.status === 401) clearLocalSession();
+        showToast(error.message, "error");
+      } else {
+        showToast("تعذّر تسجيل خروج الجهاز. تحقق من الاتصال.", "error");
+      }
+      return null;
+    } finally {
+      remoteMutationInFlight.current = false;
+    }
+  }
+
   async function deleteAccount(password: string, confirmation: string): Promise<boolean> {
     if (!user || user.role === "admin") {
       showToast("لا يمكن حذف حساب المسؤول من داخل التطبيق.", "error");
@@ -990,7 +1046,7 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, register, changePassword, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, register, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

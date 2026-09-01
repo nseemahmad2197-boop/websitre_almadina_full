@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { Database, Notice, NoticeAudience, Preferences, User } from "./data";
+import type { Database, LinkedDevice, Notice, NoticeAudience, Preferences, User } from "./data";
 import type { AppLockState } from "./app-lock-client";
 
 export type View =
@@ -15,6 +15,7 @@ export type View =
   | "settings"
   | "security"
   | "change-password"
+  | "linked-devices"
   | "delete-account"
   | "notification-settings"
   | "preferences"
@@ -59,6 +60,8 @@ export type AppContextValue = {
   logout: () => Promise<boolean>;
   register: (values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">) => Promise<boolean>;
   changePassword: (currentPassword: string, newPassword: string, confirmPassword: string, signOutAllDevices: boolean) => Promise<boolean>;
+  listLinkedDevices: () => Promise<LinkedDevice[] | null>;
+  revokeLinkedDevice: (deviceId: string) => Promise<LinkedDevice[] | null>;
   deleteAccount: (password: string, confirmation: string) => Promise<boolean>;
   verifyCollectionCode: (invoiceId: string, verificationCode: string) => Promise<boolean>;
   shipScannedOrder: (trackingNumber: string) => Promise<boolean>;

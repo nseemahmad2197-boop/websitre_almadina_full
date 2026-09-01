@@ -14,6 +14,16 @@ export const almadinaSessions = sqliteTable("almadina_sessions", {
   createdAt: text("created_at").notNull(),
 }, (table) => [index("almadina_sessions_user_id_idx").on(table.userId)]);
 
+export const almadinaSessionDevices = sqliteTable("almadina_session_devices", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: text("user_id").notNull(),
+  deviceName: text("device_name").notNull(),
+  deviceType: text("device_type").notNull(),
+  browserName: text("browser_name").notNull(),
+  createdAt: text("created_at").notNull(),
+  lastActiveAt: text("last_active_at").notNull(),
+}, (table) => [index("almadina_session_devices_user_id_idx").on(table.userId)]);
+
 export const almadinaAppLocks = sqliteTable("almadina_app_locks", {
   userId: text("user_id").primaryKey(),
   pinHash: text("pin_hash").notNull(),

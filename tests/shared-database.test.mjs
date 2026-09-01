@@ -31,9 +31,9 @@ class FakeD1Statement {
       return this.database.state ? { payload: this.database.state.payload, revision: this.database.state.revision } : null;
     }
 
-    if (this.sql.startsWith("SELECT user_id, expires_at FROM almadina_sessions")) {
+    if (this.sql.startsWith("SELECT user_id, expires_at, created_at FROM almadina_sessions")) {
       const session = this.database.sessions.get(this.values[0]);
-      return session ? { user_id: session.user_id, expires_at: session.expires_at } : null;
+      return session ? { user_id: session.user_id, expires_at: session.expires_at, created_at: session.created_at } : null;
     }
 
     if (this.sql.startsWith("SELECT user_id, pin_hash, enabled, biometric_enabled, failed_attempts, locked_until FROM almadina_app_locks")) {
@@ -78,6 +78,36 @@ class FakeD1Statement {
   }
 
   async all() {
+    if (this.sql.startsWith("SELECT sessions.token_hash, sessions.created_at")) {
+      const [userId, now] = this.values;
+      const results = [...this.database.sessions.values()]
+        .filter((session) => session.user_id === userId && session.expires_at > now)
+        .map((session) => {
+          const device = this.database.sessionDevices.get(session.token_hash);
+          return {
+            token_hash: session.token_hash,
+            created_at: session.created_at,
+            device_name: device?.device_name ?? null,
+            device_type: device?.device_type ?? null,
+            browser_name: device?.browser_name ?? null,
+            last_active_at: device?.last_active_at ?? null,
+          };
+        })
+        .sort((first, second) => (second.last_active_at ?? second.created_at).localeCompare(first.last_active_at ?? first.created_at));
+      return { results, success: true, meta: { changes: 0 } };
+    }
+
+    if (this.sql.startsWith("SELECT token_hash FROM almadina_sessions WHERE user_id")) {
+      const [userId, now] = this.values;
+      return {
+        results: [...this.database.sessions.values()]
+          .filter((session) => session.user_id === userId && session.expires_at > now)
+          .map((session) => ({ token_hash: session.token_hash })),
+        success: true,
+        meta: { changes: 0 },
+      };
+    }
+
     if (this.sql.startsWith("SELECT credential_id, user_id, public_key, counter, transports, device_type, backed_up FROM almadina_webauthn_credentials WHERE user_id")) {
       return { results: [...this.database.credentials.values()].filter((credential) => credential.user_id === this.values[0]), success: true, meta: { changes: 0 } };
     }
@@ -117,6 +147,34 @@ class FakeD1Statement {
       return { success: true, meta: { changes: 1 } };
     }
 
+    if (this.sql.startsWith("INSERT INTO almadina_session_devices")) {
+      const [tokenHash, userId, deviceName, deviceType, browserName, createdAt, lastActiveAt, staleBefore] = this.values;
+      const current = this.database.sessionDevices.get(tokenHash);
+      if (!current) {
+        this.database.sessionDevices.set(tokenHash, {
+          token_hash: tokenHash,
+          user_id: userId,
+          device_name: deviceName,
+          device_type: deviceType,
+          browser_name: browserName,
+          created_at: createdAt,
+          last_active_at: lastActiveAt,
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+      if (this.sql.includes("ON CONFLICT") && (current.last_active_at <= staleBefore || current.device_name !== deviceName)) {
+        Object.assign(current, {
+          user_id: userId,
+          device_name: deviceName,
+          device_type: deviceType,
+          browser_name: browserName,
+          last_active_at: lastActiveAt,
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
+    }
+
     if (this.sql.startsWith("DELETE FROM almadina_sessions WHERE user_id")) {
       let changes = 0;
       for (const [tokenHash, session] of this.database.sessions) {
@@ -128,7 +186,25 @@ class FakeD1Statement {
     }
 
     if (this.sql.startsWith("DELETE FROM almadina_sessions WHERE token_hash")) {
+      const session = this.database.sessions.get(this.values[0]);
+      if (this.sql.includes("AND user_id") && session?.user_id !== this.values[1]) return { success: true, meta: { changes: 0 } };
       return { success: true, meta: { changes: Number(this.database.sessions.delete(this.values[0])) } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_session_devices WHERE user_id")) {
+      let changes = 0;
+      for (const [tokenHash, device] of this.database.sessionDevices) {
+        if (device.user_id !== this.values[0]) continue;
+        this.database.sessionDevices.delete(tokenHash);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_session_devices WHERE token_hash")) {
+      const device = this.database.sessionDevices.get(this.values[0]);
+      if (this.sql.includes("AND user_id") && device?.user_id !== this.values[1]) return { success: true, meta: { changes: 0 } };
+      return { success: true, meta: { changes: Number(this.database.sessionDevices.delete(this.values[0])) } };
     }
 
     if (this.sql.startsWith("INSERT INTO almadina_app_locks")) {
@@ -241,6 +317,7 @@ class FakeD1Statement {
 class FakeD1Database {
   state = null;
   sessions = new Map();
+  sessionDevices = new Map();
   appLocks = new Map();
   credentials = new Map();
   passkeyLoginCredentials = new Map();
@@ -2190,6 +2267,7 @@ test("deletes only the authenticated eligible account and preserves every other 
   assert.equal(deleted.body.success, true);
   assert.match(deleted.headers.get("set-cookie") ?? "", /Max-Age=0/);
   assert.equal([...database.sessions.values()].some((session) => session.user_id === merchant.body.userId), false);
+  assert.equal([...database.sessionDevices.values()].some((device) => device.user_id === merchant.body.userId), false);
 
   const deletedAccountSecondSession = await call(worker, database, "database", { cookie: merchantSecondCookie });
   assert.equal(deletedAccountSecondSession.status, 401);
@@ -2286,6 +2364,137 @@ test("deletes only the authenticated eligible account and preserves every other 
   assert.equal(preservedOrder.courierId, undefined);
   assert.equal(preservedOrder.courierName, "مندوب سابق");
   assert.equal(preservedOrder.trackingEvents[0].actor, "مندوب سابق");
+});
+
+test("lists linked device names per account and revokes only a selected non-current session", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const iphoneAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1";
+  const windowsAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36";
+  const androidAgent = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/128.0.0.0 Mobile Safari/537.36";
+
+  const firstDevice = await call(worker, database, "register", {
+    method: "POST",
+    headers: { "User-Agent": iphoneAgent },
+    payload: accountPayload("صاحب الأجهزة", "devices@example.test", "0593333333"),
+  });
+  assert.equal(firstDevice.status, 201);
+  const firstCookie = sessionFrom(firstDevice);
+
+  const secondDevice = await call(worker, database, "login", {
+    method: "POST",
+    headers: { "User-Agent": windowsAgent },
+    payload: { email: "devices@example.test", password: "Customer@123" },
+  });
+  assert.equal(secondDevice.status, 200);
+  const secondCookie = sessionFrom(secondDevice);
+
+  const unrelated = await call(worker, database, "register", {
+    method: "POST",
+    headers: { "User-Agent": androidAgent },
+    payload: accountPayload("حساب الأجهزة الآخر", "devices-other@example.test", "0594444444"),
+  });
+  assert.equal(unrelated.status, 201);
+  const unrelatedCookie = sessionFrom(unrelated);
+  database.sessions.set("expired-device-session", {
+    token_hash: "expired-device-session",
+    user_id: firstDevice.body.userId,
+    expires_at: Math.floor(Date.now() / 1000) - 1,
+    created_at: new Date(Date.now() - 86_400_000).toISOString(),
+  });
+  database.sessionDevices.set("expired-device-session", {
+    token_hash: "expired-device-session",
+    user_id: firstDevice.body.userId,
+    device_name: "Firefox على Linux",
+    device_type: "desktop",
+    browser_name: "Firefox",
+    created_at: new Date(Date.now() - 86_400_000).toISOString(),
+    last_active_at: new Date(Date.now() - 86_400_000).toISOString(),
+  });
+  const initialRevision = database.state.revision;
+  const initialPayload = database.state.payload;
+
+  assert.equal((await call(worker, database, "security/devices")).status, 401);
+
+  const firstList = await call(worker, database, "security/devices", {
+    cookie: firstCookie,
+    headers: { "User-Agent": iphoneAgent },
+  });
+  assert.equal(firstList.status, 200);
+  assert.equal(firstList.body.count, 2);
+  assert.equal(firstList.body.devices.length, 2);
+  assert.equal(firstList.body.devices.filter((device) => device.current).length, 1);
+  assert.ok(firstList.body.devices.some((device) => device.name === "Safari على iPhone" && device.current));
+  assert.ok(firstList.body.devices.some((device) => device.name === "Chrome على Windows" && !device.current));
+  assert.ok(firstList.body.devices.every((device) => /^[\da-f]{64}$/.test(device.id)));
+  assert.ok(firstList.body.devices.every((device) => !Object.hasOwn(device, "token_hash")));
+  assert.doesNotMatch(JSON.stringify(firstList.body), /Mozilla\/5\.0|Pixel 9/);
+
+  const unrelatedList = await call(worker, database, "security/devices", {
+    cookie: unrelatedCookie,
+    headers: { "User-Agent": androidAgent },
+  });
+  assert.equal(unrelatedList.status, 200);
+  assert.equal(unrelatedList.body.count, 1);
+  assert.equal(unrelatedList.body.devices[0].name, "Chrome على هاتف Android");
+
+  const currentDevice = firstList.body.devices.find((device) => device.current);
+  const removableDevice = firstList.body.devices.find((device) => !device.current);
+  assert.ok(currentDevice);
+  assert.ok(removableDevice);
+
+  const currentRejected = await call(worker, database, "security/devices/revoke", {
+    method: "POST",
+    cookie: firstCookie,
+    origin: "http://almadina.test",
+    headers: { "User-Agent": iphoneAgent },
+    payload: { deviceId: currentDevice.id },
+  });
+  assert.equal(currentRejected.status, 409);
+
+  const malformedRejected = await call(worker, database, "security/devices/revoke", {
+    method: "POST",
+    cookie: firstCookie,
+    origin: "http://almadina.test",
+    headers: { "User-Agent": iphoneAgent },
+    payload: { deviceId: "not-a-device-id" },
+  });
+  assert.equal(malformedRejected.status, 400);
+
+  const crossAccountRejected = await call(worker, database, "security/devices/revoke", {
+    method: "POST",
+    cookie: unrelatedCookie,
+    origin: "http://almadina.test",
+    headers: { "User-Agent": androidAgent },
+    payload: { deviceId: removableDevice.id },
+  });
+  assert.equal(crossAccountRejected.status, 404);
+
+  const forgedOrigin = await call(worker, database, "security/devices/revoke", {
+    method: "POST",
+    cookie: firstCookie,
+    origin: "https://attacker.example",
+    headers: { "User-Agent": iphoneAgent },
+    payload: { deviceId: removableDevice.id },
+  });
+  assert.equal(forgedOrigin.status, 403);
+
+  const revoked = await call(worker, database, "security/devices/revoke", {
+    method: "POST",
+    cookie: firstCookie,
+    origin: "http://almadina.test",
+    headers: { "User-Agent": iphoneAgent },
+    payload: { deviceId: removableDevice.id },
+  });
+  assert.equal(revoked.status, 200);
+  assert.equal(revoked.body.success, true);
+  assert.equal(revoked.body.count, 1);
+  assert.equal(revoked.body.devices[0].current, true);
+  assert.equal((await call(worker, database, "database", { cookie: secondCookie, headers: { "User-Agent": windowsAgent } })).status, 401);
+  assert.equal((await call(worker, database, "database", { cookie: firstCookie, headers: { "User-Agent": iphoneAgent } })).status, 200);
+  assert.equal((await call(worker, database, "database", { cookie: unrelatedCookie, headers: { "User-Agent": androidAgent } })).status, 200);
+  assert.equal(database.state.revision, initialRevision);
+  assert.equal(database.state.payload, initialPayload);
 });
 
 test("changes only the authenticated account password and optionally revokes every session and biometric credential", async () => {
@@ -2463,6 +2672,8 @@ test("changes only the authenticated account password and optionally revokes eve
   assert.match(clearedCookies, /Max-Age=0/);
   assert.equal(database.state.revision, initialRevision + 2);
   assert.equal([...database.sessions.values()].some((session) => session.user_id === targetId), false);
+  assert.equal([...database.sessionDevices.values()].some((device) => device.user_id === targetId), false);
+  assert.equal([...database.sessionDevices.values()].some((device) => device.user_id === unrelatedId), true);
   assert.equal(database.credentials.has("credential-target"), false);
   assert.equal(database.passkeyLoginCredentials.has("credential-target"), false);
   assert.equal(database.challenges.has("target:registration"), false);
