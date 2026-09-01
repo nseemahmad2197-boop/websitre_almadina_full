@@ -516,11 +516,14 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
   const payload = submitted as Record<string, unknown>;
   const requestId = typeof payload.requestId === "string" ? payload.requestId.trim() : "";
   const audience = payload.audience;
+  const recipientUserId = typeof payload.recipientUserId === "string" ? payload.recipientUserId.trim() : "";
   const title = typeof payload.title === "string" ? payload.title.trim() : "";
   const message = typeof payload.message === "string" ? payload.message.trim() : "";
 
   if (!/^[a-zA-Z0-9_-]{8,120}$/.test(requestId)) return json({ error: "معرّف طلب الإشعار غير صالح." }, 400);
-  if (audience !== "all" && audience !== "merchants" && audience !== "couriers") return json({ error: "فئة مستلمي الإشعار غير صالحة." }, 400);
+  if (audience !== "all" && audience !== "merchants" && audience !== "couriers" && audience !== "user") return json({ error: "فئة مستلمي الإشعار غير صالحة." }, 400);
+  if (audience === "user" && !/^[a-zA-Z0-9_-]{1,120}$/.test(recipientUserId)) return json({ error: "اختر مستخدمًا صالحًا لاستلام الإشعار." }, 400);
+  if (audience !== "user" && recipientUserId) return json({ error: "لا يمكن تحديد مستخدم مع فئة جماعية." }, 400);
   if (title.length < 3 || title.length > 80) return json({ error: "يجب أن يكون عنوان الإشعار بين 3 و80 حرفًا." }, 400);
   if (message.length < 5 || message.length > 500) return json({ error: "يجب أن تكون تفاصيل الإشعار بين 5 و500 حرف." }, 400);
 
@@ -532,11 +535,19 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
     if (!administrator || administrator.role !== "admin") return json({ error: "لم يعد حساب المسؤول متاحًا." }, 403);
 
     const previousRequestNotices = state.database.notices.filter((notice) => notice.broadcastId === requestId);
-    if (previousRequestNotices.some((notice) => notice.title !== title || notice.message !== message || notice.audience !== audience)) {
+    if (previousRequestNotices.some((notice) => notice.title !== title || notice.message !== message || notice.audience !== audience || (audience === "user" && notice.userId !== recipientUserId))) {
       return json({ error: "استُخدم معرّف هذا الإرسال سابقًا لمحتوى مختلف. أعد المحاولة.", ...snapshot(state, administrator) }, 409);
     }
+    if (previousRequestNotices.length) {
+      return json({ ...snapshot(state, administrator), recipientCount: previousRequestNotices.length });
+    }
 
-    const recipients = state.database.users.filter((account) => account.role !== "admin" && (
+    const selectedRecipient = audience === "user"
+      ? state.database.users.find((account) => account.id === recipientUserId && account.role !== "admin")
+      : undefined;
+    if (audience === "user" && !selectedRecipient) return json({ error: "المستخدم المحدد غير موجود أو لا يمكن إرسال إشعار إليه." }, 422);
+
+    const recipients = selectedRecipient ? [selectedRecipient] : state.database.users.filter((account) => account.role !== "admin" && (
       audience === "all"
         || (audience === "merchants" && account.role === "merchant")
         || (audience === "couriers" && account.role === "courier")

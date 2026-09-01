@@ -744,6 +744,12 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .admin-notification-message .field__control { height: auto; min-height: 130px; padding: 0; align-items: stretch; }
 .admin-notification-message textarea { width: 100%; min-height: 128px; padding: 12px; border: 0; outline: 0; resize: vertical; background: transparent; color: var(--text); font: inherit; font-size: 11px; line-height: 1.8; }
 .admin-notification-message textarea::placeholder { color: var(--muted); }
+.admin-notification-recipient { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--green), transparent 76%); border-radius: 13px; background: color-mix(in srgb, var(--green-pale), var(--surface) 70%); }
+.admin-notification-recipient > div { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.admin-notification-recipient strong, .admin-notification-recipient span, .admin-notification-recipient small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-notification-recipient strong { font-size: 11px; }
+.admin-notification-recipient span, .admin-notification-recipient small { color: var(--muted); font-size: 9px; }
+.admin-notification-recipient > svg { flex: 0 0 auto; color: var(--green); }
 .admin-notification-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-muted); }
 .admin-notification-summary > div { display: grid; gap: 2px; }
 .admin-notification-summary > div > strong { color: var(--green); font-size: 18px; line-height: 1; }

@@ -14,6 +14,7 @@ type Toast = { id: string; message: string; kind: ToastKind };
 type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number };
 type DatabaseUpdater = (current: Database) => Database;
 type ThemePreference = Preferences["theme"];
+type WebkitAudioWindow = Window & { webkitAudioContext?: typeof AudioContext };
 
 const THEME_STORAGE_KEY = "almadina-express-theme";
 
@@ -24,6 +25,39 @@ function rememberSnapshotAccount(snapshot: SharedSnapshot): void {
 
 function isThemePreference(value: unknown): value is ThemePreference {
   return value === "light" || value === "dark" || value === "system";
+}
+
+function noticeIdsForUser(notices: Notice[], userId: string): Set<string> {
+  return new Set(notices.filter((notice) => notice.userId === userId).map((notice) => notice.id));
+}
+
+async function playNotificationChime(context: AudioContext | null): Promise<void> {
+  if (!context || context.state === "closed") return;
+
+  try {
+    if (context.state === "suspended") await context.resume();
+    if (context.state !== "running") return;
+
+    const now = context.currentTime;
+    const playTone = (frequency: number, offset: number, duration: number, volume: number) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const start = now + offset;
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(volume, start + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(start + duration + 0.02);
+    };
+
+    playTone(720, 0, 0.2, 0.11);
+    playTone(960, 0.16, 0.28, 0.085);
+  } catch {
+    // Some browsers block audio until the first user interaction; notifications must remain usable without sound.
+  }
 }
 
 class SharedApiError extends Error {
@@ -164,6 +198,51 @@ export default function AlmadinaApplication() {
   const remoteMutationInFlight = useRef(false);
   const savingUpdates = useRef(false);
   const storedThemePreference = useRef<ThemePreference | null>(null);
+  const knownNoticeIds = useRef<Set<string>>(new Set());
+  const noticeBaselineUserId = useRef<string | null>(null);
+  const notificationAudioContext = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    let unlocking = false;
+    const removeUnlockListeners = () => {
+      document.removeEventListener("pointerdown", unlock);
+      document.removeEventListener("keydown", unlock);
+    };
+    const unlock = () => {
+      if (unlocking) return;
+
+      try {
+        const AudioContextConstructor = window.AudioContext ?? (window as WebkitAudioWindow).webkitAudioContext;
+        if (!AudioContextConstructor) {
+          removeUnlockListeners();
+          return;
+        }
+        const context = notificationAudioContext.current?.state === "closed"
+          ? new AudioContextConstructor()
+          : notificationAudioContext.current ?? new AudioContextConstructor();
+        notificationAudioContext.current = context;
+        if (context.state === "running") {
+          removeUnlockListeners();
+          return;
+        }
+
+        unlocking = true;
+        void context.resume().then(() => {
+          unlocking = false;
+          if (context.state === "running") removeUnlockListeners();
+        }).catch(() => {
+          unlocking = false;
+        });
+      } catch {
+        unlocking = false;
+        // Audio support is optional and must never interrupt the application.
+      }
+    };
+
+    document.addEventListener("pointerdown", unlock, { passive: true });
+    document.addEventListener("keydown", unlock);
+    return removeUnlockListeners;
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -203,6 +282,8 @@ export default function AlmadinaApplication() {
         authoritativeDatabase.current = snapshot.database;
         visibleDatabase.current = snapshot.database;
         serverRevision.current = snapshot.revision;
+        noticeBaselineUserId.current = account.id;
+        knownNoticeIds.current = noticeIdsForUser(snapshot.database.notices, account.id);
         setDatabase(snapshot.database);
         setUserId(account.id);
         setViewState(account.role === "admin" ? "admin" : "home");
@@ -218,12 +299,35 @@ export default function AlmadinaApplication() {
   const user = useMemo(() => database.users.find((entry) => entry.id === userId) ?? null, [database.users, userId]);
   const storedPreferences = user ? { ...defaultPreferences, ...(database.preferences[user.id] ?? {}) } : anonymousPreferences;
   const preferences = { ...storedPreferences, theme: activeTheme };
+  const currentUserRole = user?.role;
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => { const dark = preferences.theme === "dark" || (preferences.theme === "system" && media.matches); document.documentElement.dataset.theme = dark ? "dark" : "light"; document.documentElement.style.colorScheme = dark ? "dark" : "light"; };
     apply(); media.addEventListener("change", apply); return () => media.removeEventListener("change", apply);
   }, [preferences.theme]);
+
+  useEffect(() => {
+    if (!userId || !currentUserRole) {
+      noticeBaselineUserId.current = null;
+      knownNoticeIds.current = new Set();
+      return;
+    }
+
+    if (noticeBaselineUserId.current !== userId) {
+      noticeBaselineUserId.current = userId;
+      knownNoticeIds.current = noticeIdsForUser(database.notices, userId);
+      return;
+    }
+
+    const newNotices = database.notices.filter((notice) => notice.userId === userId && !knownNoticeIds.current.has(notice.id));
+    if (!newNotices.length) return;
+    newNotices.forEach((notice) => knownNoticeIds.current.add(notice.id));
+
+    if (currentUserRole !== "admin" && preferences.notifications && preferences.sounds && newNotices.some((notice) => !notice.read)) {
+      void playNotificationChime(notificationAudioContext.current);
+    }
+  }, [database.notices, userId, currentUserRole, preferences.notifications, preferences.sounds]);
 
   useEffect(() => {
     if (!userId) return;
@@ -360,7 +464,7 @@ export default function AlmadinaApplication() {
     }
   }
 
-  async function broadcastNotice(values: { audience: NoticeAudience; title: string; message: string }): Promise<number | null> {
+  async function broadcastNotice(values: { audience: NoticeAudience; recipientUserId?: string; title: string; message: string }): Promise<number | null> {
     if (!user || user.role !== "admin") {
       showToast("هذه الميزة متاحة للمسؤول فقط.", "error");
       return null;
@@ -370,7 +474,7 @@ export default function AlmadinaApplication() {
       return null;
     }
 
-    const requestKey = JSON.stringify([values.audience, values.title.trim(), values.message.trim()]);
+    const requestKey = JSON.stringify([values.audience, values.recipientUserId ?? "", values.title.trim(), values.message.trim()]);
     const requestId = broadcastRequestIds.current.get(requestKey) ?? uid("broadcast");
     broadcastRequestIds.current.set(requestKey, requestId);
     remoteMutationInFlight.current = true;
@@ -454,6 +558,8 @@ export default function AlmadinaApplication() {
     visibleDatabase.current = snapshot.database;
     serverRevision.current = snapshot.revision;
     pendingUpdates.current = [];
+    noticeBaselineUserId.current = account.id;
+    knownNoticeIds.current = noticeIdsForUser(snapshot.database.notices, account.id);
     setDatabase(snapshot.database);
     setUserId(account.id);
     setSelectedOrderId(null);
@@ -478,6 +584,8 @@ export default function AlmadinaApplication() {
     authoritativeDatabase.current = null;
     pendingUpdates.current = [];
     broadcastRequestIds.current.clear();
+    noticeBaselineUserId.current = null;
+    knownNoticeIds.current = new Set();
     const anonymous = createSeedDatabase();
     visibleDatabase.current = anonymous;
     setDatabase(anonymous);
@@ -557,6 +665,7 @@ export default function AlmadinaApplication() {
 
   function notify(values: Omit<Notice, "id" | "read" | "createdAt">) {
     const notice: Notice = { ...values, id: uid("notice"), read: false, createdAt: new Date().toISOString() };
+    knownNoticeIds.current.add(notice.id);
     updateDatabase((current) => ({ ...current, notices: [notice, ...current.notices] }));
   }
 

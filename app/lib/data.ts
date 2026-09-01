@@ -107,7 +107,7 @@ export type CollectionInvoice = {
   paidAt?: string;
 };
 
-export type NoticeAudience = "all" | "merchants" | "couriers";
+export type NoticeAudience = "all" | "merchants" | "couriers" | "user";
 
 export type Notice = {
   id: string;
