@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { createTrackingEvent, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
 import { Icon } from "./icon";
 import { Button, Field, PageHeader, SectionCard, SelectField } from "./ui";
 
@@ -52,6 +52,10 @@ export function NewOrder() {
   const amount = Math.max(0, Number(form.amount) || 0);
   const contentValue = Math.max(amount - deliveryFee, 0);
   const savedRecipients = database.recipients.filter((recipient) => recipient.merchantId === user?.id);
+  const selectedGovernorate = resolveDeliveryRegion(form.governorate);
+  const localitySuggestions = selectedGovernorate
+    ? deliveryLocalities.filter((item) => item.governorate === selectedGovernorate.name)
+    : deliveryLocalities;
   const selectedType = orderTypes.find((type) => type.id === form.type) ?? orderTypes[0];
   const totalCollection = amount;
   const additionalFeeDetails = [
@@ -71,8 +75,11 @@ export function NewOrder() {
   function chooseSaved(id: string) {
     const recipient = savedRecipients.find((item) => item.id === id);
     if (!recipient) return;
-    const match = governorates.find((item) => item.name === recipient.city || item.cities.includes(recipient.city));
-    setForm({ ...form, name: recipient.name, phone: recipient.phone, governorate: match?.name ?? "", city: recipient.city, address: recipient.address, favorite: recipient.favorite });
+    const savedGovernorate = recipient.governorate?.trim() ?? "";
+    const match = savedGovernorate
+      ? resolveDeliveryRegion(savedGovernorate, recipient.city)
+      : resolveDeliveryRegion("", recipient.city);
+    setForm({ ...form, name: recipient.name, phone: recipient.phone, governorate: savedGovernorate || match?.name || "", city: recipient.city, address: recipient.address, favorite: recipient.favorite });
     showToast("تم تعبئة بيانات المستلم المحفوظ.");
   }
 
@@ -82,6 +89,7 @@ export function NewOrder() {
     if (!/^05\d{8}$/.test(form.phone)) return showToast("أدخل رقم جوال صحيح مكوّن من 10 أرقام.", "error");
     if (!form.name.trim()) return showToast("أدخل اسم المستلم.", "error");
     if (!form.governorate.trim() || !form.city.trim()) return showToast("أدخل المحافظة والمدينة أو المنطقة للتوصيل.", "error");
+    if (!region) return showToast("اختر محافظة ومدينة متطابقتين من الاقتراحات، واكتب الحي والشارع في وصف العنوان.", "error");
     if (!form.address.trim()) return showToast("أدخل عنوان التوصيل بالتفصيل.", "error");
     if (!form.amount || Number(form.amount) < 0) return showToast("أدخل قيمة محتويات الطرد.", "error");
 
@@ -103,7 +111,7 @@ export function NewOrder() {
       };
       updateDatabase((current) => {
         const alreadySaved = current.recipients.some((recipient) => recipient.merchantId === user.id && recipient.phone === form.phone);
-        const recipients = form.favorite && !alreadySaved ? [{ id: uid("recipient"), merchantId: user.id, name: form.name.trim(), phone: form.phone, city: form.city.trim(), address: form.address.trim(), favorite: true }, ...current.recipients] : current.recipients;
+        const recipients = form.favorite && !alreadySaved ? [{ id: uid("recipient"), merchantId: user.id, name: form.name.trim(), phone: form.phone, governorate: form.governorate.trim(), city: form.city.trim(), address: form.address.trim(), favorite: true }, ...current.recipients] : current.recipients;
         return { ...current, orders: [order, ...current.orders], recipients, nextOrder: current.nextOrder + 1 };
       });
       notify({ userId: user.id, title: "تم إنشاء طرد جديد", message: `تم إنشاء الطرد ${trackingNumber} وحالته قيد الإنشاء.`, icon: "edit" });
@@ -133,9 +141,11 @@ export function NewOrder() {
           <span className={deliveryZone === "interior" ? "delivery-rate is-active" : "delivery-rate"}>الداخل <strong>{membershipPrices.interior} ₪</strong></span>
         </div>
         <div className="form-grid">
-          <Field label="المحافظة" placeholder="اكتب المحافظة، مثلًا: الخليل أو القدس" value={form.governorate} onChange={(event) => setForm({ ...form, governorate: event.target.value })} autoComplete="address-level1" />
-          <Field label="المدينة أو المنطقة" placeholder="اكتب المدينة أو المنطقة" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} autoComplete="address-level2" />
+          <Field label="المحافظة" placeholder="اكتب أو اختر المحافظة" list="almadina-governorates" value={form.governorate} onChange={(event) => setForm({ ...form, governorate: event.target.value })} autoComplete="address-level1" />
+          <Field label="المدينة أو المنطقة" placeholder="ابحث أو اكتب المدينة أو المنطقة" list="almadina-localities" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} autoComplete="address-level2" />
         </div>
+        <datalist id="almadina-governorates">{governorates.map((item) => <option key={item.name} value={item.name} />)}</datalist>
+        <datalist id="almadina-localities">{localitySuggestions.map((item) => <option key={`${item.governorate}-${item.name}`} value={item.name} label={item.governorate} />)}</datalist>
         <Field label="الشارع / وصف العنوان" placeholder="مثلًا: شارع نابلس، بالقرب من دوار الساعة" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} />
         <Field
           label="تاريخ التوصيل المفضل (اختياري)"

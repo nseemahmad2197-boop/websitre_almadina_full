@@ -13,6 +13,16 @@ class FakeD1Statement {
   }
 
   async first() {
+    if (this.sql.startsWith("INSERT INTO almadina_rate_limits")) {
+      const [keyHash, action, resetAt, now] = this.values;
+      const current = this.database.rateLimits.get(keyHash);
+      const next = !current || current.reset_at <= now
+        ? { key_hash: keyHash, action, request_count: 1, reset_at: resetAt }
+        : { ...current, action, request_count: current.request_count + 1 };
+      this.database.rateLimits.set(keyHash, next);
+      return { request_count: next.request_count, reset_at: next.reset_at };
+    }
+
     if (this.sql.startsWith("SELECT revision FROM almadina_state")) {
       return this.database.state ? { revision: this.database.state.revision } : null;
     }
@@ -34,6 +44,10 @@ class FakeD1Statement {
       return [...this.database.credentials.values()].find((credential) => credential.user_id === this.values[0]) ?? null;
     }
 
+    if (this.sql.startsWith("SELECT credential_id FROM almadina_passkey_login_credentials WHERE user_id")) {
+      return [...this.database.passkeyLoginCredentials.values()].find((credential) => credential.user_id === this.values[0]) ?? null;
+    }
+
     if (this.sql.startsWith("SELECT challenge, origin, rp_id, expires_at FROM almadina_webauthn_challenges")) {
       return this.database.challenges.get(`${this.values[0]}:${this.values[2]}`) ?? null;
     }
@@ -42,9 +56,22 @@ class FakeD1Statement {
       return this.database.credentials.get(this.values[0]) ?? null;
     }
 
+    if (this.sql.startsWith("SELECT credentials.credential_id") && this.sql.includes("INNER JOIN almadina_passkey_login_credentials")) {
+      const credential = this.database.credentials.get(this.values[0]);
+      return credential && this.database.passkeyLoginCredentials.has(this.values[0]) ? credential : null;
+    }
+
     if (this.sql.startsWith("SELECT credential_id, user_id, public_key, counter, transports, device_type, backed_up FROM almadina_webauthn_credentials WHERE credential_id")) {
       const credential = this.database.credentials.get(this.values[0]);
       return credential?.user_id === this.values[1] ? credential : null;
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_webauthn_challenges") && this.sql.includes("RETURNING challenge")) {
+      const key = `${this.values[0]}:${this.values[2]}`;
+      const challenge = this.database.challenges.get(key) ?? null;
+      if (challenge?.user_id !== this.values[1]) return null;
+      this.database.challenges.delete(key);
+      return challenge;
     }
 
     throw new Error(`Unsupported mock D1 first() query: ${this.sql}`);
@@ -148,6 +175,23 @@ class FakeD1Statement {
       return { success: true, meta: { changes } };
     }
 
+    if (this.sql.startsWith("DELETE FROM almadina_passkey_login_credentials WHERE user_id")) {
+      let changes = 0;
+      for (const [credentialId, credential] of this.database.passkeyLoginCredentials) {
+        if (credential.user_id !== this.values[0]) continue;
+        this.database.passkeyLoginCredentials.delete(credentialId);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("INSERT INTO almadina_passkey_login_credentials")) {
+      this.database.passkeyLoginCredentials.set(this.values[0], {
+        credential_id: this.values[0], user_id: this.values[1], created_at: this.values[2],
+      });
+      return { success: true, meta: { changes: 1 } };
+    }
+
     if (this.sql.startsWith("DELETE FROM almadina_webauthn_challenges WHERE user_id")) {
       let changes = 0;
       for (const [key, challenge] of this.database.challenges) {
@@ -180,6 +224,16 @@ class FakeD1Statement {
       return { success: true, meta: { changes: Number(this.database.challenges.delete(`${this.values[0]}:${this.values[1]}`)) } };
     }
 
+    if (this.sql.startsWith("DELETE FROM almadina_rate_limits WHERE reset_at")) {
+      let changes = 0;
+      for (const [keyHash, rateLimit] of this.database.rateLimits) {
+        if (rateLimit.reset_at > this.values[0]) continue;
+        this.database.rateLimits.delete(keyHash);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
     throw new Error(`Unsupported mock D1 run() query: ${this.sql}`);
   }
 }
@@ -189,7 +243,9 @@ class FakeD1Database {
   sessions = new Map();
   appLocks = new Map();
   credentials = new Map();
+  passkeyLoginCredentials = new Map();
   challenges = new Map();
+  rateLimits = new Map();
 
   prepare(sql) {
     return new FakeD1Statement(this, sql);
@@ -212,8 +268,8 @@ async function loadWorker() {
   return worker;
 }
 
-async function call(worker, database, path, { method = "GET", payload, cookie, origin } = {}) {
-  const headers = new Headers();
+async function call(worker, database, path, { method = "GET", payload, cookie, origin, headers: extraHeaders } = {}) {
+  const headers = new Headers(extraHeaders);
   if (payload) headers.set("Content-Type", "application/json");
   if (cookie) headers.set("Cookie", cookie);
   if (origin) headers.set("Origin", origin);
@@ -1422,6 +1478,33 @@ test("recalculates progressive weight and dimension fees without trusting client
     snapshot = response.body;
   }
 
+  const conflictingDestination = {
+    ...snapshot.database.orders[0],
+    id: "parcel-conflicting-destination",
+    trackingNumber: "FORGED-CONFLICT",
+    governorate: "الخليل",
+    city: "حيفا",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const rejectedConflict = await call(worker, database, "database", {
+    method: "PUT",
+    cookie,
+    payload: {
+      revision: snapshot.revision,
+      database: {
+        ...snapshot.database,
+        orders: [conflictingDestination, ...snapshot.database.orders],
+        nextOrder: snapshot.database.nextOrder + 1,
+      },
+    },
+  });
+  assert.equal(rejectedConflict.status, 400);
+  assert.match(rejectedConflict.body.error, /تطابق المحافظة والمدينة/);
+  const unchangedAfterConflict = await call(worker, database, "database", { cookie });
+  assert.equal(unchangedAfterConflict.body.revision, snapshot.revision);
+  assert.equal(unchangedAfterConflict.body.database.orders.some((order) => order.id === conflictingDestination.id), false);
+
   const administrator = await call(worker, database, "login", {
     method: "POST",
     payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
@@ -1507,14 +1590,14 @@ test("stores the app-lock PIN only as a server hash and gates device biometrics 
   const cookie = sessionFrom(registration);
 
   const initialStatus = await call(worker, database, "security/status", { cookie });
-  assert.deepEqual(initialStatus.body, { enabled: false, biometricEnabled: false });
+  assert.deepEqual(initialStatus.body, { enabled: false, biometricEnabled: false, biometricLoginReady: false });
 
   const invalidPin = await call(worker, database, "security/pin", { method: "POST", cookie, payload: { pin: "12" } });
   assert.equal(invalidPin.status, 400);
 
   const enabled = await call(worker, database, "security/pin", { method: "POST", cookie, payload: { pin: "١٢٣٤" } });
   assert.equal(enabled.status, 200);
-  assert.deepEqual(enabled.body, { enabled: true, biometricEnabled: false });
+  assert.deepEqual(enabled.body, { enabled: true, biometricEnabled: false, biometricLoginReady: false });
   const storedLock = database.appLocks.get(registration.body.userId);
   assert.ok(storedLock.pin_hash.startsWith("pbkdf2:"));
   assert.ok(!storedLock.pin_hash.includes("1234"));
@@ -1526,18 +1609,81 @@ test("stores the app-lock PIN only as a server hash and gates device biometrics 
   assert.equal(verified.status, 200);
   assert.equal(verified.body.verified, true);
 
-  const registrationOptions = await call(worker, database, "security/webauthn/register/options", { method: "POST", cookie });
+  const registrationWithoutPin = await call(worker, database, "security/webauthn/register/options", { method: "POST", cookie, payload: {} });
+  assert.equal(registrationWithoutPin.status, 400);
+  const registrationOptions = await call(worker, database, "security/webauthn/register/options", { method: "POST", cookie, payload: { pin: "1234" } });
   assert.equal(registrationOptions.status, 200);
   assert.equal(registrationOptions.body.rp.id, "almadina.test");
   assert.equal(registrationOptions.body.authenticatorSelection.authenticatorAttachment, "platform");
+  assert.equal(registrationOptions.body.authenticatorSelection.residentKey, "required");
+  assert.equal(registrationOptions.body.authenticatorSelection.requireResidentKey, true);
   assert.equal(registrationOptions.body.authenticatorSelection.userVerification, "required");
   assert.equal(database.challenges.size, 1);
 
   const disabled = await call(worker, database, "security/disable", { method: "POST", cookie, payload: { pin: "1234" } });
   assert.equal(disabled.status, 200);
-  assert.deepEqual(disabled.body, { enabled: false, biometricEnabled: false });
+  assert.deepEqual(disabled.body, { enabled: false, biometricEnabled: false, biometricLoginReady: false });
   assert.equal(database.appLocks.size, 0);
   assert.equal(database.challenges.size, 0);
+});
+
+test("issues an anonymous discoverable-passkey challenge and consumes it only once", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+
+  const options = await call(worker, database, "passkey/login/options", { method: "POST", payload: {} });
+  assert.equal(options.status, 200);
+  assert.deepEqual(options.body.allowCredentials, []);
+  assert.equal(options.body.userVerification, "required");
+  const setCookie = options.headers.get("set-cookie");
+  assert.ok(setCookie?.includes("almadina_passkey_login="));
+  assert.match(setCookie, /HttpOnly/);
+  assert.match(setCookie, /SameSite=Strict/);
+  const ceremonyCookie = setCookie.split(";")[0];
+  assert.equal(database.challenges.size, 1);
+
+  const rejected = await call(worker, database, "passkey/login/verify", {
+    method: "POST",
+    cookie: ceremonyCookie,
+    payload: { id: "unknown-credential" },
+  });
+  assert.equal(rejected.status, 401);
+  assert.equal(database.challenges.size, 0);
+
+  const replayed = await call(worker, database, "passkey/login/verify", {
+    method: "POST",
+    cookie: ceremonyCookie,
+    payload: { id: "unknown-credential" },
+  });
+  assert.equal(replayed.status, 401);
+  assert.equal(replayed.body.error, rejected.body.error);
+
+  for (let attempt = 1; attempt < 30; attempt += 1) {
+    const allowed = await call(worker, database, "passkey/login/options", { method: "POST", payload: {} });
+    assert.equal(allowed.status, 200);
+  }
+  const limited = await call(worker, database, "passkey/login/options", { method: "POST", payload: {} });
+  assert.equal(limited.status, 429);
+  assert.match(limited.body.error, /محاولات كثيرة/);
+  assert.equal(database.rateLimits.size, 2);
+
+  const otherAddress = await call(worker, database, "passkey/login/options", {
+    method: "POST",
+    payload: {},
+    headers: { "x-forwarded-for": "203.0.113.20", "cf-connecting-ip": "198.51.100.1" },
+  });
+  assert.equal(otherAddress.status, 200);
+  const spoofedCloudflareHeader = await call(worker, database, "passkey/login/options", {
+    method: "POST",
+    payload: {},
+    headers: { "x-forwarded-for": "203.0.113.20", "cf-connecting-ip": "198.51.100.99" },
+  });
+  assert.equal(spoofedCloudflareHeader.status, 200);
+  assert.equal(database.rateLimits.size, 3);
+  for (const [keyHash, rateLimit] of database.rateLimits) {
+    assert.match(keyHash, /^[a-f0-9]{64}$/);
+    assert.match(rateLimit.action, /^passkey-login-(options|verify)$/);
+  }
 });
 
 test("deletes only the authenticated eligible account and preserves every other hosted record", async () => {

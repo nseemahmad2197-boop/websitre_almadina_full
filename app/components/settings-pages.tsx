@@ -18,9 +18,8 @@ export function SettingsPage() {
 export function SecurityPage() {
   const { user, appLock, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, setView, showToast } = useApp();
   const [pin, setPin] = useState("");
-  const [pinMode, setPinMode] = useState<"setup" | "disable-lock" | "disable-biometric" | null>(null);
+  const [pinMode, setPinMode] = useState<"setup" | "disable-lock" | "enable-biometric" | "disable-biometric" | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [biometricBusy, setBiometricBusy] = useState(false);
 
   async function submitPin(value: string) {
     if (!pinMode) return;
@@ -29,7 +28,9 @@ export function SecurityPage() {
       ? await enableAppLock(value)
       : pinMode === "disable-lock"
         ? await disableAppLock(value)
-        : await disableBiometricUnlock(value);
+        : pinMode === "enable-biometric"
+          ? await enableBiometricUnlock(value)
+          : await disableBiometricUnlock(value);
     setSubmitting(false);
     setPin("");
     if (completed) setPinMode(null);
@@ -47,19 +48,27 @@ export function SecurityPage() {
   const biometricSubtitle = !appLock.enabled
     ? "فعّل قفل التطبيق وحدد رمزًا أولًا"
     : appLock.biometricEnabled
-      ? "مفعّلة على هذا الحساب"
+      ? appLock.biometricLoginReady
+        ? "مفعّلة للدخول بعد تسجيل الخروج"
+        : "مفعّلة داخل الجلسة؛ أوقفها ثم أعد ربطها للدخول بعد الخروج"
       : appLock.biometricAvailable
         ? "استخدم بصمة أو Face ID أو رمز حماية الجهاز"
         : "متاحة على الهواتف وiPad المدعومة عبر HTTPS";
-  const pinTitle = pinMode === "setup" ? "أدخل رمز قفل جديدًا (4 أرقام)" : pinMode === "disable-lock" ? "أدخل رمز القفل لإيقافه" : "أدخل رمز القفل لإيقاف البصمة";
+  const pinTitle = pinMode === "setup"
+    ? "أدخل رمز قفل جديدًا (4 أرقام)"
+    : pinMode === "disable-lock"
+      ? "أدخل رمز القفل لإيقافه"
+      : pinMode === "enable-biometric"
+        ? "أدخل رمز القفل لتفعيل البصمة"
+        : "أدخل رمز القفل لإيقاف البصمة";
 
   return <div className="page-content animate-page"><PageHeader title="الأمان والخصوصية" onBack={() => setView("settings")} />
     <div className="settings-group">
       <SettingsRow icon="lock" title="قفل التطبيق" subtitle={appLock.enabled ? "رمز القفل مفعّل ومشفّر" : "احمِ حسابك برمز دخول"} action={<Toggle checked={appLock.enabled} disabled={!appLock.ready || submitting} onChange={(value) => { setPin(""); setPinMode(value ? "setup" : "disable-lock"); showToast(value ? "أدخل رمزًا جديدًا من 4 أرقام." : "أدخل رمز القفل الحالي للتأكيد.", "info"); }} label="قفل التطبيق" />} />
-      <SettingsRow icon="fingerprint" title="الدخول بالبصمة" subtitle={biometricSubtitle} action={<Toggle checked={appLock.biometricEnabled} disabled={!appLock.ready || !appLock.enabled || biometricBusy || (!appLock.biometricAvailable && !appLock.biometricEnabled)} onChange={(value) => { if (!value) { setPin(""); setPinMode("disable-biometric"); return; } setBiometricBusy(true); void enableBiometricUnlock().finally(() => setBiometricBusy(false)); }} label="الدخول بالبصمة" />} />
+      <SettingsRow icon="fingerprint" title="الدخول بالبصمة" subtitle={biometricSubtitle} action={<Toggle checked={appLock.biometricEnabled} disabled={!appLock.ready || !appLock.enabled || submitting || (!appLock.biometricAvailable && !appLock.biometricEnabled)} onChange={(value) => { setPin(""); setPinMode(value ? "enable-biometric" : "disable-biometric"); if (value) showToast("أدخل رمز قفل التطبيق لتأكيد ربط حماية الجهاز.", "info"); }} label="الدخول بالبصمة" />} />
     </div>
     {pinMode && <SectionCard title={pinTitle} className="pin-card" action={<Button type="button" variant="ghost" disabled={submitting} onClick={() => { setPinMode(null); setPin(""); }}>إلغاء</Button>}><div className="pin-dots">{[0, 1, 2, 3].map((index) => <span key={index} className={index < pin.length ? "is-filled" : ""} />)}</div><div className="pin-keypad">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "delete"].map((value) => <button type="button" disabled={submitting} key={value} onClick={() => press(value)}>{value === "clear" ? "C" : value === "delete" ? <Icon name="arrowLeft" size={20} /> : value}</button>)}</div>{submitting && <p className="pin-card__status"><span className="spinner" /> جارٍ حفظ إعدادات الأمان...</p>}</SectionCard>}
-    <SectionCard className="security-note"><p><Icon name="shield" size={18} /> يعمل قفل التطبيق داخل الجلسة الحالية. بعد تسجيل الخروج الكامل ستحتاج إلى كلمة مرور الحساب مرة أخرى.</p></SectionCard>
+    <SectionCard className="security-note"><p><Icon name="shield" size={18} /> عند تفعيل البصمة وربطها بهذا الجهاز، يمكنك تسجيل الدخول بها بعد الخروج للحسابات العادية والبريميوم والموظف والمسؤول. تبقى كلمة المرور متاحة دائمًا.</p></SectionCard>
     {user?.role !== "admin" && <div className="settings-group"><SettingsRow icon="trash" title="حذف الحساب" subtitle="راجع الشروط قبل الحذف النهائي" danger onClick={() => setView("delete-account")} /></div>}
   </div>;
 }

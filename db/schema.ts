@@ -36,6 +36,12 @@ export const almadinaWebAuthnCredentials = sqliteTable("almadina_webauthn_creden
   updatedAt: text("updated_at").notNull(),
 }, (table) => [index("almadina_webauthn_credentials_user_id_idx").on(table.userId)]);
 
+export const almadinaPasskeyLoginCredentials = sqliteTable("almadina_passkey_login_credentials", {
+  credentialId: text("credential_id").primaryKey(),
+  userId: text("user_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [index("almadina_passkey_login_credentials_user_id_idx").on(table.userId)]);
+
 export const almadinaWebAuthnChallenges = sqliteTable("almadina_webauthn_challenges", {
   sessionHash: text("session_hash").notNull(),
   userId: text("user_id").notNull(),
@@ -46,3 +52,10 @@ export const almadinaWebAuthnChallenges = sqliteTable("almadina_webauthn_challen
   expiresAt: integer("expires_at").notNull(),
   createdAt: text("created_at").notNull(),
 }, (table) => [primaryKey({ columns: [table.sessionHash, table.kind] })]);
+
+export const almadinaRateLimits = sqliteTable("almadina_rate_limits", {
+  keyHash: text("key_hash").primaryKey(),
+  action: text("action").notNull(),
+  requestCount: integer("request_count").notNull().default(0),
+  resetAt: integer("reset_at").notNull(),
+}, (table) => [index("almadina_rate_limits_reset_at_idx").on(table.resetAt)]);

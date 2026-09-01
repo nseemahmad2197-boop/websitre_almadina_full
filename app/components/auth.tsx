@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
+import { detectBiometricAvailability } from "../lib/app-lock-client";
 import { AVAILABLE_ACCOUNTS_EVENT, AVAILABLE_ACCOUNTS_STORAGE_KEY, readAvailableAccounts, type AvailableAccount } from "../lib/available-accounts";
 import type { Order } from "../lib/data";
 import { Icon } from "./icon";
@@ -9,7 +10,7 @@ import { TrackingHistory } from "./tracking-history";
 import { Avatar, Brand, Button, Field, IconButton, Modal, StatusPill } from "./ui";
 
 export function Authentication() {
-  const { login, register, preferences, updatePreferences, showToast, openScanner } = useApp();
+  const { login, loginWithBiometric, register, preferences, updatePreferences, showToast, openScanner } = useApp();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,6 +21,8 @@ export function Authentication() {
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricBusy, setBiometricBusy] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", store: "", email: "", password: "", confirm: "" });
 
   useEffect(() => {
@@ -37,10 +40,18 @@ export function Authentication() {
     };
   }, []);
 
-  const passwordToggle = <button type="button" className="field__action" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}><Icon name={showPassword ? "eyeOff" : "eye"} size={20} /></button>;
+  useEffect(() => {
+    let active = true;
+    void detectBiometricAvailability().then((available) => { if (active) setBiometricAvailable(available); });
+    return () => { active = false; };
+  }, []);
+
+  const loginOperationBusy = busy || biometricBusy;
+  const passwordToggle = <button type="button" className="field__action" disabled={loginOperationBusy} onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}><Icon name={showPassword ? "eyeOff" : "eye"} size={20} /></button>;
 
   async function onLogin(event: FormEvent) {
     event.preventDefault();
+    if (loginOperationBusy) return;
     setError("");
     if (!email.trim() || !password) return setError("أدخل البريد الإلكتروني وكلمة المرور.");
     setBusy(true);
@@ -55,6 +66,7 @@ export function Authentication() {
 
   async function onRegister(event: FormEvent) {
     event.preventDefault();
+    if (busy) return;
     setError("");
     if (!form.name.trim() || !form.store.trim()) return setError("أدخل الاسم الكامل واسم المتجر.");
     if (!/^05\d{8}$/.test(form.phone)) return setError("أدخل رقم جوال مكوّن من 10 أرقام ويبدأ بـ 05.");
@@ -69,6 +81,17 @@ export function Authentication() {
       setError(error instanceof Error ? error.message : "تعذّر إنشاء الحساب. حاول مرة أخرى.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onBiometricLogin() {
+    if (loginOperationBusy) return;
+    setError("");
+    setBiometricBusy(true);
+    try {
+      await loginWithBiometric();
+    } finally {
+      setBiometricBusy(false);
     }
   }
 
@@ -87,11 +110,12 @@ export function Authentication() {
   }
 
   function chooseAvailableAccount(account: AvailableAccount) {
+    if (loginOperationBusy) return;
     setEmail(account.email);
     setPassword("");
     setError("");
     setAccountsOpen(false);
-    showToast(`تم اختيار حساب ${account.name}. أدخل كلمة المرور للمتابعة.`, "info");
+    showToast(`تم اختيار حساب ${account.name} وملء بريده لتسجيل الدخول بكلمة المرور. عند استخدام حماية الجهاز سيختار الجهاز الحساب المرتبط بالبصمة.`, "info");
   }
 
   return (
@@ -110,14 +134,15 @@ export function Authentication() {
           <header className="auth-card__header"><h1>{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h1><p>{mode === "login" ? "أهلًا بعودتك — أدخل بيانات حسابك للمتابعة" : "سجّل متجرك وابدأ التوصيل مع المدينة إكسبرس"}</p></header>
           {mode === "login" ? (
             <form className="auth-form" onSubmit={onLogin} noValidate>
-              <Field icon="mail" type="email" placeholder="البريد الإلكتروني" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" dir="ltr" />
-              <Field icon="lock" type={showPassword ? "text" : "password"} placeholder="كلمة المرور" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" suffix={passwordToggle} />
+              <Field icon="mail" type="email" placeholder="البريد الإلكتروني" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" dir="ltr" disabled={loginOperationBusy} />
+              <Field icon="lock" type={showPassword ? "text" : "password"} placeholder="كلمة المرور" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" suffix={passwordToggle} disabled={loginOperationBusy} />
               {error && <p className="form-error"><Icon name="alert" size={15} />{error}</p>}
-              <Button type="submit" full loading={busy}>تسجيل الدخول</Button>
+              <Button type="submit" full loading={busy} disabled={biometricBusy}>تسجيل الدخول</Button>
+              {biometricAvailable && <Button type="button" variant="secondary" icon="fingerprint" full loading={biometricBusy} disabled={busy} onClick={() => { void onBiometricLogin(); }}>الدخول ببصمة الوجه أو حماية الجهاز</Button>}
               <button
                 type="button"
                 className="available-accounts-button"
-                disabled={availableAccounts.length === 0}
+                disabled={availableAccounts.length === 0 || loginOperationBusy}
                 aria-haspopup="dialog"
                 onClick={() => setAccountsOpen(true)}
               >
@@ -126,7 +151,7 @@ export function Authentication() {
                 {availableAccounts.length ? <span className="available-accounts-button__count">{availableAccounts.length.toLocaleString("ar-EG")}</span> : <Icon name="lock" size={17} />}
               </button>
               <div className="auth-divider"><span>أو</span></div>
-              <p className="auth-switch">ليس لديك حساب؟ <button type="button" onClick={() => { setMode("register"); setError(""); }}>أنشئ حسابًا جديدًا</button></p>
+              <p className="auth-switch">ليس لديك حساب؟ <button type="button" disabled={loginOperationBusy} onClick={() => { setMode("register"); setError(""); }}>أنشئ حسابًا جديدًا</button></p>
             </form>
           ) : (
             <form className="auth-form" onSubmit={onRegister} noValidate>
@@ -153,12 +178,12 @@ export function Authentication() {
       {trackedOrder && <Modal onClose={() => setTrackedOrder(null)} title="تتبّع الطرد" className="tracking-modal"><div className="tracking-modal__number"><Icon name="package" size={32} /><div><strong dir="ltr">{trackedOrder.trackingNumber}</strong><span>{trackedOrder.recipientName} · {trackedOrder.city}</span></div><StatusPill status={trackedOrder.status} /></div><TrackingHistory order={trackedOrder} compact /><Button full onClick={() => setTrackedOrder(null)}>حسنًا</Button></Modal>}
       {accountsOpen && (
         <Modal title="الحسابات المتاحة" onClose={() => setAccountsOpen(false)} className="available-accounts-modal" sheet>
-          <p className="modal-description">اختر حسابًا سبق استخدامه على هذا الجهاز. سنملأ البريد الإلكتروني فقط، ثم أدخل كلمة المرور لحماية حسابك.</p>
+          <p className="modal-description">اختيار حساب من هذه القائمة يملأ البريد الإلكتروني لتسجيل الدخول بكلمة المرور فقط. عند الضغط على زر حماية الجهاز، يعرض الجهاز الحسابات المرتبطة بالبصمة ويختار المستخدم منها.</p>
           <div className="account-list available-account-list">
             {availableAccounts.map((account) => {
               const selected = email.trim().toLowerCase() === account.email;
               return (
-                <button type="button" key={account.id} className={`account-entry ${selected ? "is-active" : ""}`} onClick={() => chooseAvailableAccount(account)}>
+                <button type="button" key={account.id} className={`account-entry ${selected ? "is-active" : ""}`} disabled={loginOperationBusy} onClick={() => chooseAvailableAccount(account)}>
                   <Avatar name={account.name} color={account.avatarColor} />
                   <span>
                     <strong>{account.name}</strong>

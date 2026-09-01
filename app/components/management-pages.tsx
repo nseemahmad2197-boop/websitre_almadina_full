@@ -3,10 +3,11 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { downloadDocument, importTemplate, ordersCsv } from "../lib/download";
-import { createTrackingEvent, formatDate, getDeliveryFee, getOversizeFee, getWeightFee, governorates, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getWeightFee, governorates, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Order } from "../lib/data";
+import { parseParcelImportCsv, type ParcelImportCsvLayout, type ParcelImportRow } from "../lib/import-csv";
 import { OrderCard } from "./dashboard";
 import { Icon } from "./icon";
-import { Avatar, Button, EmptyState, Field, IconButton, Modal, PageHeader, SectionCard, SelectField } from "./ui";
+import { Avatar, Button, EmptyState, Field, IconButton, Modal, PageHeader, SectionCard } from "./ui";
 
 export function ReturnsPage() {
   const { database, user, setView, showToast } = useApp();
@@ -125,7 +126,7 @@ export function CollectionsPage() {
 
   const selectedOrders = selectedInvoice ? invoiceOrders(selectedInvoice) : [];
   const regions = selectedOrders.reduce<Record<string, { delivered: number; returned: number }>>((result, order) => {
-    const region = resolveDeliveryRegion(order.city)?.name;
+    const region = resolveDeliveryRegion(order.governorate ?? "", order.city)?.name;
     const key = region === "القدس" ? "القدس" : region === "الداخل" ? "الداخل" : "الضفة الغربية";
     result[key] ??= { delivered: 0, returned: 0 };
     if (order.status === "returned") result[key].returned += 1;
@@ -176,21 +177,26 @@ export function RecipientsPage() {
   const { database, user, updateDatabase, showToast, confirm } = useApp();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", city: "", address: "" });
-  const recipients = database.recipients.filter((item) => item.merchantId === user?.id && (!query || `${item.name} ${item.phone} ${item.city}`.includes(query)));
+  const [form, setForm] = useState({ name: "", phone: "", governorate: "", city: "", address: "" });
+  const selectedGovernorate = resolveDeliveryRegion(form.governorate);
+  const localitySuggestions = selectedGovernorate
+    ? deliveryLocalities.filter((item) => item.governorate === selectedGovernorate.name)
+    : deliveryLocalities;
+  const recipients = database.recipients.filter((item) => item.merchantId === user?.id && (!query || `${item.name} ${item.phone} ${item.governorate ?? ""} ${item.city}`.includes(query)));
 
   function save(event: FormEvent) {
     event.preventDefault();
     if (!user || !form.name.trim()) return showToast("أدخل اسم المستلم.", "error");
     if (!/^05\d{8}$/.test(form.phone)) return showToast("أدخل رقم جوال صحيحًا.", "error");
-    updateDatabase((current) => ({ ...current, recipients: [{ ...form, id: uid("recipient"), merchantId: user.id, favorite: true }, ...current.recipients] }));
-    setOpen(false); setForm({ name: "", phone: "", city: "", address: "" }); showToast("تمت إضافة المستلم إلى المفضلة.");
+    if (!form.governorate.trim() || !form.city.trim()) return showToast("أدخل المحافظة والمدينة أو المنطقة.", "error");
+    if (!resolveDeliveryRegion(form.governorate, form.city)) return showToast("اختر محافظة ومدينة متطابقتين من الاقتراحات.", "error");
+    const recipient = { ...form, name: form.name.trim(), governorate: form.governorate.trim(), city: form.city.trim(), address: form.address.trim(), id: uid("recipient"), merchantId: user.id, favorite: true };
+    updateDatabase((current) => ({ ...current, recipients: [recipient, ...current.recipients] }));
+    setOpen(false); setForm({ name: "", phone: "", governorate: "", city: "", address: "" }); showToast("تمت إضافة المستلم إلى المفضلة.");
   }
 
-  return <div className="page-content animate-page"><PageHeader title="المستلمون المفضلون" subtitle="احتفظ ببيانات العملاء الذين تتعامل معهم باستمرار" action={<Button icon="plus" onClick={() => setOpen(true)}>إضافة مستلم</Button>} /><Field icon="search" placeholder="ابحث باسم المستلم أو رقم الجوال..." value={query} onChange={(event) => setQuery(event.target.value)} wrapperClassName="search-field" />{recipients.length ? <div className="recipient-list">{recipients.map((recipient) => <article className="recipient-card" key={recipient.id}><Avatar name={recipient.name} color="#158754" /><div><strong>{recipient.name}</strong><a href={`tel:${recipient.phone}`} dir="ltr">{recipient.phone}</a><span>{recipient.city}{recipient.address && ` · ${recipient.address}`}</span></div><IconButton name="trash" label="حذف المستلم" className="is-danger" onClick={() => confirm({ title: "حذف المستلم؟", message: `ستُحذف بيانات ${recipient.name} من قائمة المستلمين المحفوظين.`, confirmLabel: "حذف", danger: true, onConfirm: () => { updateDatabase((current) => ({ ...current, recipients: current.recipients.filter((item) => item.id !== recipient.id) })); showToast("تم حذف المستلم."); } })} /></article>)}</div> : <EmptyState icon="users" title="لا يوجد مستلمون محفوظون" description="أضف المستلمين الذين تتعامل معهم باستمرار لتعبئة بياناتهم بسرعة." action="إضافة مستلم" onAction={() => setOpen(true)} />}{open && <Modal title="إضافة مستلم جديد" onClose={() => setOpen(false)} sheet><form className="modal-form" onSubmit={save}><Field icon="user" label="اسم المستلم" placeholder="الاسم الكامل" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><Field icon="phone" label="رقم الجوال" placeholder="05xxxxxxxx" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} dir="ltr" /><SelectField label="المحافظة" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })}><option value="">اختر المحافظة</option>{governates().map((name) => <option key={name}>{name}</option>)}</SelectField><Field label="العنوان التفصيلي" placeholder="الشارع والمعلم القريب" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /><Button type="submit" icon="user" full>إضافة المستلم</Button></form></Modal>}</div>;
+  return <div className="page-content animate-page"><PageHeader title="المستلمون المفضلون" subtitle="احتفظ ببيانات العملاء الذين تتعامل معهم باستمرار" action={<Button icon="plus" onClick={() => setOpen(true)}>إضافة مستلم</Button>} /><Field icon="search" placeholder="ابحث باسم المستلم أو رقم الجوال..." value={query} onChange={(event) => setQuery(event.target.value)} wrapperClassName="search-field" />{recipients.length ? <div className="recipient-list">{recipients.map((recipient) => <article className="recipient-card" key={recipient.id}><Avatar name={recipient.name} color="#158754" /><div><strong>{recipient.name}</strong><a href={`tel:${recipient.phone}`} dir="ltr">{recipient.phone}</a><span>{recipient.governorate ? `${recipient.governorate} · ` : ""}{recipient.city}{recipient.address && ` · ${recipient.address}`}</span></div><IconButton name="trash" label="حذف المستلم" className="is-danger" onClick={() => confirm({ title: "حذف المستلم؟", message: `ستُحذف بيانات ${recipient.name} من قائمة المستلمين المحفوظين.`, confirmLabel: "حذف", danger: true, onConfirm: () => { updateDatabase((current) => ({ ...current, recipients: current.recipients.filter((item) => item.id !== recipient.id) })); showToast("تم حذف المستلم."); } })} /></article>)}</div> : <EmptyState icon="users" title="لا يوجد مستلمون محفوظون" description="أضف المستلمين الذين تتعامل معهم باستمرار لتعبئة بياناتهم بسرعة." action="إضافة مستلم" onAction={() => setOpen(true)} />}{open && <Modal title="إضافة مستلم جديد" onClose={() => setOpen(false)} sheet><form className="modal-form" onSubmit={save}><Field icon="user" label="اسم المستلم" placeholder="الاسم الكامل" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><Field icon="phone" label="رقم الجوال" placeholder="05xxxxxxxx" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} dir="ltr" /><Field label="المحافظة" placeholder="اكتب أو اختر المحافظة" list="recipient-governorates" value={form.governorate} onChange={(event) => setForm({ ...form, governorate: event.target.value })} autoComplete="address-level1" /><Field label="المدينة أو المنطقة" placeholder="اكتب أو اختر المدينة أو المنطقة" list="recipient-localities" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} autoComplete="address-level2" /><datalist id="recipient-governorates">{governorates.map((item) => <option key={item.name} value={item.name} />)}</datalist><datalist id="recipient-localities">{localitySuggestions.map((item) => <option key={`${item.governorate}-${item.name}`} value={item.name} label={item.governorate} />)}</datalist><Field label="العنوان التفصيلي" placeholder="الشارع والمعلم القريب" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /><Button type="submit" icon="user" full>إضافة المستلم</Button></form></Modal>}</div>;
 }
-
-function governates() { return governorates.map((item) => item.name); }
 
 export function NotificationsPage() {
   const { database, user, updateDatabase, clearNotices, setView, confirm, showToast } = useApp();
@@ -237,40 +243,49 @@ export function ImportPage() {
   const { user, updateDatabase, setView, showToast } = useApp();
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
-  const [rows, setRows] = useState<string[][]>([]);
+  const [rows, setRows] = useState<ParcelImportRow[]>([]);
+  const [layout, setLayout] = useState<ParcelImportCsvLayout>("governorate-city");
 
   function openFile(file?: File) {
     if (!file) return;
     if (!/\.(csv|txt)$/i.test(file.name)) return showToast("احفظ ملف Excel بصيغة CSV ثم ارفعه هنا.", "error");
     const reader = new FileReader();
     reader.onload = () => {
-      const text = String(reader.result ?? "").replace(/^\uFEFF/, "");
-      const parsed = text.split(/\r?\n/).filter(Boolean).slice(1).map((line) => line.split(",").map((cell) => cell.replace(/^"|"$/g, "").trim()));
-      if (!parsed.length) return showToast("الملف لا يحتوي على طلبات صالحة.", "error");
-      setFileName(file.name); setRows(parsed); showToast(`تم العثور على ${parsed.length} طلب في الملف.`);
+      const parsed = parseParcelImportCsv(String(reader.result ?? ""));
+      if (!parsed.rows.length) return showToast("الملف لا يحتوي على طلبات صالحة.", "error");
+      setFileName(file.name); setRows(parsed.rows); setLayout(parsed.layout);
+      showToast(`تم العثور على ${parsed.rows.length} طلب في الملف${parsed.layout === "legacy-region" ? " باستخدام تنسيق المنطقة القديم" : ""}.`);
     };
     reader.readAsText(file);
   }
 
   function importRows() {
     if (!user || !rows.length) return;
+    const validRows = rows.filter((row) => row.name && row.phone);
+    if (!validRows.length) return showToast("لا توجد صفوف تحتوي على اسم مستلم ورقم جوال.", "error");
+    const invalidRows = validRows.filter((row) => (
+      (layout === "governorate-city" && (!row.governorate || !row.city))
+      || !resolveDeliveryRegion(row.governorate, row.city)
+    ));
+    if (invalidRows.length) return showToast(`تعذّر تحديد محافظة ومدينة متطابقتين في ${invalidRows.length.toLocaleString("ar-EG")} صف. استخدم القيم الموجودة في قوائم المناطق.`, "error");
     updateDatabase((current) => {
       let counter = current.nextOrder;
-      const created: Order[] = rows.filter((row) => row[0] && row[1]).map((row) => {
-        const region = governorates.find((item) => item.name === row[2] || item.cities.includes(row[2]));
-        const lengthCm = parseDimensionCm(row[6]);
-        const widthCm = parseDimensionCm(row[7]);
-        const heightCm = parseDimensionCm(row[8]);
-        const weight = normalizeWeightOption(row[9]);
+      const created: Order[] = validRows.map((row) => {
+        const region = resolveDeliveryRegion(row.governorate, row.city);
+        if (!region) throw new Error("منطقة توصيل غير معروفة في ملف الاستيراد.");
+        const lengthCm = parseDimensionCm(row.length);
+        const widthCm = parseDimensionCm(row.width);
+        const heightCm = parseDimensionCm(row.height);
+        const weight = normalizeWeightOption(row.weight);
         const weightFee = getWeightFee(weight);
         const oversizeFee = getOversizeFee(lengthCm, widthCm, heightCm);
         const dimensions = [lengthCm, widthCm, heightCm].some(Boolean) ? `${lengthCm ?? 0} × ${widthCm ?? 0} × ${heightCm ?? 0} سم` : "غير محددة";
         const now = new Date().toISOString();
         const order: Order = {
           id: uid("order"), trackingNumber: `ALX-${counter++}`, merchantId: user.id, merchantName: user.name, merchantStore: user.store,
-          recipientName: row[0], recipientPhone: row[1], governorate: region?.name, city: row[2] || "الخليل", address: row[3] || "يُحدد لاحقًا",
-          pickupAddress: user.store, amount: Number(row[4]) || 0, deliveryFee: getDeliveryFee(region ?? governorates[0], user.membership) + weightFee + oversizeFee,
-          content: row[5] || "", weight, dimensions, lengthCm, widthCm, heightCm, weightFee, oversizeFee,
+          recipientName: row.name, recipientPhone: row.phone, governorate: region.name, city: row.city, address: row.address || "يُحدد لاحقًا",
+          pickupAddress: user.store, amount: Number(row.amount) || 0, deliveryFee: getDeliveryFee(region, user.membership) + weightFee + oversizeFee,
+          content: row.content, weight, dimensions, lengthCm, widthCm, heightCm, weightFee, oversizeFee,
           notes: "", privateNotes: "", reference: "", type: "طرد عادي", status: "draft", courierName: "بانتظار تعيين المندوب",
           trackingEvents: [createTrackingEvent("draft", user.name, { location: "مع المرسل", note: "تم إنشاء الطرد عبر ملف الاستيراد وحالته قيد الإنشاء.", createdAt: now })],
           createdAt: now, updatedAt: now, deleted: false,
@@ -279,10 +294,10 @@ export function ImportPage() {
       });
       return { ...current, orders: [...created, ...current.orders], nextOrder: counter };
     });
-    showToast(`تم استيراد ${rows.length} طرد بحالة قيد الإنشاء.`); setView("shipments");
+    showToast(`تم استيراد ${validRows.length} طرد بحالة قيد الإنشاء.`); setView("shipments");
   }
 
-  return <div className="page-content animate-page"><PageHeader title="استيراد طرود من Excel" subtitle="أنشئ عدة طرود دفعة واحدة" onBack={() => setView("home")} /><SectionCard title="تعليمات الاستيراد" icon="info"><ol className="instruction-list"><li>حمّل نموذج الاستيراد وافتحه باستخدام Excel أو Google Sheets.</li><li>املأ الاسم ورقم الجوال والمدينة والعنوان وقيمة الطرد.</li><li>اختر الوزن، وأدخل الأبعاد اختياريًا؛ يحسب النظام رسوم الوزن والحجم تدريجيًا.</li><li>احفظ الملف بصيغة CSV ثم اختره من منطقة الرفع.</li></ol><Button variant="outline" icon="download" onClick={() => { downloadDocument("نموذج-استيراد-طرود-المدينة-إكسبرس.csv", importTemplate); showToast("تم تنزيل نموذج الاستيراد."); }}>تحميل نموذج الاستيراد</Button></SectionCard><button className={`upload-zone ${fileName ? "has-file" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); openFile(event.dataTransfer.files[0]); }}><Icon name="upload" size={42} /><strong>{fileName || "اسحب ملف CSV إلى هنا أو اضغط لاختياره"}</strong><span>{rows.length ? `${rows.length} طلب جاهز للاستيراد` : "ملفات CSV المتوافقة مع Excel — بحد أقصى 1000 طلب"}</span></button><input ref={inputRef} type="file" accept=".csv,.txt,.xls,.xlsx" className="sr-only" onChange={(event) => openFile(event.target.files?.[0])} />{rows.length > 0 && <Button icon="upload" full onClick={importRows}>استيراد {rows.length} طلب</Button>}</div>;
+  return <div className="page-content animate-page"><PageHeader title="استيراد طرود من Excel" subtitle="أنشئ عدة طرود دفعة واحدة" onBack={() => setView("home")} /><SectionCard title="تعليمات الاستيراد" icon="info"><ol className="instruction-list"><li>حمّل نموذج الاستيراد وافتحه باستخدام Excel أو Google Sheets.</li><li>املأ الاسم ورقم الجوال، ثم أدخل المحافظة والمدينة في عمودين منفصلين.</li><li>يبقى القالب القديم ذو عمود المدينة أو المنطقة الواحد مدعومًا للمناطق التي يمكن تحديدها دون التباس.</li><li>اختر الوزن، وأدخل الأبعاد اختياريًا؛ يحسب النظام رسوم الوزن والحجم تدريجيًا.</li><li>احفظ الملف بصيغة CSV ثم اختره من منطقة الرفع.</li></ol><Button variant="outline" icon="download" onClick={() => { downloadDocument("نموذج-استيراد-طرود-المدينة-إكسبرس.csv", importTemplate); showToast("تم تنزيل نموذج الاستيراد."); }}>تحميل نموذج الاستيراد</Button></SectionCard><button className={`upload-zone ${fileName ? "has-file" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); openFile(event.dataTransfer.files[0]); }}><Icon name="upload" size={42} /><strong>{fileName || "اسحب ملف CSV إلى هنا أو اضغط لاختياره"}</strong><span>{rows.length ? `${rows.length} طلب جاهز للاستيراد${layout === "legacy-region" ? " · قالب قديم" : ""}` : "ملفات CSV المتوافقة مع Excel — بحد أقصى 1000 طلب"}</span></button><input ref={inputRef} type="file" accept=".csv,.txt" className="sr-only" onChange={(event) => openFile(event.target.files?.[0])} />{rows.length > 0 && <Button icon="upload" full onClick={importRows}>استيراد {rows.length} طلب</Button>}</div>;
 }
 
 export function ProfilePage() {

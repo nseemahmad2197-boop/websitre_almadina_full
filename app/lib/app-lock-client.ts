@@ -5,6 +5,7 @@ import {
   platformAuthenticatorIsAvailable,
   startAuthentication,
   startRegistration,
+  type AuthenticationResponseJSON,
   type PublicKeyCredentialCreationOptionsJSON,
   type PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/browser";
@@ -12,6 +13,7 @@ import {
 export type ServerAppLockStatus = {
   enabled: boolean;
   biometricEnabled: boolean;
+  biometricLoginReady: boolean;
 };
 
 export type AppLockState = ServerAppLockStatus & {
@@ -37,6 +39,18 @@ async function appLockRequest<T>(path: string, options: RequestInit = {}): Promi
   });
   const payload = await response.json() as T & { error?: string };
   if (!response.ok) throw new AppLockApiError(payload.error ?? "تعذّر التحقق من قفل التطبيق.", response.status);
+  return payload;
+}
+
+async function passkeyLoginRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`/api/almadina/passkey/login/${path}`, {
+    ...options,
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json", ...options.headers },
+  });
+  const payload = await response.json() as T & { error?: string };
+  if (!response.ok) throw new AppLockApiError(payload.error ?? "تعذّر تسجيل الدخول بحماية الجهاز.", response.status);
   return payload;
 }
 
@@ -73,8 +87,11 @@ export function removeAppLock(pin: string): Promise<ServerAppLockStatus> {
   return appLockRequest<ServerAppLockStatus>("disable", { method: "POST", body: JSON.stringify({ pin }) });
 }
 
-export async function registerBiometricUnlock(): Promise<ServerAppLockStatus> {
-  const optionsJSON = await appLockRequest<PublicKeyCredentialCreationOptionsJSON>("webauthn/register/options", { method: "POST" });
+export async function registerBiometricUnlock(pin: string): Promise<ServerAppLockStatus> {
+  const optionsJSON = await appLockRequest<PublicKeyCredentialCreationOptionsJSON>("webauthn/register/options", {
+    method: "POST",
+    body: JSON.stringify({ pin }),
+  });
   try {
     const credential = await startRegistration({ optionsJSON });
     return await appLockRequest<ServerAppLockStatus>("webauthn/register/verify", {
@@ -88,6 +105,22 @@ export async function registerBiometricUnlock(): Promise<ServerAppLockStatus> {
     if (name === "InvalidStateError") throw new AppLockApiError("حماية هذا الجهاز مسجلة مسبقًا لهذا الحساب.", 409);
     throw new AppLockApiError("لم يتمكن الجهاز من تفعيل البصمة أو حماية الجهاز.", 400);
   }
+}
+
+export async function startSignedOutBiometricAuthentication(): Promise<AuthenticationResponseJSON> {
+  const optionsJSON = await passkeyLoginRequest<PublicKeyCredentialRequestOptionsJSON>("options", { method: "POST" });
+  try {
+    return await startAuthentication({ optionsJSON });
+  } catch (error) {
+    if (error instanceof AppLockApiError) throw error;
+    const name = error instanceof Error ? error.name : "";
+    if (name === "NotAllowedError") throw new AppLockApiError("أُلغيت عملية الدخول أو انتهى وقتها. استخدم كلمة المرور عند الحاجة.", 400);
+    throw new AppLockApiError("تعذّر تسجيل الدخول بحماية الجهاز. استخدم كلمة المرور.", 400);
+  }
+}
+
+export function verifySignedOutBiometricAuthentication<T>(credential: AuthenticationResponseJSON): Promise<T> {
+  return passkeyLoginRequest<T>("verify", { method: "POST", body: JSON.stringify(credential) });
 }
 
 export async function authenticateWithBiometric(): Promise<{ verified: true }> {

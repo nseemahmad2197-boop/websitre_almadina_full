@@ -15,6 +15,20 @@
       "when": 1788226144753,
       "tag": "0001_good_dark_phoenix",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788264799499,
+      "tag": "0002_productive_timeslip",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788266815470,
+      "tag": "0003_bright_snowbird",
+      "breakpoints": true
     }
   ]
 }

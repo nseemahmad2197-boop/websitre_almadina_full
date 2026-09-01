@@ -9,7 +9,7 @@ import { Icon } from "./components/icon";
 import { Avatar, Brand, Button, Field, IconButton, Modal } from "./components/ui";
 import { AppContext, type ConfirmOptions, type ToastKind, type View } from "./lib/app-context";
 import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/available-accounts";
-import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiometricAvailability, getAppLockStatus, registerBiometricUnlock, removeAppLock, removeBiometricUnlock, verifyAppLockPin, type AppLockState } from "./lib/app-lock-client";
+import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiometricAvailability, getAppLockStatus, registerBiometricUnlock, removeAppLock, removeBiometricUnlock, startSignedOutBiometricAuthentication, verifyAppLockPin, verifySignedOutBiometricAuthentication, type AppLockState } from "./lib/app-lock-client";
 import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type NoticeAudience, type Preferences, type User } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
@@ -25,6 +25,7 @@ const EMPTY_APP_LOCK: AppLockState = {
   enabled: false,
   locked: false,
   biometricEnabled: false,
+  biometricLoginReady: false,
   biometricAvailable: false,
 };
 
@@ -192,7 +193,21 @@ function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employe
 }
 
 function ConfirmModal({ options, onClose }: { options: ConfirmOptions; onClose: () => void }) {
-  return <Modal onClose={onClose} className={`confirm-modal ${options.danger ? "confirm-modal--danger" : ""}`}><span className="confirm-modal__icon"><Icon name={options.danger ? "alert" : "info"} size={29} /></span><h2>{options.title}</h2><p>{options.message}</p><div className="confirm-modal__actions"><Button variant={options.danger ? "danger" : "primary"} onClick={() => { onClose(); options.onConfirm(); }}>{options.confirmLabel ?? "تأكيد"}</Button><Button variant="secondary" onClick={onClose}>إلغاء</Button></div></Modal>;
+  const [submitting, setSubmitting] = useState(false);
+
+  async function confirmAction() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const completed = await options.onConfirm();
+      if (completed === false) return setSubmitting(false);
+      onClose();
+    } catch {
+      setSubmitting(false);
+    }
+  }
+
+  return <Modal closeDisabled={submitting} onClose={onClose} className={`confirm-modal ${options.danger ? "confirm-modal--danger" : ""}`}><span className="confirm-modal__icon"><Icon name={options.danger ? "alert" : "info"} size={29} /></span><h2>{options.title}</h2><p>{options.message}</p><div className="confirm-modal__actions"><Button loading={submitting} variant={options.danger ? "danger" : "primary"} onClick={() => { void confirmAction(); }}>{options.confirmLabel ?? "تأكيد"}</Button><Button variant="secondary" disabled={submitting} onClick={onClose}>إلغاء</Button></div></Modal>;
 }
 
 export default function AlmadinaApplication() {
@@ -206,6 +221,7 @@ export default function AlmadinaApplication() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
   const [accountSwitcher, setAccountSwitcher] = useState(false);
+  const [accountSwitcherLogoutBusy, setAccountSwitcherLogoutBusy] = useState(false);
   const [scanner, setScanner] = useState<{ callback?: (value: string) => void } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const authoritativeDatabase = useRef<Database | null>(null);
@@ -215,6 +231,7 @@ export default function AlmadinaApplication() {
   const broadcastRequestIds = useRef<Map<string, string>>(new Map());
   const remoteMutationInFlight = useRef(false);
   const savingUpdates = useRef(false);
+  const logoutInFlight = useRef(false);
   const storedThemePreference = useRef<ThemePreference | null>(null);
   const knownNoticeIds = useRef<Set<string>>(new Set());
   const noticeBaselineUserId = useRef<string | null>(null);
@@ -301,6 +318,7 @@ export default function AlmadinaApplication() {
             enabled: true,
             locked: true,
             biometricEnabled: false,
+            biometricLoginReady: false,
             biometricAvailable,
             error: "تعذّر التحقق من حالة قفل التطبيق. أعد المحاولة أو سجّل الخروج.",
           };
@@ -478,6 +496,7 @@ export default function AlmadinaApplication() {
   }
 
   function updateDatabase(updater: DatabaseUpdater) {
+    if (logoutInFlight.current) return showToast("جارٍ تسجيل الخروج؛ لم يتم تطبيق تعديل جديد.", "info");
     if (!authoritativeDatabase.current) return showToast("يجب تسجيل الدخول قبل تعديل البيانات.", "error");
     visibleDatabase.current = updater(visibleDatabase.current);
     setDatabase(visibleDatabase.current);
@@ -486,12 +505,13 @@ export default function AlmadinaApplication() {
   }
 
   async function waitForPendingUpdates(): Promise<boolean> {
+    if (logoutInFlight.current) return false;
     const deadline = Date.now() + 6_000;
-    while ((savingUpdates.current || pendingUpdates.current.length) && Date.now() < deadline) {
+    while ((savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) && Date.now() < deadline) {
       if (!savingUpdates.current && pendingUpdates.current.length) void savePendingUpdates();
       await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
     }
-    return !savingUpdates.current && pendingUpdates.current.length === 0;
+    return !savingUpdates.current && !remoteMutationInFlight.current && pendingUpdates.current.length === 0;
   }
 
   async function verifyCollectionCode(invoiceId: string, verificationCode: string): Promise<boolean> {
@@ -514,7 +534,7 @@ export default function AlmadinaApplication() {
       return true;
     } catch (error) {
       if (error instanceof SharedApiError) {
-        if (error.status === 401) logout();
+        if (error.status === 401) clearLocalSession();
         showToast(error.message, "error");
         return false;
       }
@@ -558,7 +578,7 @@ export default function AlmadinaApplication() {
           visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), error.snapshot.database);
           setDatabase(visibleDatabase.current);
         }
-        if (error.status === 401) logout();
+        if (error.status === 401) clearLocalSession();
         showToast(error.message, "error");
         return null;
       }
@@ -596,7 +616,7 @@ export default function AlmadinaApplication() {
           visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), error.snapshot.database);
           setDatabase(visibleDatabase.current);
         }
-        if (error.status === 401) logout();
+        if (error.status === 401) clearLocalSession();
         showToast(error.message, "error");
         return null;
       }
@@ -623,7 +643,7 @@ export default function AlmadinaApplication() {
       return true;
     } catch (error) {
       if (error instanceof SharedApiError) {
-        if (error.status === 401) logout();
+        if (error.status === 401) clearLocalSession();
         showToast(error.message, "error");
         return false;
       }
@@ -673,7 +693,7 @@ export default function AlmadinaApplication() {
     }
   }
 
-  async function enableBiometricUnlock(): Promise<boolean> {
+  async function enableBiometricUnlock(pin: string): Promise<boolean> {
     const biometricAvailable = await detectBiometricAvailability();
     setAppLock((current) => ({ ...current, biometricAvailable }));
     if (!appLock.enabled) {
@@ -686,7 +706,7 @@ export default function AlmadinaApplication() {
     }
 
     try {
-      const status = await registerBiometricUnlock();
+      const status = await registerBiometricUnlock(pin);
       setAppLock((current) => ({ ...status, ready: true, locked: false, biometricAvailable: current.biometricAvailable }));
       showToast("تم ربط قفل التطبيق بحماية هذا الجهاز.");
       return true;
@@ -772,6 +792,19 @@ export default function AlmadinaApplication() {
     }
   }
 
+  async function loginWithBiometric(): Promise<boolean> {
+    try {
+      const credential = await startSignedOutBiometricAuthentication();
+      const snapshot = await verifySignedOutBiometricAuthentication<SharedSnapshot>(credential);
+      const account = snapshot.database.users.find((entry) => entry.id === snapshot.userId);
+      activateSession(snapshot, `أهلًا بك، ${account?.name ?? "بك"}.`);
+      return true;
+    } catch (error) {
+      showToast(readableAppLockError(error, "تعذّر تسجيل الدخول بحماية الجهاز. استخدم كلمة المرور."), "error");
+      return false;
+    }
+  }
+
   function clearLocalSession() {
     authoritativeDatabase.current = null;
     pendingUpdates.current = [];
@@ -789,9 +822,36 @@ export default function AlmadinaApplication() {
     setAccountSwitcher(false);
   }
 
-  function logout() {
-    void fetch("/api/almadina/logout", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
-    clearLocalSession();
+  async function logout(): Promise<boolean> {
+    if (logoutInFlight.current) return false;
+    if (!await waitForPendingUpdates()) {
+      showToast("تعذّر تسجيل الخروج لأن بعض التغييرات لم تُحفظ بعد. انتظر لحظة ثم حاول مجددًا.", "error");
+      return false;
+    }
+
+    logoutInFlight.current = true;
+    try {
+      const response = await fetch("/api/almadina/logout", { method: "POST", credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error("Logout request failed");
+      if (savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) {
+        throw new Error("A data update started while logging out");
+      }
+      clearLocalSession();
+      return true;
+    } catch {
+      showToast("تعذّر تسجيل الخروج بأمان. تحقق من الاتصال ثم حاول مجددًا.", "error");
+      return false;
+    } finally {
+      logoutInFlight.current = false;
+    }
+  }
+
+  async function logoutFromAccountSwitcher(): Promise<void> {
+    if (accountSwitcherLogoutBusy) return;
+    setAccountSwitcherLogoutBusy(true);
+    const loggedOut = await logout();
+    setAccountSwitcherLogoutBusy(false);
+    if (loggedOut) setAccountSwitcher(false);
   }
 
   async function deleteAccount(password: string, confirmation: string): Promise<boolean> {
@@ -879,10 +939,10 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, logout, register, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, register, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
-    {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}
+    {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}
     {!appLock.locked && scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}
     <div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div>
   </AppContext.Provider>;

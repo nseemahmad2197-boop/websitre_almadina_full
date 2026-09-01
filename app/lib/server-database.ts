@@ -8,20 +8,25 @@ import {
   type Base64URLString,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, governorates, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
 
 const SESSION_COOKIE = "almadina_session";
+const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
 const SESSION_DURATION = 30 * 24 * 60 * 60;
 const PASSWORD_ITERATIONS = 100_000;
 const APP_LOCK_CHALLENGE_DURATION = 5 * 60;
 const APP_LOCK_MAX_FAILED_ATTEMPTS = 5;
 const APP_LOCK_COOLDOWN = 5 * 60;
+const PASSKEY_RATE_LIMIT_WINDOW = 5 * 60;
+const PASSKEY_OPTIONS_RATE_LIMIT = 30;
+const PASSKEY_VERIFY_RATE_LIMIT = 60;
 const initializedDatabases = new WeakMap<D1Database, Promise<void>>();
 
 type StateRow = { payload: string; revision: number };
 type SessionRow = { user_id: string; expires_at: number };
 type StoredState = { database: Database; revision: number };
 type AuthenticatedSession = { account: User; state: StoredState; token: string };
+type WebAuthnChallengeKind = "registration" | "authentication" | "login";
 type AppLockRow = {
   user_id: string;
   pin_hash: string;
@@ -45,6 +50,12 @@ type WebAuthnChallengeRow = {
   rp_id: string;
   expires_at: number;
 };
+type AppLockStatus = {
+  enabled: boolean;
+  biometricEnabled: boolean;
+  biometricLoginReady: boolean;
+};
+type RateLimitRow = { request_count: number; reset_at: number };
 
 class ApiRequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -54,10 +65,18 @@ class ApiRequestError extends Error {
 }
 
 function json(payload: unknown, status = 200, headers: HeadersInit = {}): Response {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("Cache-Control", "no-store");
   return Response.json(payload, {
     status,
-    headers: { "Cache-Control": "no-store", ...headers },
+    headers: responseHeaders,
   });
+}
+
+function cookieHeaders(...cookies: string[]): Headers {
+  const headers = new Headers();
+  cookies.forEach((cookie) => headers.append("Set-Cookie", cookie));
+  return headers;
 }
 
 function toHex(value: ArrayBuffer | Uint8Array): string {
@@ -141,6 +160,12 @@ async function initializeDatabase(database: D1Database): Promise<void> {
       updated_at TEXT NOT NULL
     )`),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_webauthn_credentials_user_id_idx ON almadina_webauthn_credentials (user_id)"),
+    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_passkey_login_credentials (
+      credential_id TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_passkey_login_credentials_user_id_idx ON almadina_passkey_login_credentials (user_id)"),
     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_webauthn_challenges (
       session_hash TEXT NOT NULL,
       user_id TEXT NOT NULL,
@@ -152,6 +177,13 @@ async function initializeDatabase(database: D1Database): Promise<void> {
       created_at TEXT NOT NULL,
       PRIMARY KEY (session_hash, kind)
     )`),
+    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_rate_limits (
+      key_hash TEXT PRIMARY KEY NOT NULL,
+      action TEXT NOT NULL,
+      request_count INTEGER DEFAULT 0 NOT NULL,
+      reset_at INTEGER NOT NULL
+    )`),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_rate_limits_reset_at_idx ON almadina_rate_limits (reset_at)"),
   ]);
 
   const existing = await database.prepare("SELECT revision FROM almadina_state WHERE id = ?").bind("main").first<{ revision: number }>();
@@ -190,18 +222,50 @@ async function saveState(database: D1Database, state: Database, revision: number
   return (result.meta?.changes ?? 0) === 1;
 }
 
-function getSessionToken(request: Request): string | null {
+function getCookie(request: Request, cookieName: string): string | null {
   const cookie = request.headers.get("cookie") ?? "";
   for (const item of cookie.split(";")) {
     const [name, ...parts] = item.trim().split("=");
-    if (name === SESSION_COOKIE) return parts.join("=") || null;
+    if (name === cookieName) return parts.join("=") || null;
   }
   return null;
+}
+
+function getSessionToken(request: Request): string | null {
+  return getCookie(request, SESSION_COOKIE);
 }
 
 function sessionCookie(request: Request, token: string, maxAge = SESSION_DURATION): string {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+}
+
+function passkeyLoginCookie(request: Request, token: string, maxAge = APP_LOCK_CHALLENGE_DURATION): string {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${PASSKEY_LOGIN_COOKIE}=${token}; Path=/api/almadina; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+}
+
+async function enforcePublicPasskeyRateLimit(database: D1Database, request: Request, action: "options" | "verify", limit: number): Promise<void> {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
+  // Render sets the first X-Forwarded-For entry to the real client address.
+  // A Cloudflare-specific address is trusted only when the runtime supplies the
+  // non-header `request.cf` property, which an HTTP client cannot forge.
+  const cloudflareAddress = "cf" in request ? request.headers.get("cf-connecting-ip")?.trim() : "";
+  const clientAddress = (cloudflareAddress || forwarded.at(0) || "unknown").slice(0, 128).toLowerCase();
+  const keyHash = await sha256(`passkey-login:${action}:${clientAddress}`);
+  const now = Math.floor(Date.now() / 1000);
+  const resetAt = now + PASSKEY_RATE_LIMIT_WINDOW;
+
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
+  const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT (key_hash) DO UPDATE SET
+      action = excluded.action,
+      request_count = CASE WHEN almadina_rate_limits.reset_at <= ? THEN 1 ELSE almadina_rate_limits.request_count + 1 END,
+      reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
+    RETURNING request_count, reset_at`)
+    .bind(keyHash, `passkey-login-${action}`, resetAt, now, now).first<RateLimitRow>();
+  if (!rate || rate.request_count > limit) throw new ApiRequestError("محاولات كثيرة. انتظر بضع دقائق ثم حاول مجددًا.", 429);
 }
 
 async function createSession(database: D1Database, userId: string): Promise<string> {
@@ -255,12 +319,18 @@ async function readWebAuthnCredentials(database: D1Database, userId: string): Pr
   return result.results ?? [];
 }
 
-async function appLockStatus(database: D1Database, userId: string): Promise<{ enabled: boolean; biometricEnabled: boolean }> {
+async function appLockStatus(database: D1Database, userId: string): Promise<AppLockStatus> {
   const lock = await readAppLock(database, userId);
-  if (!lock || lock.enabled !== 1) return { enabled: false, biometricEnabled: false };
+  if (!lock || lock.enabled !== 1) return { enabled: false, biometricEnabled: false, biometricLoginReady: false };
   const credential = await database.prepare("SELECT credential_id FROM almadina_webauthn_credentials WHERE user_id = ? LIMIT 1")
     .bind(userId).first<{ credential_id: string }>();
-  return { enabled: true, biometricEnabled: lock.biometric_enabled === 1 && Boolean(credential) };
+  const loginCredential = await database.prepare("SELECT credential_id FROM almadina_passkey_login_credentials WHERE user_id = ? LIMIT 1")
+    .bind(userId).first<{ credential_id: string }>();
+  return {
+    enabled: true,
+    biometricEnabled: lock.biometric_enabled === 1 && Boolean(credential),
+    biometricLoginReady: lock.biometric_enabled === 1 && Boolean(loginCredential),
+  };
 }
 
 async function requireValidAppLockPin(database: D1Database, userId: string, submittedPin: unknown): Promise<AppLockRow> {
@@ -306,6 +376,7 @@ async function createAppLock(database: D1Database, request: Request, session: Au
     ON CONFLICT (user_id) DO UPDATE SET pin_hash = excluded.pin_hash, enabled = 1, biometric_enabled = 0, failed_attempts = 0, locked_until = 0, updated_at = excluded.updated_at`)
     .bind(session.account.id, pinHash, now).run();
   await database.prepare("DELETE FROM almadina_webauthn_credentials WHERE user_id = ?").bind(session.account.id).run();
+  await database.prepare("DELETE FROM almadina_passkey_login_credentials WHERE user_id = ?").bind(session.account.id).run();
   await database.prepare("DELETE FROM almadina_webauthn_challenges WHERE user_id = ?").bind(session.account.id).run();
   return json(await appLockStatus(database, session.account.id));
 }
@@ -321,10 +392,11 @@ async function disableAppLock(database: D1Database, request: Request, session: A
   await requireValidAppLockPin(database, session.account.id, payload.pin);
   await database.batch([
     database.prepare("DELETE FROM almadina_webauthn_credentials WHERE user_id = ?").bind(session.account.id),
+    database.prepare("DELETE FROM almadina_passkey_login_credentials WHERE user_id = ?").bind(session.account.id),
     database.prepare("DELETE FROM almadina_webauthn_challenges WHERE user_id = ?").bind(session.account.id),
     database.prepare("DELETE FROM almadina_app_locks WHERE user_id = ?").bind(session.account.id),
   ]);
-  return json({ enabled: false, biometricEnabled: false });
+  return json({ enabled: false, biometricEnabled: false, biometricLoginReady: false });
 }
 
 function webAuthnContext(request: Request): { origin: string; rpID: string } {
@@ -332,28 +404,37 @@ function webAuthnContext(request: Request): { origin: string; rpID: string } {
   return { origin: url.origin, rpID: url.hostname };
 }
 
-async function rememberWebAuthnChallenge(database: D1Database, session: AuthenticatedSession, kind: "registration" | "authentication", challenge: string, origin: string, rpID: string): Promise<void> {
+async function rememberStoredWebAuthnChallenge(database: D1Database, sessionHash: string, userId: string, kind: WebAuthnChallengeKind, challenge: string, origin: string, rpID: string): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
-  const sessionHash = await sha256(session.token);
   await database.prepare("DELETE FROM almadina_webauthn_challenges WHERE expires_at <= ?").bind(now).run();
   await database.prepare(`INSERT INTO almadina_webauthn_challenges (session_hash, user_id, kind, challenge, origin, rp_id, expires_at, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (session_hash, kind) DO UPDATE SET user_id = excluded.user_id, challenge = excluded.challenge, origin = excluded.origin, rp_id = excluded.rp_id, expires_at = excluded.expires_at, created_at = excluded.created_at`)
-    .bind(sessionHash, session.account.id, kind, challenge, origin, rpID, now + APP_LOCK_CHALLENGE_DURATION, new Date().toISOString()).run();
+    .bind(sessionHash, userId, kind, challenge, origin, rpID, now + APP_LOCK_CHALLENGE_DURATION, new Date().toISOString()).run();
 }
 
-async function consumeWebAuthnChallenge(database: D1Database, session: AuthenticatedSession, kind: "registration" | "authentication"): Promise<WebAuthnChallengeRow> {
-  const sessionHash = await sha256(session.token);
-  const challenge = await database.prepare("SELECT challenge, origin, rp_id, expires_at FROM almadina_webauthn_challenges WHERE session_hash = ? AND user_id = ? AND kind = ?")
-    .bind(sessionHash, session.account.id, kind).first<WebAuthnChallengeRow>();
-  await database.prepare("DELETE FROM almadina_webauthn_challenges WHERE session_hash = ? AND kind = ?").bind(sessionHash, kind).run();
+async function consumeStoredWebAuthnChallenge(database: D1Database, sessionHash: string, userId: string, kind: WebAuthnChallengeKind): Promise<WebAuthnChallengeRow> {
+  const challenge = await database.prepare(`DELETE FROM almadina_webauthn_challenges
+    WHERE session_hash = ? AND user_id = ? AND kind = ?
+    RETURNING challenge, origin, rp_id, expires_at`)
+    .bind(sessionHash, userId, kind).first<WebAuthnChallengeRow>();
   if (!challenge || challenge.expires_at <= Math.floor(Date.now() / 1000)) throw new ApiRequestError("انتهت صلاحية طلب حماية الجهاز. حاول مجددًا.", 400);
   return challenge;
 }
 
+async function rememberWebAuthnChallenge(database: D1Database, session: AuthenticatedSession, kind: "registration" | "authentication", challenge: string, origin: string, rpID: string): Promise<void> {
+  await rememberStoredWebAuthnChallenge(database, await sha256(session.token), session.account.id, kind, challenge, origin, rpID);
+}
+
+async function consumeWebAuthnChallenge(database: D1Database, session: AuthenticatedSession, kind: "registration" | "authentication"): Promise<WebAuthnChallengeRow> {
+  return consumeStoredWebAuthnChallenge(database, await sha256(session.token), session.account.id, kind);
+}
+
 async function webAuthnRegistrationOptions(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  const payload = await request.json() as { pin?: unknown };
   const lock = await readAppLock(database, session.account.id);
   if (!lock || lock.enabled !== 1) return json({ error: "فعّل قفل التطبيق وحدد رمزًا قبل تفعيل البصمة." }, 409);
+  await requireValidAppLockPin(database, session.account.id, payload.pin);
   const credentials = await readWebAuthnCredentials(database, session.account.id);
   const { origin, rpID } = webAuthnContext(request);
   const options = await generateRegistrationOptions({
@@ -367,7 +448,8 @@ async function webAuthnRegistrationOptions(database: D1Database, request: Reques
     excludeCredentials: credentials.map((credential) => ({ id: credential.credential_id, transports: parseTransports(credential.transports) })),
     authenticatorSelection: {
       authenticatorAttachment: "platform",
-      residentKey: "discouraged",
+      residentKey: "required",
+      requireResidentKey: true,
       userVerification: "required",
     },
   });
@@ -394,22 +476,28 @@ async function verifyWebAuthnRegistration(database: D1Database, request: Request
 
   const credential = verification.registrationInfo.credential;
   const now = new Date().toISOString();
-  await database.prepare(`INSERT INTO almadina_webauthn_credentials (credential_id, user_id, public_key, counter, transports, device_type, backed_up, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT (credential_id) DO UPDATE SET public_key = excluded.public_key, counter = excluded.counter, transports = excluded.transports, device_type = excluded.device_type, backed_up = excluded.backed_up, updated_at = excluded.updated_at`)
-    .bind(
-      credential.id,
-      session.account.id,
-      toHex(credential.publicKey),
-      credential.counter,
-      JSON.stringify(credential.transports ?? []),
-      verification.registrationInfo.credentialDeviceType,
-      verification.registrationInfo.credentialBackedUp ? 1 : 0,
-      now,
-      now,
-    ).run();
-  await database.prepare("UPDATE almadina_app_locks SET biometric_enabled = 1, updated_at = ? WHERE user_id = ?")
-    .bind(now, session.account.id).run();
+  await database.batch([
+    database.prepare(`INSERT INTO almadina_webauthn_credentials (credential_id, user_id, public_key, counter, transports, device_type, backed_up, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (credential_id) DO UPDATE SET public_key = excluded.public_key, counter = excluded.counter, transports = excluded.transports, device_type = excluded.device_type, backed_up = excluded.backed_up, updated_at = excluded.updated_at`)
+      .bind(
+        credential.id,
+        session.account.id,
+        toHex(credential.publicKey),
+        credential.counter,
+        JSON.stringify(credential.transports ?? []),
+        verification.registrationInfo.credentialDeviceType,
+        verification.registrationInfo.credentialBackedUp ? 1 : 0,
+        now,
+        now,
+      ),
+    database.prepare(`INSERT INTO almadina_passkey_login_credentials (credential_id, user_id, created_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT (credential_id) DO UPDATE SET user_id = excluded.user_id, created_at = excluded.created_at`)
+      .bind(credential.id, session.account.id, now),
+    database.prepare("UPDATE almadina_app_locks SET biometric_enabled = 1, updated_at = ? WHERE user_id = ?")
+      .bind(now, session.account.id),
+  ]);
   return json(await appLockStatus(database, session.account.id));
 }
 
@@ -462,10 +550,79 @@ async function disableWebAuthn(database: D1Database, request: Request, session: 
   await requireValidAppLockPin(database, session.account.id, payload.pin);
   await database.batch([
     database.prepare("DELETE FROM almadina_webauthn_credentials WHERE user_id = ?").bind(session.account.id),
+    database.prepare("DELETE FROM almadina_passkey_login_credentials WHERE user_id = ?").bind(session.account.id),
     database.prepare("DELETE FROM almadina_webauthn_challenges WHERE user_id = ?").bind(session.account.id),
     database.prepare("UPDATE almadina_app_locks SET biometric_enabled = 0, updated_at = ? WHERE user_id = ?").bind(new Date().toISOString(), session.account.id),
   ]);
   return json(await appLockStatus(database, session.account.id));
+}
+
+async function publicPasskeyLoginOptions(database: D1Database, request: Request): Promise<Response> {
+  await enforcePublicPasskeyRateLimit(database, request, "options", PASSKEY_OPTIONS_RATE_LIMIT);
+  const { origin, rpID } = webAuthnContext(request);
+  const options = await generateAuthenticationOptions({
+    rpID,
+    timeout: 60_000,
+    userVerification: "required",
+    allowCredentials: [],
+  });
+  const ceremonyToken = toHex(crypto.getRandomValues(new Uint8Array(32)));
+  await rememberStoredWebAuthnChallenge(database, await sha256(ceremonyToken), "", "login", options.challenge, origin, rpID);
+  return json(options, 200, { "Set-Cookie": passkeyLoginCookie(request, ceremonyToken) });
+}
+
+async function verifyPublicPasskeyLogin(database: D1Database, request: Request): Promise<Response> {
+  await enforcePublicPasskeyRateLimit(database, request, "verify", PASSKEY_VERIFY_RATE_LIMIT);
+  const genericMessage = "تعذّر تسجيل الدخول بحماية الجهاز. استخدم كلمة المرور أو أعد ربط البصمة من الإعدادات.";
+  const clearCeremonyCookie = { "Set-Cookie": passkeyLoginCookie(request, "", 0) };
+  const ceremonyToken = getCookie(request, PASSKEY_LOGIN_COOKIE);
+
+  try {
+    const response = await request.json() as AuthenticationResponseJSON;
+    if (!ceremonyToken || !response || typeof response.id !== "string") return json({ error: genericMessage }, 401, clearCeremonyCookie);
+
+    const challenge = await consumeStoredWebAuthnChallenge(database, await sha256(ceremonyToken), "", "login");
+    const credential = await database.prepare(`SELECT credentials.credential_id, credentials.user_id, credentials.public_key, credentials.counter,
+      credentials.transports, credentials.device_type, credentials.backed_up
+      FROM almadina_webauthn_credentials AS credentials
+      INNER JOIN almadina_passkey_login_credentials AS login_credentials ON login_credentials.credential_id = credentials.credential_id
+      WHERE credentials.credential_id = ?`)
+      .bind(response.id).first<WebAuthnCredentialRow>();
+    if (!credential) return json({ error: genericMessage }, 401, clearCeremonyCookie);
+
+    const lock = await readAppLock(database, credential.user_id);
+    const state = await readState(database);
+    const account = state.database.users.find((entry) => entry.id === credential.user_id);
+    if (!account || !lock || lock.enabled !== 1 || lock.biometric_enabled !== 1) {
+      return json({ error: genericMessage }, 401, clearCeremonyCookie);
+    }
+
+    const verification = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge: challenge.challenge,
+      expectedOrigin: challenge.origin,
+      expectedRPID: challenge.rp_id,
+      credential: {
+        id: credential.credential_id,
+        publicKey: fromHex(credential.public_key),
+        counter: credential.counter,
+        transports: parseTransports(credential.transports),
+      },
+      requireUserVerification: true,
+    });
+    if (!verification.verified) return json({ error: genericMessage }, 401, clearCeremonyCookie);
+
+    await database.prepare("UPDATE almadina_webauthn_credentials SET counter = ?, updated_at = ? WHERE credential_id = ? AND user_id = ?")
+      .bind(verification.authenticationInfo.newCounter, new Date().toISOString(), credential.credential_id, credential.user_id).run();
+    const sessionToken = await createSession(database, credential.user_id);
+    return json(snapshot(state, account), 200, cookieHeaders(
+      sessionCookie(request, sessionToken),
+      passkeyLoginCookie(request, "", 0),
+    ));
+  } catch (error) {
+    if (!(error instanceof ApiRequestError)) console.warn("Public passkey login failed.", error);
+    return json({ error: genericMessage }, 401, clearCeremonyCookie);
+  }
 }
 
 function publicAccount(account: User): User {
@@ -748,7 +905,8 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     const weight = normalizeWeightOption(candidate.weight);
     const weightFee = getWeightFee(weight);
     const oversizeFee = getOrderOversizeFee(candidate);
-    const region = resolveDeliveryRegion(candidate.governorate ?? "", candidate.city) ?? governorates[0];
+    const region = resolveDeliveryRegion(candidate.governorate ?? "", candidate.city);
+    if (!region) throw new ApiRequestError("تحقق من تطابق المحافظة والمدينة قبل حفظ الطرد.", 400);
     const deliveryFee = getDeliveryFee(region, savedAccount.membership) + weightFee + oversizeFee;
     const notes = typeof candidate.notes === "string" ? candidate.notes.trim().slice(0, 500) : "";
     const privateNotes = typeof candidate.privateNotes === "string" ? candidate.privateNotes.trim().slice(0, 1000) : "";
@@ -1013,6 +1171,7 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
     await database.batch([
       database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_webauthn_credentials WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_passkey_login_credentials WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_webauthn_challenges WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_app_locks WHERE user_id = ?").bind(account.id),
     ]);
@@ -1208,13 +1367,18 @@ export async function handleAlmadinaApi(request: Request, database: D1Database):
 
     if (url.pathname === "/api/almadina/login" && request.method === "POST") return await login(database, request);
     if (url.pathname === "/api/almadina/register" && request.method === "POST") return await register(database, request);
+    if (url.pathname === "/api/almadina/passkey/login/options" && request.method === "POST") return await publicPasskeyLoginOptions(database, request);
+    if (url.pathname === "/api/almadina/passkey/login/verify" && request.method === "POST") return await verifyPublicPasskeyLogin(database, request);
     if (url.pathname === "/api/almadina/track" && request.method === "GET") return await publicTracking(database, request);
 
     const session = await authenticate(database, request);
 
     if (url.pathname === "/api/almadina/logout" && request.method === "POST") {
       if (session) await database.prepare("DELETE FROM almadina_sessions WHERE token_hash = ?").bind(await sha256(session.token)).run();
-      return json({ success: true }, 200, { "Set-Cookie": sessionCookie(request, "", 0) });
+      return json({ success: true }, 200, cookieHeaders(
+        sessionCookie(request, "", 0),
+        passkeyLoginCookie(request, "", 0),
+      ));
     }
 
     if (!session) return json({ error: "يجب تسجيل الدخول أولًا." }, 401, { "Set-Cookie": sessionCookie(request, "", 0) });

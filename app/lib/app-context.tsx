@@ -30,7 +30,7 @@ export type ConfirmOptions = {
   message: string;
   confirmLabel?: string;
   danger?: boolean;
-  onConfirm: () => void;
+  onConfirm: () => void | boolean | Promise<void | boolean>;
 };
 
 export type ToastKind = "success" | "error" | "info";
@@ -48,13 +48,14 @@ export type AppContextValue = {
   updatePreferences: (values: Partial<Preferences>) => void;
   enableAppLock: (pin: string) => Promise<boolean>;
   disableAppLock: (pin: string) => Promise<boolean>;
-  enableBiometricUnlock: () => Promise<boolean>;
+  enableBiometricUnlock: (pin: string) => Promise<boolean>;
   disableBiometricUnlock: (pin: string) => Promise<boolean>;
   verifyAppPin: (pin: string) => Promise<boolean>;
   unlockWithBiometric: () => Promise<boolean>;
   refreshAppLock: () => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
-  logout: () => void;
+  loginWithBiometric: () => Promise<boolean>;
+  logout: () => Promise<boolean>;
   register: (values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">) => Promise<boolean>;
   deleteAccount: (password: string, confirmation: string) => Promise<boolean>;
   verifyCollectionCode: (invoiceId: string, verificationCode: string) => Promise<boolean>;

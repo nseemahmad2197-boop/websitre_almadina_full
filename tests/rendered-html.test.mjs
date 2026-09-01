@@ -93,7 +93,7 @@ test("keeps account switching and all merchant-facing records private to the sig
   assert.doesNotMatch(application, /database\.users\.filter\(\(entry\) => entry\.role === "admin"/);
   assert.doesNotMatch(application, /loginAs/);
   assert.doesNotMatch(context, /loginAs/);
-  assert.match(application, /لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر/);
+  assert.match(application, /لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر/);
   assert.match(server, /verifyPassword\(password, account\.password\)/);
   assert.match(server, /users:\s*\[publicAccount\(account\)\]/);
   assert.match(dashboard, /item\.id === selectedOrderId && \(user\?\.role === "admin" \|\| item\.merchantId === user\?\.id\)/);
@@ -197,7 +197,7 @@ test("keeps the selected theme consistent before login, inside the account, and 
   assert.match(settings, /updatePreferences\(\{ theme: theme\.id \}\)/);
 });
 
-test("shows a safe available-accounts picker and still requires the password", async () => {
+test("shows a safe available-accounts picker with password fallback and signed-out passkey login", async () => {
   const [auth, application, availableAccounts, styles] = await Promise.all([
     readFile(new URL("../app/components/auth.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
@@ -213,7 +213,7 @@ test("shows a safe available-accounts picker and still requires the password", a
   assert.match(application, /rememberAvailableAccount\(\{ id: account\.id, name: account\.name, email: account\.email, store: account\.store, role: account\.role, avatarColor: account\.avatarColor \}\)/);
   assert.doesNotMatch(application, /rememberAvailableAccount\(account\)/);
   assert.match(auth, /className="available-accounts-button"/);
-  assert.match(auth, /disabled=\{availableAccounts\.length === 0\}/);
+  assert.match(auth, /disabled=\{availableAccounts\.length === 0 \|\| loginOperationBusy\}/);
   assert.match(auth, /<strong>الحسابات المتاحة<\/strong>/);
   assert.match(auth, /لا توجد حسابات مسجلة على هذا الجهاز/);
   assert.match(auth, /setAccountsOpen\(true\)/);
@@ -222,6 +222,13 @@ test("shows a safe available-accounts picker and still requires the password", a
   assert.match(auth, /setEmail\(account\.email\)/);
   assert.match(auth, /setPassword\(""\)/);
   assert.match(auth, /لا يتم حفظ كلمات المرور/);
+  assert.match(auth, /الدخول ببصمة الوجه أو حماية الجهاز/);
+  assert.match(auth, /detectBiometricAvailability\(\)/);
+  assert.match(auth, /await loginWithBiometric\(\)/);
+  assert.match(auth, /const loginOperationBusy = busy \|\| biometricBusy/);
+  assert.match(auth, /disabled=\{loginOperationBusy\}/);
+  assert.match(auth, /الجهاز الحساب المرتبط بالبصمة/);
+  assert.match(auth, /type=\{showPassword \? "text" : "password"\}/);
   assert.match(styles, /\.available-accounts-button\s*\{\s*display:\s*none/);
   assert.match(styles, /\.available-accounts-button:disabled\s*\{/);
   assert.match(styles, /\.available-accounts-modal\s*\{/);
@@ -247,27 +254,47 @@ test("gates secure mobile biometric unlock behind an encrypted four-digit app lo
   assert.equal(typeof manifest.dependencies["@simplewebauthn/server"], "string");
   assert.match(schema, /sqliteTable\("almadina_app_locks"/);
   assert.match(schema, /sqliteTable\("almadina_webauthn_credentials"/);
+  assert.match(schema, /sqliteTable\("almadina_passkey_login_credentials"/);
   assert.match(schema, /sqliteTable\("almadina_webauthn_challenges"/);
   assert.match(server, /pin_hash TEXT NOT NULL/);
   assert.match(server, /APP_LOCK_MAX_FAILED_ATTEMPTS = 5/);
   assert.match(server, /await verifyPassword\(pin, lock\.pin_hash\)/);
   assert.match(server, /authenticatorAttachment: "platform"/);
+  assert.match(server, /residentKey: "required"/);
+  assert.match(server, /requireResidentKey: true/);
   assert.match(server, /userVerification: "required"/);
   assert.match(server, /requireUserVerification: true/);
-  assert.match(server, /DELETE FROM almadina_webauthn_challenges WHERE session_hash/);
+  assert.match(server, /DELETE FROM almadina_webauthn_challenges[\s\S]*RETURNING challenge, origin, rp_id, expires_at/);
+  assert.match(server, /\/api\/almadina\/passkey\/login\/options/);
+  assert.match(server, /\/api\/almadina\/passkey\/login\/verify/);
+  assert.match(server, /allowCredentials: \[\]/);
+  assert.match(server, /SameSite=Strict/);
+  assert.match(server, /INNER JOIN almadina_passkey_login_credentials/);
+  assert.match(server, /const sessionToken = await createSession\(database, credential\.user_id\)/);
   assert.match(client, /window\.isSecureContext/);
   assert.match(client, /navigator\.maxTouchPoints > 0/);
   assert.match(client, /shortestScreenSide > 1024/);
   assert.match(client, /platformAuthenticatorIsAvailable\(\)/);
   assert.match(settings, /!appLock\.enabled/);
   assert.match(settings, /setPinMode\(value \? "setup" : "disable-lock"\)/);
+  assert.match(settings, /setPinMode\(value \? "enable-biometric" : "disable-biometric"\)/);
   assert.match(settings, /disabled=\{!appLock\.ready \|\| !appLock\.enabled/);
   assert.doesNotMatch(settings, /updatePreferences\(\{ pin:/);
   assert.match(application, /restoredLock = \{ \.\.\.status, ready: true, locked: status\.enabled/);
   assert.match(application, /appLock\.locked \? <AppLockScreen \/> : <ApplicationShell \/>/);
   assert.match(application, /BACKGROUND_LOCK_DELAY = 15_000/);
+  assert.match(application, /savingUpdates\.current \|\| remoteMutationInFlight\.current \|\| pendingUpdates\.current\.length/);
+  assert.match(application, /const logoutInFlight = useRef\(false\)/);
+  assert.match(application, /if \(logoutInFlight\.current\) return showToast/);
+  assert.match(application, /logoutInFlight\.current = true/);
+  assert.match(application, /const completed = await options\.onConfirm\(\)/);
+  assert.match(application, /if \(completed === false\) return setSubmitting\(false\)/);
+  assert.match(application, /const response = await fetch\("\/api\/almadina\/logout"/);
+  assert.match(application, /if \(!response\.ok\) throw new Error\("Logout request failed"\)/);
+  assert.match(application, /تعذّر تسجيل الخروج بأمان/);
   assert.match(context, /enableBiometricUnlock/);
-  assert.match(screen, /تسجيل الخروج واستخدام كلمة المرور/);
+  assert.match(context, /loginWithBiometric/);
+  assert.match(screen, /بعد الخروج يمكنك استخدام كلمة المرور أو حماية الجهاز/);
   assert.match(styles, /\.app-lock-screen/);
   assert.match(styles, /\.toggle:disabled/);
 });
@@ -478,7 +505,7 @@ test("preserves ₪25 West Bank, ₪35 Jerusalem, and ₪80 interior standard de
     readFile(new URL("../app/components/management-pages.tsx", import.meta.url), "utf8"),
   ]);
 
-  const regions = [...data.matchAll(/\{ name: "([^"]+)", fee: (\d+), cities:/g)]
+  const regions = [...data.matchAll(/\{\s*name: "([^"]+)", fee: (\d+), cities:/g)]
     .map((match) => ({ name: match[1], fee: Number(match[2]) }));
 
   assert.ok(regions.length >= 12);
@@ -489,7 +516,7 @@ test("preserves ₪25 West Bank, ₪35 Jerusalem, and ₪80 interior standard de
   assert.match(orderForm, /الضفة <strong>\{membershipPrices\.westBank\} ₪<\/strong>/);
   assert.match(orderForm, /القدس <strong>\{membershipPrices\.jerusalem\} ₪<\/strong>/);
   assert.match(orderForm, /الداخل <strong>\{membershipPrices\.interior\} ₪<\/strong>/);
-  assert.match(management, /deliveryFee:\s*getDeliveryFee\(region \?\? governorates\[0\], user\.membership\) \+ weightFee \+ oversizeFee/);
+  assert.match(management, /deliveryFee:\s*getDeliveryFee\(region, user\.membership\) \+ weightFee \+ oversizeFee/);
 });
 
 test("automatically applies ₪20 West Bank, ₪30 Jerusalem, and ₪65 interior premium delivery prices", async () => {
@@ -508,7 +535,7 @@ test("automatically applies ₪20 West Bank, ₪30 Jerusalem, and ₪65 interior
   assert.match(orderForm, /getDeliveryFee\(region, user\?\.membership\)/);
   assert.match(orderForm, /resolveDeliveryRegion\(form\.governorate, form\.city\)/);
   assert.match(orderForm, /أسعار بريميوم/);
-  assert.match(management, /getDeliveryFee\(region \?\? governorates\[0\], user\.membership\) \+ weightFee \+ oversizeFee/);
+  assert.match(management, /getDeliveryFee\(region, user\.membership\) \+ weightFee \+ oversizeFee/);
 });
 
 test("allows freely typing the parcel governorate and city while resolving regional delivery prices", async () => {
@@ -522,12 +549,18 @@ test("allows freely typing the parcel governorate and city while resolving regio
   assert.match(data, /export function resolveDeliveryRegion\(governorate: string, city = ""\)/);
   assert.match(data, /location\.includes\("القدس"\)/);
   assert.match(data, /location\.includes\("الداخل"\)/);
-  assert.match(data, /return matchingCity \?\? governorates\[0\]/);
-  assert.match(deliveryAddress, /<Field label="المحافظة" placeholder="اكتب المحافظة، مثلًا: الخليل أو القدس"/);
-  assert.match(deliveryAddress, /<Field label="المدينة أو المنطقة" placeholder="اكتب المدينة أو المنطقة"/);
-  assert.doesNotMatch(deliveryAddress, /<SelectField label="المحافظة"|<SelectField label="المدينة أو المنطقة"|<option/);
+  assert.match(data, /const matchingRegions = \[\.\.\.new Set/);
+  assert.match(data, /return matchingRegions\.length === 1 \? matchingRegions\[0\] : undefined/);
+  assert.match(deliveryAddress, /<Field label="المحافظة" placeholder="اكتب أو اختر المحافظة" list="almadina-governorates"/);
+  assert.match(deliveryAddress, /<Field label="المدينة أو المنطقة" placeholder="ابحث أو اكتب المدينة أو المنطقة" list="almadina-localities"/);
+  assert.doesNotMatch(deliveryAddress, /<SelectField label="المحافظة"|<SelectField label="المدينة أو المنطقة"/);
+  assert.match(deliveryAddress, /<datalist id="almadina-governorates">/);
+  assert.match(deliveryAddress, /<datalist id="almadina-localities">/);
   assert.match(orderForm, /form\.governorate\.trim\(\) \|\| !form\.city\.trim\(\)/);
   assert.match(orderForm, /city: form\.city\.trim\(\)/);
+  assert.match(orderForm, /governorate: form\.governorate\.trim\(\)/);
+  assert.match(orderForm, /recipient\.governorate\?\.trim\(\)/);
+  assert.match(orderForm, /item\.governorate === selectedGovernorate\.name/);
 });
 
 test("subtracts the selected regional delivery fee from the parcel price in the contents value", async () => {
@@ -592,14 +625,55 @@ test("adds progressive weight and dimension fees while keeping legacy imports co
   assert.match(server, /getDeliveryFee\(region, savedAccount\.membership\) \+ weightFee \+ oversizeFee/);
   assert.match(dashboard, /رسوم الوزن الإضافية/);
   assert.match(dashboard, /رسوم الحجم الإضافية/);
+  assert.match(download, /"المحافظة", "المدينة", "العنوان"/);
   assert.match(download, /"الطول سم", "العرض سم", "الارتفاع سم", "الوزن"/);
-  assert.match(management, /parseDimensionCm\(row\[6\]\)/);
-  assert.match(management, /normalizeWeightOption\(row\[9\]\)/);
+  assert.match(management, /parseDimensionCm\(row\.length\)/);
+  assert.match(management, /normalizeWeightOption\(row\.weight\)/);
   assert.match(management, /getWeightFee\(weight\)/);
   assert.match(management, /getOversizeFee\(lengthCm, widthCm, heightCm\)/);
-  assert.match(management, /getDeliveryFee\(region \?\? governorates\[0\], user\.membership\) \+ weightFee \+ oversizeFee/);
+  assert.match(management, /getDeliveryFee\(region, user\.membership\) \+ weightFee \+ oversizeFee/);
+  assert.match(management, /resolveDeliveryRegion\(row\.governorate, row\.city\)/);
+  assert.match(management, /القالب القديم ذو عمود المدينة أو المنطقة الواحد مدعومًا/);
   assert.match(management, /رسوم الوزن والحجم تدريجيًا/);
   assert.match(styles, /\.oversize-fee-notice\.is-active/);
+});
+
+test("imports explicit governorate and city CSV columns while preserving the legacy single-region template", async () => {
+  const [{ parseParcelImportCsv }, { resolveDeliveryRegion }] = await Promise.all([
+    import(new URL("../app/lib/import-csv.ts", import.meta.url)),
+    import(new URL("../app/lib/data.ts", import.meta.url)),
+  ]);
+
+  const current = parseParcelImportCsv([
+    "الاسم,رقم الجوال,المحافظة,المدينة,العنوان,القيمة,الوصف,الطول سم,العرض سم,الارتفاع سم,الوزن",
+    'أحمد,0599123456,نابلس,حوارة,"الشارع الرئيسي, بناية 2",120,ملابس,40,30,20,0 - 5 كغم',
+  ].join("\n"));
+  assert.equal(current.layout, "governorate-city");
+  assert.deepEqual(current.rows[0], {
+    name: "أحمد",
+    phone: "0599123456",
+    governorate: "نابلس",
+    city: "حوارة",
+    address: "الشارع الرئيسي, بناية 2",
+    amount: "120",
+    content: "ملابس",
+    length: "40",
+    width: "30",
+    height: "20",
+    weight: "0 - 5 كغم",
+  });
+  assert.equal(resolveDeliveryRegion(current.rows[0].governorate, current.rows[0].city)?.name, "نابلس");
+
+  const legacy = parseParcelImportCsv([
+    "الاسم,رقم الجوال,المدينة,العنوان,القيمة,الوصف,الطول سم,العرض سم,الارتفاع سم,الوزن",
+    "سارة,0599000000,حيفا,شارع الميناء,90,كتب,30,20,10,5 - 10 كغم",
+  ].join("\n"));
+  assert.equal(legacy.layout, "legacy-region");
+  assert.equal(legacy.rows[0].governorate, "");
+  assert.equal(legacy.rows[0].city, "حيفا");
+  assert.equal(legacy.rows[0].address, "شارع الميناء");
+  assert.equal(legacy.rows[0].weight, "5 - 10 كغم");
+  assert.equal(resolveDeliveryRegion(legacy.rows[0].governorate, legacy.rows[0].city)?.name, "الداخل");
 });
 
 test("normalizes Arabic and Latin dimension values used by CSV importing", async () => {
@@ -626,6 +700,52 @@ test("normalizes Arabic and Latin dimension values used by CSV importing", async
   assert.equal(getWeightFee("أكثر من 30 كغم"), 20);
   assert.equal(normalizeWeightOption(undefined), "0 - 5 كغم");
   assert.equal(getWeightFee("قيمة غير صالحة"), 0);
+});
+
+test("covers representative West Bank, Jerusalem, and interior localities without mispricing unknown text", async () => {
+  const { deliveryLocalities, governorates, normalizeLocation, resolveDeliveryRegion } = await import(new URL("../app/lib/data.ts", import.meta.url));
+  const { OFFICIAL_LOCALITY_COUNTS } = await import(new URL("../app/lib/palestine-locations.generated.ts", import.meta.url));
+
+  assert.equal(governorates.length, 12);
+  assert.equal(OFFICIAL_LOCALITY_COUNTS.westBankAndJerusalem, 524);
+  assert.equal(OFFICIAL_LOCALITY_COUNTS.interiorSourceRows, 1125);
+  assert.equal(OFFICIAL_LOCALITY_COUNTS.interiorUniqueNames, 1120);
+  assert.ok(deliveryLocalities.length >= 1700);
+  const representatives = [
+    ["القدس", "كفر عقب", "القدس"],
+    ["القدس", "بيت حنينا", "القدس"],
+    ["رام الله والبيرة", "روابي", "رام الله والبيرة"],
+    ["نابلس", "حوارة", "نابلس"],
+    ["سلفيت", "بديا", "سلفيت"],
+    ["طوباس", "طمون", "طوباس"],
+    ["الداخل", "طمرة", "الداخل"],
+    ["الداخل", "باقة الغربية", "الداخل"],
+    ["الداخل", "مجد الكروم", "الداخل"],
+    ["الداخل", "بئر السبع", "الداخل"],
+    ["رام الله والبيرة", "بيت ريما", "رام الله والبيرة"],
+    ["رام الله والبيرة", "مزارع النوباني", "رام الله والبيرة"],
+    ["بيت لحم", "بيت تعمر", "بيت لحم"],
+    ["بيت لحم", "المنية", "بيت لحم"],
+    ["بيت لحم", "كيسان", "بيت لحم"],
+    ["الداخل", "كفر مصر", "الداخل"],
+    ["الداخل", "سولم", "الداخل"],
+    ["الداخل", "أم القطف", "الداخل"],
+  ];
+  for (const [governorate, city, expected] of representatives) {
+    assert.equal(resolveDeliveryRegion(governorate, city)?.name, expected);
+  }
+
+  assert.equal(resolveDeliveryRegion("الداخل", "الطيبة")?.name, "الداخل");
+  assert.equal(resolveDeliveryRegion("جنين", "الطيبة")?.name, "جنين");
+  assert.equal(resolveDeliveryRegion("رام الله والبيرة", "برقة")?.name, "رام الله والبيرة");
+  assert.equal(resolveDeliveryRegion("نابلس", "برقة")?.name, "نابلس");
+  assert.equal(resolveDeliveryRegion("القدس", "حي غير مسجل"), undefined);
+  assert.equal(resolveDeliveryRegion("القدس", "حيفا"), undefined);
+  assert.equal(resolveDeliveryRegion("الخليل", "حيفا الجديدة"), undefined);
+  assert.equal(resolveDeliveryRegion("الخليل", "تل أبيب"), undefined);
+  assert.equal(resolveDeliveryRegion("", "الطيبة"), undefined);
+  assert.equal(resolveDeliveryRegion("محافظة غير معروفة", "منطقة غير معروفة"), undefined);
+  assert.equal(normalizeLocation("  أُمّ   الفحم  "), normalizeLocation("ام الفحم"));
 });
 
 test("uses «الطرود» in visible copy while preserving the internal shipments hooks", async () => {
