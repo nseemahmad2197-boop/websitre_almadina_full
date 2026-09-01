@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IScannerControls } from "@zxing/browser";
+import { AppLockScreen } from "./components/app-lock-screen";
 import { ApplicationShell } from "./components/application-shell";
 import { Authentication } from "./components/auth";
 import { Icon } from "./components/icon";
-import { Avatar, Button, Field, IconButton, Modal } from "./components/ui";
+import { Avatar, Brand, Button, Field, IconButton, Modal } from "./components/ui";
 import { AppContext, type ConfirmOptions, type ToastKind, type View } from "./lib/app-context";
 import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/available-accounts";
+import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiometricAvailability, getAppLockStatus, registerBiometricUnlock, removeAppLock, removeBiometricUnlock, verifyAppLockPin, type AppLockState } from "./lib/app-lock-client";
 import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type NoticeAudience, type Preferences, type User } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
@@ -17,6 +19,14 @@ type ThemePreference = Preferences["theme"];
 type WebkitAudioWindow = Window & { webkitAudioContext?: typeof AudioContext };
 
 const THEME_STORAGE_KEY = "almadina-express-theme";
+const BACKGROUND_LOCK_DELAY = 15_000;
+const EMPTY_APP_LOCK: AppLockState = {
+  ready: false,
+  enabled: false,
+  locked: false,
+  biometricEnabled: false,
+  biometricAvailable: false,
+};
 
 function rememberSnapshotAccount(snapshot: SharedSnapshot): void {
   const account = snapshot.database.users.find((entry) => entry.id === snapshot.userId);
@@ -69,6 +79,11 @@ class SharedApiError extends Error {
     this.status = status;
     this.snapshot = snapshot;
   }
+}
+
+function readableAppLockError(error: unknown, fallback: string): string {
+  if (error instanceof AppLockApiError) return error.message;
+  return fallback;
 }
 
 async function sharedRequest(path: string, options: RequestInit = {}): Promise<SharedSnapshot> {
@@ -183,6 +198,8 @@ function ConfirmModal({ options, onClose }: { options: ConfirmOptions; onClose: 
 export default function AlmadinaApplication() {
   const [database, setDatabase] = useState<Database>(() => createSeedDatabase());
   const [userId, setUserId] = useState<string | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [appLock, setAppLock] = useState<AppLockState>(EMPTY_APP_LOCK);
   const [view, setViewState] = useState<View>("home");
   const [anonymousPreferences, setAnonymousPreferences] = useState<Preferences>(defaultPreferences);
   const [activeTheme, setActiveTheme] = useState<ThemePreference>(defaultPreferences.theme);
@@ -202,6 +219,7 @@ export default function AlmadinaApplication() {
   const knownNoticeIds = useRef<Set<string>>(new Set());
   const noticeBaselineUserId = useRef<string | null>(null);
   const notificationAudioContext = useRef<AudioContext | null>(null);
+  const backgroundedAt = useRef<number | null>(null);
 
   useEffect(() => {
     let unlocking = false;
@@ -272,6 +290,22 @@ export default function AlmadinaApplication() {
         if (!account) return;
         rememberSnapshotAccount(snapshot);
 
+        const biometricAvailable = await detectBiometricAvailability();
+        let restoredLock: AppLockState;
+        try {
+          const status = await getAppLockStatus();
+          restoredLock = { ...status, ready: true, locked: status.enabled, biometricAvailable };
+        } catch {
+          restoredLock = {
+            ready: true,
+            enabled: true,
+            locked: true,
+            biometricEnabled: false,
+            biometricAvailable,
+            error: "تعذّر التحقق من حالة قفل التطبيق. أعد المحاولة أو سجّل الخروج.",
+          };
+        }
+
         const accountTheme = snapshot.database.preferences[account.id]?.theme;
         if (!storedThemePreference.current && isThemePreference(accountTheme)) {
           storedThemePreference.current = accountTheme;
@@ -287,9 +321,12 @@ export default function AlmadinaApplication() {
         knownNoticeIds.current = noticeIdsForUser(snapshot.database.notices, account.id);
         setDatabase(snapshot.database);
         setUserId(account.id);
+        setAppLock(restoredLock);
         setViewState(account.role === "admin" ? "admin" : "home");
       } catch {
         // An anonymous visitor simply remains on the sign-in screen.
+      } finally {
+        if (active) setSessionReady(true);
       }
     }
 
@@ -307,6 +344,27 @@ export default function AlmadinaApplication() {
     const apply = () => { const dark = preferences.theme === "dark" || (preferences.theme === "system" && media.matches); document.documentElement.dataset.theme = dark ? "dark" : "light"; document.documentElement.style.colorScheme = dark ? "dark" : "light"; };
     apply(); media.addEventListener("change", apply); return () => media.removeEventListener("change", apply);
   }, [preferences.theme]);
+
+  useEffect(() => {
+    if (!userId || !appLock.enabled) {
+      backgroundedAt.current = null;
+      return;
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        backgroundedAt.current = Date.now();
+        return;
+      }
+      if (backgroundedAt.current && Date.now() - backgroundedAt.current >= BACKGROUND_LOCK_DELAY) {
+        setAppLock((current) => current.enabled ? { ...current, locked: true } : current);
+      }
+      backgroundedAt.current = null;
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [userId, appLock.enabled]);
 
   useEffect(() => {
     if (!userId || !currentUserRole) {
@@ -580,6 +638,98 @@ export default function AlmadinaApplication() {
 
   function setView(next: View) { setViewState(next); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
+  async function refreshAppLock(): Promise<void> {
+    try {
+      const [status, biometricAvailable] = await Promise.all([getAppLockStatus(), detectBiometricAvailability()]);
+      setAppLock((current) => ({ ...status, ready: true, locked: status.enabled && current.locked, biometricAvailable }));
+    } catch (error) {
+      const message = readableAppLockError(error, "تعذّر التحقق من حالة قفل التطبيق.");
+      setAppLock((current) => ({ ...current, ready: true, locked: true, error: message }));
+      showToast(message, "error");
+    }
+  }
+
+  async function enableAppLock(pin: string): Promise<boolean> {
+    try {
+      const [status, biometricAvailable] = await Promise.all([createAppLock(pin), detectBiometricAvailability()]);
+      setAppLock({ ...status, ready: true, locked: false, biometricAvailable });
+      showToast("تم تفعيل قفل التطبيق وحفظ الرمز بصورة مشفّرة.");
+      return true;
+    } catch (error) {
+      showToast(readableAppLockError(error, "تعذّر تفعيل قفل التطبيق."), "error");
+      return false;
+    }
+  }
+
+  async function disableAppLock(pin: string): Promise<boolean> {
+    try {
+      const status = await removeAppLock(pin);
+      setAppLock((current) => ({ ...status, ready: true, locked: false, biometricAvailable: current.biometricAvailable }));
+      showToast("تم إيقاف قفل التطبيق وإزالة حماية الجهاز المرتبطة به.");
+      return true;
+    } catch (error) {
+      showToast(readableAppLockError(error, "تعذّر إيقاف قفل التطبيق."), "error");
+      return false;
+    }
+  }
+
+  async function enableBiometricUnlock(): Promise<boolean> {
+    const biometricAvailable = await detectBiometricAvailability();
+    setAppLock((current) => ({ ...current, biometricAvailable }));
+    if (!appLock.enabled) {
+      showToast("فعّل قفل التطبيق وحدد رمزًا أولًا.", "info");
+      return false;
+    }
+    if (!biometricAvailable) {
+      showToast("حماية الجهاز غير متاحة هنا. استخدم هاتفًا أو iPad يدعمها عبر HTTPS.", "error");
+      return false;
+    }
+
+    try {
+      const status = await registerBiometricUnlock();
+      setAppLock((current) => ({ ...status, ready: true, locked: false, biometricAvailable: current.biometricAvailable }));
+      showToast("تم ربط قفل التطبيق بحماية هذا الجهاز.");
+      return true;
+    } catch (error) {
+      showToast(readableAppLockError(error, "تعذّر تفعيل حماية الجهاز."), "error");
+      return false;
+    }
+  }
+
+  async function disableBiometricUnlock(pin: string): Promise<boolean> {
+    try {
+      const status = await removeBiometricUnlock(pin);
+      setAppLock((current) => ({ ...status, ready: true, locked: false, biometricAvailable: current.biometricAvailable }));
+      showToast("تم إيقاف الدخول بحماية الجهاز.");
+      return true;
+    } catch (error) {
+      showToast(readableAppLockError(error, "تعذّر إيقاف حماية الجهاز."), "error");
+      return false;
+    }
+  }
+
+  async function verifyAppPin(pin: string): Promise<boolean> {
+    try {
+      await verifyAppLockPin(pin);
+      setAppLock((current) => ({ ...current, locked: false, error: undefined }));
+      return true;
+    } catch (error) {
+      showToast(readableAppLockError(error, "رمز القفل غير صحيح."), "error");
+      return false;
+    }
+  }
+
+  async function unlockWithBiometric(): Promise<boolean> {
+    try {
+      await authenticateWithBiometric();
+      setAppLock((current) => ({ ...current, locked: false, error: undefined }));
+      return true;
+    } catch (error) {
+      showToast(readableAppLockError(error, "تعذّر فتح التطبيق بحماية الجهاز."), "error");
+      return false;
+    }
+  }
+
   function activateSession(snapshot: SharedSnapshot, greeting: string) {
     const account = snapshot.database.users.find((entry) => entry.id === snapshot.userId);
     if (!account) throw new Error("تعذّر تحميل بيانات الحساب من الخادم.");
@@ -601,9 +751,12 @@ export default function AlmadinaApplication() {
     knownNoticeIds.current = noticeIdsForUser(snapshot.database.notices, account.id);
     setDatabase(snapshot.database);
     setUserId(account.id);
+    setSessionReady(true);
+    setAppLock({ ...EMPTY_APP_LOCK, ready: true, locked: false });
     setSelectedOrderId(null);
     setViewState(account.role === "admin" ? "admin" : "home");
     setAccountSwitcher(false);
+    void refreshAppLock();
     showToast(greeting);
   }
 
@@ -629,6 +782,8 @@ export default function AlmadinaApplication() {
     visibleDatabase.current = anonymous;
     setDatabase(anonymous);
     setUserId(null);
+    setSessionReady(true);
+    setAppLock({ ...EMPTY_APP_LOCK, ready: true });
     setViewState("home");
     setSelectedOrderId(null);
     setAccountSwitcher(false);
@@ -718,5 +873,17 @@ export default function AlmadinaApplication() {
     if (user) { setSelectedOrderId(order.id); setView("order-detail"); showToast("تم العثور على الطرد."); } else showToast(`الطرد ${order.trackingNumber}: ${order.recipientName}.`, "info");
   }
 
-  return <AppContext.Provider value={{ database, user, view, preferences, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, login, logout, register, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>{user ? <ApplicationShell /> : <Authentication />}{confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}{accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}{scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div></AppContext.Provider>;
+  const content = !sessionReady
+    ? <main className="session-loading"><Brand /><span className="spinner" /><p>جارٍ التحقق من الجلسة الآمنة...</p></main>
+    : user
+      ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
+      : <Authentication />;
+
+  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, logout, register, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+    {content}
+    {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
+    {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}
+    {!appLock.locked && scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}
+    <div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div>
+  </AppContext.Provider>;
 }

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { createTrackingEvent, getDeliveryFee, getMembershipPrices, getOversizeFee, governorates, money, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, type Order } from "../lib/data";
+import { createTrackingEvent, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
 import { Icon } from "./icon";
 import { Button, Field, PageHeader, SectionCard, SelectField } from "./ui";
 
@@ -12,8 +12,6 @@ const orderTypes = [
   { id: "partial", title: "تجربة أو شراء", description: "معاينة المنتج والدفع عند الاستلام" },
   { id: "return", title: "رجوع", description: "استلام بضاعة من العميل وإعادتها إليك" },
 ];
-
-const weightOptions = ["0 - 5 كغم", "5 - 10 كغم", "10 - 20 كغم", "20 - 30 كغم", "أكثر من 30 كغم"];
 
 const blankForm = {
   type: "standard",
@@ -45,15 +43,21 @@ export function NewOrder() {
   const region = resolveDeliveryRegion(form.governorate, form.city);
   const membershipPrices = getMembershipPrices(user?.membership);
   const baseDeliveryFee = getDeliveryFee(region, user?.membership);
+  const selectedWeightFee = getWeightFee(form.weight);
   const dimensionOversizeFee = getOversizeFee(form.length, form.width, form.height);
+  const weightFee = region ? selectedWeightFee : 0;
   const oversizeFee = region ? dimensionOversizeFee : 0;
-  const deliveryFee = region ? baseDeliveryFee + oversizeFee : 0;
+  const deliveryFee = region ? baseDeliveryFee + weightFee + oversizeFee : 0;
   const deliveryZone = region?.name === "القدس" ? "jerusalem" : region?.name === "الداخل" ? "interior" : region ? "west-bank" : "";
   const amount = Math.max(0, Number(form.amount) || 0);
   const contentValue = Math.max(amount - deliveryFee, 0);
   const savedRecipients = database.recipients.filter((recipient) => recipient.merchantId === user?.id);
   const selectedType = orderTypes.find((type) => type.id === form.type) ?? orderTypes[0];
   const totalCollection = amount;
+  const additionalFeeDetails = [
+    weightFee > 0 ? `${money(weightFee)} ₪ للوزن` : "",
+    oversizeFee > 0 ? `${money(oversizeFee)} ₪ للحجم` : "",
+  ].filter(Boolean).join(" و");
   const dimensions = [form.length, form.width, form.height].some(Boolean)
     ? [form.length || "0", form.width || "0", form.height || "0"].join(" × ")
     : "";
@@ -91,7 +95,7 @@ export function NewOrder() {
         pickupAddress: form.pickup.trim() || `${user.store} - ${form.governorate.trim()}`, amount, deliveryFee,
         preferredDeliveryDate: form.deliveryDate || undefined,
         content: form.content.trim(), weight: form.weight, dimensions: dimensions ? `${dimensions} سم` : "غير محددة",
-        lengthCm: Number(form.length) || undefined, widthCm: Number(form.width) || undefined, heightCm: Number(form.height) || undefined, oversizeFee,
+        lengthCm: Number(form.length) || undefined, widthCm: Number(form.width) || undefined, heightCm: Number(form.height) || undefined, weightFee, oversizeFee,
         notes: form.notes.trim(), privateNotes: form.privateNotes.trim(), reference: form.reference.trim(),
         type: selectedType.title, status: "draft", courierName: "بانتظار تعيين المندوب",
         trackingEvents: [createTrackingEvent("draft", user.name, { location: "مع المرسل", note: "تم إنشاء الطرد وهو قيد الإنشاء.", createdAt: now })],
@@ -151,19 +155,19 @@ export function NewOrder() {
 
       <SectionCard title="تفاصيل الطرد" icon="receipt">
         <div className="form-grid"><Field label="سعر الطرد (التحصيل)" placeholder="0" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value.replace(/[^\d.]/g, "") })} inputMode="decimal" suffix={<span className="field__unit">₪</span>} /><Field label="قيمة المحتويات بعد خصم التوصيل" placeholder="تُحسب تلقائيًا" value={form.amount ? money(contentValue) : ""} readOnly aria-live="polite" suffix={<span className="field__unit">₪</span>} /></div>
-        <p className={`form-note content-value-note ${amount > 0 && amount < deliveryFee ? "is-warning" : ""}`} aria-live="polite">{region ? form.amount ? `تم خصم ${money(deliveryFee)} ₪ للتوصيل${oversizeFee ? `، وتشمل ${money(oversizeFee)} ₪ رسوم حجم إضافية` : ""}: ${money(amount)} − ${money(deliveryFee)} = ${money(contentValue)} ₪.` : `أدخل سعر الطرد، وسيُخصم منه إجمالي توصيل ${region.name} البالغ ${money(deliveryFee)} ₪ تلقائيًا.` : "أدخل المحافظة أو المدينة أولًا لتحديد رسوم التوصيل وحساب قيمة المحتويات."}</p>
+        <p className={`form-note content-value-note ${amount > 0 && amount < deliveryFee ? "is-warning" : ""}`} aria-live="polite">{region ? form.amount ? `تم خصم ${money(deliveryFee)} ₪ للتوصيل${additionalFeeDetails ? `، منها ${additionalFeeDetails}` : ""}: ${money(amount)} − ${money(deliveryFee)} = ${money(contentValue)} ₪.` : `أدخل سعر الطرد، وسيُخصم منه إجمالي توصيل ${region.name} البالغ ${money(deliveryFee)} ₪ تلقائيًا.` : "أدخل المحافظة أو المدينة أولًا لتحديد رسوم التوصيل وحساب قيمة المحتويات."}</p>
         <Field label="وصف المحتوى" placeholder="مثلًا: ساعة، ملابس، إكسسوارات..." value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} />
-        <div className="field"><span className="field__label">الوزن التقديري</span><div className="weight-options">{weightOptions.map((weight) => <button type="button" key={weight} className={form.weight === weight ? "filter-chip is-active" : "filter-chip"} onClick={() => setForm({ ...form, weight })}>{weight}</button>)}</div></div>
+        <div className="field"><span className="field__label">الوزن التقديري</span><div className="weight-options">{WEIGHT_OPTIONS.map((option) => <button type="button" key={option.label} className={form.weight === option.label ? "filter-chip is-active" : "filter-chip"} onClick={() => setForm({ ...form, weight: option.label })}><span>{option.label}</span><small>{option.fee ? `+ ${option.fee} ₪` : "بدون إضافة"}</small></button>)}</div></div>
         <div className="dimensions-grid"><Field label="الطول (سم)" placeholder="20" value={form.length} onChange={(event) => setForm({ ...form, length: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /><Field label="العرض (سم)" placeholder="15" value={form.width} onChange={(event) => setForm({ ...form, width: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /><Field label="الارتفاع (سم)" placeholder="10" value={form.height} onChange={(event) => setForm({ ...form, height: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /></div>
         <div className={`oversize-fee-notice ${dimensionOversizeFee ? "is-active" : ""}`} aria-live="polite">
           <span><Icon name="info" size={18} /></span>
-          <div><strong>{dimensionOversizeFee ? "حجم الطرد مقبول مع رسوم إضافية" : `الحد القياسي لكل بُعد هو ${OVERSIZE_DIMENSION_LIMIT_CM} سم`}</strong><small>{dimensionOversizeFee ? region ? `تجاوز أحد الأبعاد ${OVERSIZE_DIMENSION_LIMIT_CM} سم، لذلك تُضاف ${OVERSIZE_FEE} ₪ مرة واحدة فقط.` : `تجاوز أحد الأبعاد ${OVERSIZE_DIMENSION_LIMIT_CM} سم، وستُضاف ${OVERSIZE_FEE} ₪ مرة واحدة بعد تحديد منطقة التوصيل.` : `إذا تجاوز أي بُعد ${OVERSIZE_DIMENSION_LIMIT_CM} سم تُضاف ${OVERSIZE_FEE} ₪ مرة واحدة.`}</small></div>
+          <div><strong>{dimensionOversizeFee ? "حجم الطرد مقبول مع رسوم إضافية" : `الحد القياسي لكل بُعد هو ${OVERSIZE_DIMENSION_LIMIT_CM} سم`}</strong><small>{dimensionOversizeFee ? region ? `أكبر بُعد يضيف الآن ${dimensionOversizeFee} ₪؛ وتزيد الرسوم ${OVERSIZE_FEE} ₪ لكل ${OVERSIZE_DIMENSION_STEP_CM} سم إضافية حتى ${MAX_OVERSIZE_FEE} ₪.` : `أكبر بُعد يضيف ${dimensionOversizeFee} ₪ بعد تحديد منطقة التوصيل.` : `بعد ${OVERSIZE_DIMENSION_LIMIT_CM} سم تزيد الرسوم تدريجيًا ${OVERSIZE_FEE} ₪ لكل ${OVERSIZE_DIMENSION_STEP_CM} سم إضافية.`}</small></div>
         </div>
       </SectionCard>
 
       <SectionCard title="تعليمات إضافية" icon="file"><Field label="رقم المرجع (اختياري)" placeholder="ORD-00000" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} hint="رقم الطلب في متجرك ليسهل عليك ربط التقارير." /><Field label="التعليمات (تظهر للمندوب فقط)" placeholder="مثلًا: الاتصال قبل الوصول بساعة" value={form.notes} maxLength={500} onChange={(event) => setForm({ ...form, notes: event.target.value })} hint="تظهر هذه التعليمات في حساب المندوب الموظف بعد استلامه الطرد." /><Field label="الملاحظة الخاصة (تظهر للمسؤول فقط)" placeholder="ملاحظة داخلية للإدارة..." value={form.privateNotes} maxLength={1000} onChange={(event) => setForm({ ...form, privateNotes: event.target.value })} hint="لن تظهر للمندوب أو في التتبع العام." /></SectionCard>
 
-      <div className="order-summary"><div><span>سعر الطرد (التحصيل)</span><strong>{money(totalCollection)} ₪</strong></div><div><span>رسوم التوصيل الأساسية المخصومة</span><strong>- {money(baseDeliveryFee)} ₪</strong></div>{oversizeFee > 0 && <div className="order-summary__oversize"><span>رسوم الحجم الإضافية</span><strong>- {money(oversizeFee)} ₪</strong></div>}<div className="order-summary__total"><span>قيمة المحتويات بعد الخصم</span><strong>{money(contentValue)} ₪</strong></div></div><Button type="submit" icon="package" full loading={loading} className="create-order-button">إنشاء الطرد</Button>
+      <div className="order-summary"><div><span>سعر الطرد (التحصيل)</span><strong>{money(totalCollection)} ₪</strong></div><div><span>رسوم التوصيل الأساسية المخصومة</span><strong>- {money(baseDeliveryFee)} ₪</strong></div>{weightFee > 0 && <div className="order-summary__weight"><span>رسوم الوزن الإضافية</span><strong>- {money(weightFee)} ₪</strong></div>}{oversizeFee > 0 && <div className="order-summary__oversize"><span>رسوم الحجم الإضافية</span><strong>- {money(oversizeFee)} ₪</strong></div>}<div className="order-summary__total"><span>قيمة المحتويات بعد الخصم</span><strong>{money(contentValue)} ₪</strong></div></div><Button type="submit" icon="package" full loading={loading} className="create-order-button">إنشاء الطرد</Button>
     </form>
   );
 }

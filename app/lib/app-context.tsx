@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 import type { Database, Notice, NoticeAudience, Preferences, User } from "./data";
+import type { AppLockState } from "./app-lock-client";
 
 export type View =
   | "home"
@@ -39,11 +40,19 @@ export type AppContextValue = {
   user: User | null;
   view: View;
   preferences: Preferences;
+  appLock: AppLockState;
   selectedOrderId: string | null;
   setSelectedOrderId: (id: string | null) => void;
   setView: (view: View) => void;
   updateDatabase: (updater: (current: Database) => Database) => void;
   updatePreferences: (values: Partial<Preferences>) => void;
+  enableAppLock: (pin: string) => Promise<boolean>;
+  disableAppLock: (pin: string) => Promise<boolean>;
+  enableBiometricUnlock: () => Promise<boolean>;
+  disableBiometricUnlock: (pin: string) => Promise<boolean>;
+  verifyAppPin: (pin: string) => Promise<boolean>;
+  unlockWithBiometric: () => Promise<boolean>;
+  refreshAppLock: () => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   register: (values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">) => Promise<boolean>;

@@ -16,18 +16,52 @@ export function SettingsPage() {
 }
 
 export function SecurityPage() {
-  const { user, preferences, updatePreferences, setView, showToast } = useApp();
+  const { user, appLock, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, setView, showToast } = useApp();
   const [pin, setPin] = useState("");
+  const [pinMode, setPinMode] = useState<"setup" | "disable-lock" | "disable-biometric" | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [biometricBusy, setBiometricBusy] = useState(false);
+
+  async function submitPin(value: string) {
+    if (!pinMode) return;
+    setSubmitting(true);
+    const completed = pinMode === "setup"
+      ? await enableAppLock(value)
+      : pinMode === "disable-lock"
+        ? await disableAppLock(value)
+        : await disableBiometricUnlock(value);
+    setSubmitting(false);
+    setPin("");
+    if (completed) setPinMode(null);
+  }
 
   function press(value: string) {
+    if (submitting) return;
     if (value === "clear") return setPin("");
     if (value === "delete") return setPin((current) => current.slice(0, -1));
     const next = `${pin}${value}`.slice(0, 4);
     setPin(next);
-    if (next.length === 4) { updatePreferences({ pin: next }); showToast("تم تفعيل رمز قفل التطبيق."); window.setTimeout(() => setPin(""), 300); }
+    if (next.length === 4) void submitPin(next);
   }
 
-  return <div className="page-content animate-page"><PageHeader title="الأمان والخصوصية" onBack={() => setView("settings")} /><div className="settings-group"><SettingsRow icon="lock" title="قفل التطبيق" subtitle={preferences.pin ? "رمز القفل مفعّل" : "احمِ حسابك برمز دخول"} action={<Toggle checked={Boolean(preferences.pin)} onChange={(value) => { if (!value) { updatePreferences({ pin: "" }); showToast("تم إيقاف قفل التطبيق."); } else showToast("أدخل رمزًا جديدًا من 4 أرقام.", "info"); }} label="قفل التطبيق" />} /><SettingsRow icon="fingerprint" title="الدخول بالبصمة" subtitle="تسجيل دخول أسرع وأكثر أمانًا" action={<Toggle checked={preferences.biometric} onChange={(value) => { updatePreferences({ biometric: value }); showToast(value ? "تم تفعيل الدخول بالبصمة." : "تم إيقاف الدخول بالبصمة."); }} label="الدخول بالبصمة" />} /></div><SectionCard title="أدخل رمز قفل جديد (4 أرقام)" className="pin-card"><div className="pin-dots">{[0, 1, 2, 3].map((index) => <span key={index} className={index < pin.length ? "is-filled" : ""} />)}</div><div className="pin-keypad">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "delete"].map((value) => <button key={value} onClick={() => press(value)}>{value === "clear" ? "C" : value === "delete" ? <Icon name="arrowLeft" size={20} /> : value}</button>)}</div></SectionCard>{user?.role !== "admin" && <div className="settings-group"><SettingsRow icon="trash" title="حذف الحساب" subtitle="راجع الشروط قبل الحذف النهائي" danger onClick={() => setView("delete-account")} /></div>}</div>;
+  const biometricSubtitle = !appLock.enabled
+    ? "فعّل قفل التطبيق وحدد رمزًا أولًا"
+    : appLock.biometricEnabled
+      ? "مفعّلة على هذا الحساب"
+      : appLock.biometricAvailable
+        ? "استخدم بصمة أو Face ID أو رمز حماية الجهاز"
+        : "متاحة على الهواتف وiPad المدعومة عبر HTTPS";
+  const pinTitle = pinMode === "setup" ? "أدخل رمز قفل جديدًا (4 أرقام)" : pinMode === "disable-lock" ? "أدخل رمز القفل لإيقافه" : "أدخل رمز القفل لإيقاف البصمة";
+
+  return <div className="page-content animate-page"><PageHeader title="الأمان والخصوصية" onBack={() => setView("settings")} />
+    <div className="settings-group">
+      <SettingsRow icon="lock" title="قفل التطبيق" subtitle={appLock.enabled ? "رمز القفل مفعّل ومشفّر" : "احمِ حسابك برمز دخول"} action={<Toggle checked={appLock.enabled} disabled={!appLock.ready || submitting} onChange={(value) => { setPin(""); setPinMode(value ? "setup" : "disable-lock"); showToast(value ? "أدخل رمزًا جديدًا من 4 أرقام." : "أدخل رمز القفل الحالي للتأكيد.", "info"); }} label="قفل التطبيق" />} />
+      <SettingsRow icon="fingerprint" title="الدخول بالبصمة" subtitle={biometricSubtitle} action={<Toggle checked={appLock.biometricEnabled} disabled={!appLock.ready || !appLock.enabled || biometricBusy || (!appLock.biometricAvailable && !appLock.biometricEnabled)} onChange={(value) => { if (!value) { setPin(""); setPinMode("disable-biometric"); return; } setBiometricBusy(true); void enableBiometricUnlock().finally(() => setBiometricBusy(false)); }} label="الدخول بالبصمة" />} />
+    </div>
+    {pinMode && <SectionCard title={pinTitle} className="pin-card" action={<Button type="button" variant="ghost" disabled={submitting} onClick={() => { setPinMode(null); setPin(""); }}>إلغاء</Button>}><div className="pin-dots">{[0, 1, 2, 3].map((index) => <span key={index} className={index < pin.length ? "is-filled" : ""} />)}</div><div className="pin-keypad">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "delete"].map((value) => <button type="button" disabled={submitting} key={value} onClick={() => press(value)}>{value === "clear" ? "C" : value === "delete" ? <Icon name="arrowLeft" size={20} /> : value}</button>)}</div>{submitting && <p className="pin-card__status"><span className="spinner" /> جارٍ حفظ إعدادات الأمان...</p>}</SectionCard>}
+    <SectionCard className="security-note"><p><Icon name="shield" size={18} /> يعمل قفل التطبيق داخل الجلسة الحالية. بعد تسجيل الخروج الكامل ستحتاج إلى كلمة مرور الحساب مرة أخرى.</p></SectionCard>
+    {user?.role !== "admin" && <div className="settings-group"><SettingsRow icon="trash" title="حذف الحساب" subtitle="راجع الشروط قبل الحذف النهائي" danger onClick={() => setView("delete-account")} /></div>}
+  </div>;
 }
 
 export function DeleteAccountPage() {

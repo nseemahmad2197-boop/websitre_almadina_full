@@ -38,16 +38,21 @@ test("renders the Almadina Express Arabic login application", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
-  const html = await response.text();
+  const [html, auth] = await Promise.all([
+    response.text(),
+    readFile(new URL("../app/components/auth.tsx", import.meta.url), "utf8"),
+  ]);
   assert.match(html, /<html[^>]+lang="ar"[^>]+dir="rtl"/i);
   assert.match(html, /المدينة إكسبرس/);
   assert.match(html, /ALMADINA EXPRESS/);
-  assert.match(html, /تسجيل الدخول/);
-  assert.match(html, /الحسابات المتاحة/);
-  assert.match(html, /تتبّع طردك بدون تسجيل دخول/);
-  assert.match(html, /أنشئ حسابًا جديدًا/);
-  assert.doesNotMatch(html, /الدخول التجريبي/);
-  assert.doesNotMatch(html, /الحسابات المسجلة/);
+  assert.match(html, /جارٍ التحقق من الجلسة الآمنة/);
+  assert.match(html, /session-loading/);
+  assert.match(auth, /تسجيل الدخول/);
+  assert.match(auth, /الحسابات المتاحة/);
+  assert.match(auth, /تتبّع طردك بدون تسجيل دخول/);
+  assert.match(auth, /أنشئ حسابًا جديدًا/);
+  assert.doesNotMatch(auth, /الدخول التجريبي/);
+  assert.doesNotMatch(auth, /الحسابات المسجلة/);
   assert.doesNotMatch(html, /Starter Project/);
   assert.doesNotMatch(html, /name="codex-preview"/);
 });
@@ -97,7 +102,8 @@ test("keeps account switching and all merchant-facing records private to the sig
   assert.match(management, /const notices = database\.notices\.filter\(\(notice\) => notice\.userId === user\?\.id\)/);
   assert.match(management, /entry\.id === notice\.id && entry\.userId === user\?\.id/);
   assert.match(admin, /notices: current\.notices\.filter\(\(notice\) => notice\.userId !== user\.id\)/);
-  assert.match(settings, /collections: current\.collections\.filter\(\(invoice\) => invoice\.merchantId !== user\.id\)/);
+  assert.match(settings, /setView\("delete-account"\)/);
+  assert.doesNotMatch(settings, /onConfirm: \(\) => \{ updateDatabase/);
   assert.match(server, /collections: database\.collections\.filter\(\(invoice\) => invoice\.merchantId === account\.id\)/);
 });
 
@@ -223,6 +229,49 @@ test("shows a safe available-accounts picker and still requires the password", a
   assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.available-accounts-button/);
 });
 
+test("gates secure mobile biometric unlock behind an encrypted four-digit app lock", async () => {
+  const [application, context, settings, screen, client, server, schema, packageFile, styles] = await Promise.all([
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/app-lock-screen.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-lock-client.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  const manifest = JSON.parse(packageFile);
+
+  assert.equal(typeof manifest.dependencies["@simplewebauthn/browser"], "string");
+  assert.equal(typeof manifest.dependencies["@simplewebauthn/server"], "string");
+  assert.match(schema, /sqliteTable\("almadina_app_locks"/);
+  assert.match(schema, /sqliteTable\("almadina_webauthn_credentials"/);
+  assert.match(schema, /sqliteTable\("almadina_webauthn_challenges"/);
+  assert.match(server, /pin_hash TEXT NOT NULL/);
+  assert.match(server, /APP_LOCK_MAX_FAILED_ATTEMPTS = 5/);
+  assert.match(server, /await verifyPassword\(pin, lock\.pin_hash\)/);
+  assert.match(server, /authenticatorAttachment: "platform"/);
+  assert.match(server, /userVerification: "required"/);
+  assert.match(server, /requireUserVerification: true/);
+  assert.match(server, /DELETE FROM almadina_webauthn_challenges WHERE session_hash/);
+  assert.match(client, /window\.isSecureContext/);
+  assert.match(client, /navigator\.maxTouchPoints > 0/);
+  assert.match(client, /shortestScreenSide > 1024/);
+  assert.match(client, /platformAuthenticatorIsAvailable\(\)/);
+  assert.match(settings, /!appLock\.enabled/);
+  assert.match(settings, /setPinMode\(value \? "setup" : "disable-lock"\)/);
+  assert.match(settings, /disabled=\{!appLock\.ready \|\| !appLock\.enabled/);
+  assert.doesNotMatch(settings, /updatePreferences\(\{ pin:/);
+  assert.match(application, /restoredLock = \{ \.\.\.status, ready: true, locked: status\.enabled/);
+  assert.match(application, /appLock\.locked \? <AppLockScreen \/> : <ApplicationShell \/>/);
+  assert.match(application, /BACKGROUND_LOCK_DELAY = 15_000/);
+  assert.match(context, /enableBiometricUnlock/);
+  assert.match(screen, /تسجيل الخروج واستخدام كلمة المرور/);
+  assert.match(styles, /\.app-lock-screen/);
+  assert.match(styles, /\.toggle:disabled/);
+});
+
 test("keeps merchant and courier account fields read-only while administrators manage them", async () => {
   const [management, admin, server, settings, styles, application] = await Promise.all([
     readFile(new URL("../app/components/management-pages.tsx", import.meta.url), "utf8"),
@@ -267,6 +316,14 @@ test("keeps Excel importing in the desktop toolbar instead of the navigation dra
   assert.match(toolbar, /استيراد Excel/);
   assert.match(styles, /@media \(max-width: 760px\)\s*\{[\s\S]*?\.topbar__import\s*\{\s*display:\s*none/);
   assert.match(styles, /\.bottom-nav\s*\{[^}]*width:\s*100%/);
+});
+
+test("hides the notification bell from the administrator while keeping it for users", async () => {
+  const shell = await readFile(new URL("../app/components/application-shell.tsx", import.meta.url), "utf8");
+  const topbar = shell.split("function TopBar")[1].split("function BottomNavigation")[0];
+
+  assert.equal((topbar.match(/name="bell"/g) ?? []).length, 1);
+  assert.match(topbar, /\{user\?\.role !== "admin"\s*&&\s*<IconButton name="bell" label="الإشعارات" badge=\{unread\} onClick=\{\(\) => setView\("notifications"\)\} \/>\}/);
 });
 
 test("replaces compensation requests with responsive collection invoices and verification codes", async () => {
@@ -432,7 +489,7 @@ test("preserves ₪25 West Bank, ₪35 Jerusalem, and ₪80 interior standard de
   assert.match(orderForm, /الضفة <strong>\{membershipPrices\.westBank\} ₪<\/strong>/);
   assert.match(orderForm, /القدس <strong>\{membershipPrices\.jerusalem\} ₪<\/strong>/);
   assert.match(orderForm, /الداخل <strong>\{membershipPrices\.interior\} ₪<\/strong>/);
-  assert.match(management, /deliveryFee:\s*getDeliveryFee\(region \?\? governorates\[0\], user\.membership\)/);
+  assert.match(management, /deliveryFee:\s*getDeliveryFee\(region \?\? governorates\[0\], user\.membership\) \+ weightFee \+ oversizeFee/);
 });
 
 test("automatically applies ₪20 West Bank, ₪30 Jerusalem, and ₪65 interior premium delivery prices", async () => {
@@ -451,7 +508,7 @@ test("automatically applies ₪20 West Bank, ₪30 Jerusalem, and ₪65 interior
   assert.match(orderForm, /getDeliveryFee\(region, user\?\.membership\)/);
   assert.match(orderForm, /resolveDeliveryRegion\(form\.governorate, form\.city\)/);
   assert.match(orderForm, /أسعار بريميوم/);
-  assert.match(management, /getDeliveryFee\(region \?\? governorates\[0\], user\.membership\)/);
+  assert.match(management, /getDeliveryFee\(region \?\? governorates\[0\], user\.membership\) \+ weightFee \+ oversizeFee/);
 });
 
 test("allows freely typing the parcel governorate and city while resolving regional delivery prices", async () => {
@@ -480,21 +537,25 @@ test("subtracts the selected regional delivery fee from the parcel price in the 
   ]);
 
   assert.match(orderForm, /const baseDeliveryFee = getDeliveryFee\(region, user\?\.membership\)/);
+  assert.match(orderForm, /const selectedWeightFee = getWeightFee\(form\.weight\)/);
   assert.match(orderForm, /const dimensionOversizeFee = getOversizeFee\(form\.length, form\.width, form\.height\)/);
+  assert.match(orderForm, /const weightFee = region \? selectedWeightFee : 0/);
   assert.match(orderForm, /const oversizeFee = region \? dimensionOversizeFee : 0/);
-  assert.match(orderForm, /const deliveryFee = region \? baseDeliveryFee \+ oversizeFee : 0/);
+  assert.match(orderForm, /const deliveryFee = region \? baseDeliveryFee \+ weightFee \+ oversizeFee : 0/);
   assert.match(orderForm, /const contentValue = Math\.max\(amount - deliveryFee, 0\)/);
   assert.match(orderForm, /const totalCollection = amount/);
   assert.match(orderForm, /label="قيمة المحتويات بعد خصم التوصيل"/);
   assert.match(orderForm, /value=\{form\.amount \? money\(contentValue\) : ""\}/);
   assert.match(orderForm, /تم خصم \$\{money\(deliveryFee\)\} ₪ للتوصيل/);
   assert.match(orderForm, /<span>رسوم التوصيل الأساسية المخصومة<\/span><strong>- \{money\(baseDeliveryFee\)\} ₪<\/strong>/);
+  assert.match(orderForm, /<span>رسوم الوزن الإضافية<\/span><strong>- \{money\(weightFee\)\} ₪<\/strong>/);
   assert.match(orderForm, /<span>رسوم الحجم الإضافية<\/span><strong>- \{money\(oversizeFee\)\} ₪<\/strong>/);
   assert.match(orderForm, /<span>قيمة المحتويات بعد الخصم<\/span><strong>\{money\(contentValue\)\} ₪<\/strong>/);
   assert.match(dashboard, /money\(Math\.max\(order\.amount - order\.deliveryFee, 0\)\)/);
+  assert.match(dashboard, /order\.deliveryFee - weightFee - oversizeFee/);
 });
 
-test("adds one ₪7 size fee when any parcel dimension exceeds 40 cm", async () => {
+test("adds progressive weight and dimension fees while keeping legacy imports compatible", async () => {
   const [data, orderForm, server, dashboard, management, download, styles] = await Promise.all([
     readFile(new URL("../app/lib/data.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/components/order-form.tsx", import.meta.url), "utf8"),
@@ -506,39 +567,65 @@ test("adds one ₪7 size fee when any parcel dimension exceeds 40 cm", async () 
   ]);
 
   assert.match(data, /OVERSIZE_DIMENSION_LIMIT_CM = 40/);
+  assert.match(data, /OVERSIZE_DIMENSION_STEP_CM = 20/);
   assert.match(data, /OVERSIZE_FEE = 7/);
-  assert.match(data, /dimensions\.some\(\(dimension\) => validDimension\(dimension\) > OVERSIZE_DIMENSION_LIMIT_CM\) \? OVERSIZE_FEE : 0/);
+  assert.match(data, /MAX_OVERSIZE_FEE = 28/);
+  assert.match(data, /Math\.ceil\(\(largestDimension - OVERSIZE_DIMENSION_LIMIT_CM\) \/ OVERSIZE_DIMENSION_STEP_CM\)/);
+  assert.match(data, /Math\.min\(tier \* OVERSIZE_FEE, MAX_OVERSIZE_FEE\)/);
+  assert.match(data, /export const WEIGHT_OPTIONS/);
+  assert.match(data, /\{ label: "أكثر من 30 كغم", fee: 20 \}/);
+  assert.match(data, /export function getWeightFee/);
+  assert.match(data, /weightFee\?: number/);
   assert.match(data, /oversizeFee\?: number/);
   assert.match(data, /lengthCm\?: number/);
   assert.match(data, /export function getOrderOversizeFee/);
   assert.match(data, /export function parseDimensionCm/);
   assert.match(data, /normalizeDigits/);
-  assert.match(orderForm, /إذا تجاوز أي بُعد \$\{OVERSIZE_DIMENSION_LIMIT_CM\} سم تُضاف \$\{OVERSIZE_FEE\} ₪ مرة واحدة/);
+  assert.match(orderForm, /تزيد الرسوم تدريجيًا \$\{OVERSIZE_FEE\} ₪ لكل \$\{OVERSIZE_DIMENSION_STEP_CM\} سم إضافية/);
   assert.match(orderForm, /className=\{`oversize-fee-notice \$\{dimensionOversizeFee \? "is-active" : ""\}`\}/);
+  assert.match(orderForm, /weightFee, oversizeFee/);
   assert.match(orderForm, /oversizeFee:\s*oversizeFee|heightCm: Number\(form\.height\)[\s\S]{0,80}oversizeFee/);
   assert.match(server, /getOrderDimensions\(candidate\)/);
+  assert.match(server, /const weight = normalizeWeightOption\(candidate\.weight\)/);
+  assert.match(server, /const weightFee = getWeightFee\(weight\)/);
   assert.match(server, /getOrderOversizeFee\(candidate\)/);
-  assert.match(server, /getDeliveryFee\(region, savedAccount\.membership\) \+ oversizeFee/);
+  assert.match(server, /getDeliveryFee\(region, savedAccount\.membership\) \+ weightFee \+ oversizeFee/);
+  assert.match(dashboard, /رسوم الوزن الإضافية/);
   assert.match(dashboard, /رسوم الحجم الإضافية/);
-  assert.match(download, /"الطول سم", "العرض سم", "الارتفاع سم"/);
+  assert.match(download, /"الطول سم", "العرض سم", "الارتفاع سم", "الوزن"/);
   assert.match(management, /parseDimensionCm\(row\[6\]\)/);
+  assert.match(management, /normalizeWeightOption\(row\[9\]\)/);
+  assert.match(management, /getWeightFee\(weight\)/);
   assert.match(management, /getOversizeFee\(lengthCm, widthCm, heightCm\)/);
-  assert.match(management, /getDeliveryFee\(region \?\? governorates\[0\], user\.membership\) \+ oversizeFee/);
-  assert.match(management, /إذا تجاوز أي بُعد 40 سم/);
+  assert.match(management, /getDeliveryFee\(region \?\? governorates\[0\], user\.membership\) \+ weightFee \+ oversizeFee/);
+  assert.match(management, /رسوم الوزن والحجم تدريجيًا/);
   assert.match(styles, /\.oversize-fee-notice\.is-active/);
 });
 
 test("normalizes Arabic and Latin dimension values used by CSV importing", async () => {
-  const { getOversizeFee, parseDimensionCm } = await import(new URL("../app/lib/data.ts", import.meta.url));
+  const { getOversizeFee, getWeightFee, normalizeWeightOption, parseDimensionCm } = await import(new URL("../app/lib/data.ts", import.meta.url));
 
   assert.equal(parseDimensionCm("40"), 40);
   assert.equal(parseDimensionCm("٤٠"), 40);
   assert.equal(parseDimensionCm("٥٠"), 50);
   assert.equal(getOversizeFee(40, 40, 40), 0);
   assert.equal(getOversizeFee(41, 40, 40), 7);
-  assert.equal(getOversizeFee(40, 41, 40), 7);
-  assert.equal(getOversizeFee(40, 40, 41), 7);
+  assert.equal(getOversizeFee(60, 40, 40), 7);
+  assert.equal(getOversizeFee(61, 40, 40), 14);
+  assert.equal(getOversizeFee(80, 40, 40), 14);
+  assert.equal(getOversizeFee(81, 40, 40), 21);
+  assert.equal(getOversizeFee(100, 40, 40), 21);
+  assert.equal(getOversizeFee(101, 40, 40), 28);
+  assert.equal(getOversizeFee(300, 40, 40), 28);
   assert.equal(getOversizeFee(50, 50, 50), 7);
+  assert.equal(getOversizeFee("٨١", "٢٠", "٢٠"), 21);
+  assert.equal(getWeightFee("0 - 5 كغم"), 0);
+  assert.equal(getWeightFee("5 - 10 كغم"), 5);
+  assert.equal(getWeightFee("10 - 20 كغم"), 10);
+  assert.equal(getWeightFee("20 - 30 كغم"), 15);
+  assert.equal(getWeightFee("أكثر من 30 كغم"), 20);
+  assert.equal(normalizeWeightOption(undefined), "0 - 5 كغم");
+  assert.equal(getWeightFee("قيمة غير صالحة"), 0);
 });
 
 test("uses «الطرود» in visible copy while preserving the internal shipments hooks", async () => {
@@ -732,4 +819,143 @@ test("renders dialogs into the document body and keeps collection verification c
   assert.match(styles, /\.collection-detail__scroll\s*\{[^}]*overflow-y:\s*auto/);
   assert.match(styles, /\.collection-detail__action\s*\{[^}]*border-top:/);
   assert.match(icons, /return:\s*<>\s*<rect x="4" y="4" width="16" height="16" rx="4"\/>/);
+});
+
+test("lets only the administrator broadcast app-update notifications to membership groups, roles, or one user with optional sound", async () => {
+  const [data, context, application, admin, server, styles] = await Promise.all([
+    readFile(new URL("../app/lib/data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/admin.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(data, /export type NoticeAudience = "all" \| "merchants" \| "couriers" \| "premium" \| "standard" \| "user"/);
+  assert.match(context, /broadcastNotice:\s*\(notice:[\s\S]*recipientUserId\?: string[\s\S]*Promise<number \| null>/);
+  assert.match(application, /sharedRequest\("notices\/broadcast"/);
+  assert.match(application, /broadcastRequestIds\.current\.get\(requestKey\) \?\? uid\("broadcast"\)/);
+  assert.match(application, /values\.recipientUserId \?\? ""/);
+  assert.match(application, /body:\s*JSON\.stringify\(\{ requestId, \.\.\.values \}\)/);
+  assert.match(application, /remoteMutationInFlight\.current = true/);
+  assert.match(application, /pendingUpdates\.current\.reduce\(\(current, update\) => update\(current\), snapshot\.database\)/);
+  assert.match(application, /<AppContext\.Provider value=\{\{[\s\S]*broadcastNotice/);
+  assert.match(application, /knownNoticeIds/);
+  assert.match(application, /noticeBaselineUserId/);
+  assert.match(application, /playNotificationChime/);
+  assert.match(application, /preferences\.notifications && preferences\.sounds/);
+  assert.match(application, /newNotices\.some\(\(notice\) => !notice\.read\)/);
+  assert.match(application, /knownNoticeIds\.current\.add\(notice\.id\)/);
+  assert.match(application, /document\.addEventListener\("pointerdown", unlock/);
+  assert.match(admin, />إرسال تحديث<\/Button>/);
+  assert.match(admin, /title="إرسال إشعار تحديث"/);
+  assert.match(admin, /جميع المستخدمين/);
+  assert.match(admin, /التجار فقط/);
+  assert.match(admin, /<option value="premium">حسابات البريميوم فقط<\/option>/);
+  assert.match(admin, /<option value="standard">الحسابات العادية فقط<\/option>/);
+  assert.match(admin, /المندوبون فقط/);
+  assert.match(admin, /مستخدم محدد/);
+  assert.match(admin, /label="اختر المستخدم"/);
+  assert.match(admin, /recipientUserId/);
+  assert.match(admin, /audience === "premium" && account\.role === "merchant" && account\.membership === "premium"/);
+  assert.match(admin, /audience === "standard" && account\.role === "merchant" && account\.membership !== "premium"/);
+  assert.match(admin, /announcement\.audience === "premium" \? merchants\.filter\(\(account\) => account\.membership === "premium"\)\.length/);
+  assert.match(admin, /announcement\.audience === "standard" \? merchants\.filter\(\(account\) => account\.membership !== "premium"\)\.length/);
+  assert.match(admin, /await broadcastNotice\(/);
+  assert.match(server, /session\.account\.role !== "admin"[\s\S]*هذه الميزة متاحة للمسؤول فقط/);
+  assert.match(server, /url\.pathname === "\/api\/almadina\/notices\/broadcast"/);
+  assert.match(server, /audience !== "premium" && audience !== "standard"/);
+  assert.match(server, /audience === "premium" && account\.role === "merchant" && account\.membership === "premium"/);
+  assert.match(server, /audience === "standard" && account\.role === "merchant" && account\.membership !== "premium"/);
+  assert.match(server, /sha256\(`\$\{requestId\}:\$\{account\.id\}`\)/);
+  assert.match(server, /notice\.broadcastId === requestId/);
+  assert.match(server, /notice\.title !== title \|\| notice\.message !== message \|\| notice\.audience !== audience \|\| \(audience === "user" && notice\.userId !== recipientUserId\)/);
+  assert.match(server, /account\.id === recipientUserId && account\.role !== "admin"/);
+  assert.match(server, /المستخدم المحدد غير موجود أو لا يمكن إرسال إشعار إليه/);
+  assert.match(server, /notices:\s*\[\.\.\.missingNotices, \.\.\.state\.database\.notices\]/);
+  assert.match(server, /if \(!missingNotices\.length\)/);
+  assert.match(styles, /\.admin-notification-modal\s*\{/);
+  assert.match(styles, /\.admin-notification-message textarea\s*\{/);
+  assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.admin-notification-summary/);
+});
+
+test("lets a signed-in account clear only its own selected notifications through the protected server route", async () => {
+  const [context, application, management, server, styles] = await Promise.all([
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/management-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(context, /clearNotices:\s*\(noticeIds: string\[\]\) => Promise<number \| null>/);
+  assert.match(application, /async function clearNotices\(noticeIds: string\[\]\): Promise<number \| null>/);
+  assert.match(application, /sharedRequest\("notices\/clear",\s*\{[\s\S]*method: "POST"[\s\S]*JSON\.stringify\(\{ noticeIds \}\)/);
+  assert.match(application, /authoritativeDatabase\.current = snapshot\.database/);
+  assert.match(application, /return snapshot\.removedCount \?\? 0/);
+  assert.match(application, /<AppContext\.Provider value=\{\{[\s\S]*clearNotices/);
+  assert.match(management, /const notices = database\.notices\.filter\(\(notice\) => notice\.userId === user\?\.id\)/);
+  assert.match(management, /const visibleNoticeIds = notices\.map\(\(notice\) => notice\.id\)/);
+  assert.match(management, /const removedCount = await clearNotices\(noticeIds\)/);
+  assert.match(management, /title: "مسح جميع الإشعارات\؟"/);
+  assert.match(management, /إشعارات هذا الحساب فقط/);
+  assert.match(management, /danger: true/);
+  assert.match(management, /className="notification-clear-button"[\s\S]*مسح الكل/);
+  assert.match(server, /async function clearNotices\(database: D1Database, request: Request, session: AuthenticatedSession\): Promise<Response>/);
+  assert.match(server, /Array\.isArray\(payload\.noticeIds\)[\s\S]*payload\.noticeIds\.length > 5_000/);
+  assert.match(server, /const noticeIds = new Set\(payload\.noticeIds\.map/);
+  assert.match(server, /state\.database\.users\.find\(\(entry\) => entry\.id === session\.account\.id\)/);
+  assert.match(server, /state\.database\.notices\.filter\(\(notice\) => notice\.userId !== account\.id \|\| !noticeIds\.has\(notice\.id\)\)/);
+  assert.match(server, /const next: Database = \{ \.\.\.state\.database, notices \}/);
+  assert.match(server, /removedCount: 0/);
+  assert.match(server, /if \(!session\) return[\s\S]*url\.pathname === "\/api\/almadina\/notices\/clear" && request\.method === "POST"[\s\S]*return await clearNotices\(database, request, session\)/);
+  assert.match(styles, /\.notification-page-actions\s*\{/);
+  assert.match(styles, /\.notification-clear-button\s*\{[^}]*color:\s*var\(--danger\)/);
+});
+
+test("shows a reference-style account deletion page and performs deletion only through the protected server route", async () => {
+  const [application, context, server, shell, settings, styles, availableAccounts] = await Promise.all([
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/available-accounts.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(context, /\| "delete-account"/);
+  assert.match(context, /deleteAccount:\s*\(password: string, confirmation: string\) => Promise<boolean>/);
+  assert.match(shell, /case "delete-account": return <DeleteAccountPage \/>/);
+  assert.match(shell, /view !== "delete-account" && <BottomNavigation \/>/);
+  assert.match(settings, /export function DeleteAccountPage\(\)/);
+  assert.match(settings, /قبل حذف حسابك/);
+  assert.match(settings, /إكمال جميع معاملات التحصيل/);
+  assert.match(settings, /ألا توجد طرود نشطة/);
+  assert.match(settings, /إدراج كل طرد مكتمل في فاتورة تحصيل مدفوعة/);
+  assert.match(settings, /الحذف نهائي وفوري بعد التأكيد/);
+  assert.match(settings, /disabled=\{!eligible\}/);
+  assert.match(settings, /اكتب «حذف حسابي» للتأكيد/);
+  assert.match(settings, /deleteAccount\(password, confirmation\)/);
+  assert.doesNotMatch(settings, /users: current\.users\.filter\(\(entry\) => entry\.id !== user\.id\)/);
+
+  assert.match(application, /fetch\("\/api\/almadina\/account\/delete"/);
+  assert.match(application, /JSON\.stringify\(\{ password, confirmation \}\)/);
+  assert.match(application, /forgetAvailableAccount\(user\.id\)/);
+  assert.match(availableAccounts, /export function forgetAvailableAccount\(accountId: string\)/);
+
+  assert.match(server, /async function deleteOwnAccount/);
+  assert.match(server, /session\.account\.role === "admin"/);
+  assert.match(server, /confirmation !== "حذف حسابي"/);
+  assert.match(server, /verifyPassword\(password, account\.password\)/);
+  assert.match(server, /accountDeletionEligibility\(state\.database, account\)/);
+  assert.match(server, /invoice\.status === "paid"/);
+  assert.match(server, /order\.status !== "delivered" && order\.status !== "returned"/);
+  assert.match(server, /DELETE FROM almadina_sessions WHERE user_id = \?/);
+  assert.match(server, /url\.pathname === "\/api\/almadina\/account\/delete"/);
+
+  assert.match(styles, /\.delete-account-page\s*\{/);
+  assert.match(styles, /\.delete-account-requirements\s*\{/);
+  assert.match(styles, /\.delete-account-actions\s*\{/);
+  assert.match(styles, /\.delete-account-confirmation-modal\s*\{/);
 });

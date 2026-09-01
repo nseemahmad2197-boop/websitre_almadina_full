@@ -26,7 +26,35 @@ class FakeD1Statement {
       return session ? { user_id: session.user_id, expires_at: session.expires_at } : null;
     }
 
+    if (this.sql.startsWith("SELECT user_id, pin_hash, enabled, biometric_enabled, failed_attempts, locked_until FROM almadina_app_locks")) {
+      return this.database.appLocks.get(this.values[0]) ?? null;
+    }
+
+    if (this.sql.startsWith("SELECT credential_id FROM almadina_webauthn_credentials WHERE user_id")) {
+      return [...this.database.credentials.values()].find((credential) => credential.user_id === this.values[0]) ?? null;
+    }
+
+    if (this.sql.startsWith("SELECT challenge, origin, rp_id, expires_at FROM almadina_webauthn_challenges")) {
+      return this.database.challenges.get(`${this.values[0]}:${this.values[2]}`) ?? null;
+    }
+
+    if (this.sql.startsWith("SELECT user_id FROM almadina_webauthn_credentials WHERE credential_id")) {
+      return this.database.credentials.get(this.values[0]) ?? null;
+    }
+
+    if (this.sql.startsWith("SELECT credential_id, user_id, public_key, counter, transports, device_type, backed_up FROM almadina_webauthn_credentials WHERE credential_id")) {
+      const credential = this.database.credentials.get(this.values[0]);
+      return credential?.user_id === this.values[1] ? credential : null;
+    }
+
     throw new Error(`Unsupported mock D1 first() query: ${this.sql}`);
+  }
+
+  async all() {
+    if (this.sql.startsWith("SELECT credential_id, user_id, public_key, counter, transports, device_type, backed_up FROM almadina_webauthn_credentials WHERE user_id")) {
+      return { results: [...this.database.credentials.values()].filter((credential) => credential.user_id === this.values[0]), success: true, meta: { changes: 0 } };
+    }
+    throw new Error(`Unsupported mock D1 all() query: ${this.sql}`);
   }
 
   async run() {
@@ -62,8 +90,94 @@ class FakeD1Statement {
       return { success: true, meta: { changes: 1 } };
     }
 
-    if (this.sql.startsWith("DELETE FROM almadina_sessions")) {
+    if (this.sql.startsWith("DELETE FROM almadina_sessions WHERE user_id")) {
+      let changes = 0;
+      for (const [tokenHash, session] of this.database.sessions) {
+        if (session.user_id !== this.values[0]) continue;
+        this.database.sessions.delete(tokenHash);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_sessions WHERE token_hash")) {
       return { success: true, meta: { changes: Number(this.database.sessions.delete(this.values[0])) } };
+    }
+
+    if (this.sql.startsWith("INSERT INTO almadina_app_locks")) {
+      this.database.appLocks.set(this.values[0], {
+        user_id: this.values[0], pin_hash: this.values[1], enabled: 1, biometric_enabled: 0,
+        failed_attempts: 0, locked_until: 0, updated_at: this.values[2],
+      });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("UPDATE almadina_app_locks SET failed_attempts = ?")) {
+      const lock = this.database.appLocks.get(this.values[3]);
+      if (!lock) return { success: true, meta: { changes: 0 } };
+      Object.assign(lock, { failed_attempts: this.values[0], locked_until: this.values[1], updated_at: this.values[2] });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("UPDATE almadina_app_locks SET failed_attempts = 0")) {
+      const lock = this.database.appLocks.get(this.values[1]);
+      if (!lock) return { success: true, meta: { changes: 0 } };
+      Object.assign(lock, { failed_attempts: 0, locked_until: 0, updated_at: this.values[0] });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("UPDATE almadina_app_locks SET biometric_enabled =")) {
+      const enabled = this.sql.includes("biometric_enabled = 1") ? 1 : 0;
+      const lock = this.database.appLocks.get(this.values[1]);
+      if (!lock) return { success: true, meta: { changes: 0 } };
+      Object.assign(lock, { biometric_enabled: enabled, updated_at: this.values[0] });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_app_locks WHERE user_id")) {
+      return { success: true, meta: { changes: Number(this.database.appLocks.delete(this.values[0])) } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_webauthn_credentials WHERE user_id")) {
+      let changes = 0;
+      for (const [credentialId, credential] of this.database.credentials) {
+        if (credential.user_id !== this.values[0]) continue;
+        this.database.credentials.delete(credentialId);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_webauthn_challenges WHERE user_id")) {
+      let changes = 0;
+      for (const [key, challenge] of this.database.challenges) {
+        if (challenge.user_id !== this.values[0]) continue;
+        this.database.challenges.delete(key);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_webauthn_challenges WHERE expires_at")) {
+      let changes = 0;
+      for (const [key, challenge] of this.database.challenges) {
+        if (challenge.expires_at > this.values[0]) continue;
+        this.database.challenges.delete(key);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("INSERT INTO almadina_webauthn_challenges")) {
+      this.database.challenges.set(`${this.values[0]}:${this.values[2]}`, {
+        session_hash: this.values[0], user_id: this.values[1], kind: this.values[2], challenge: this.values[3],
+        origin: this.values[4], rp_id: this.values[5], expires_at: this.values[6], created_at: this.values[7],
+      });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_webauthn_challenges WHERE session_hash")) {
+      return { success: true, meta: { changes: Number(this.database.challenges.delete(`${this.values[0]}:${this.values[1]}`)) } };
     }
 
     throw new Error(`Unsupported mock D1 run() query: ${this.sql}`);
@@ -73,6 +187,9 @@ class FakeD1Statement {
 class FakeD1Database {
   state = null;
   sessions = new Map();
+  appLocks = new Map();
+  credentials = new Map();
+  challenges = new Map();
 
   prepare(sql) {
     return new FakeD1Statement(this, sql);
@@ -175,6 +292,7 @@ test("shares accounts and orders across devices while isolating customers and pr
     lengthCm: 50,
     widthCm: 50,
     heightCm: 50,
+    weightFee: 999,
     oversizeFee: 999,
     notes: courierInstructions,
     privateNotes: adminOnlyNote,
@@ -212,6 +330,7 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(createdOrder.body.database.orders[0].trackingEvents[0].actor, "التاجر الأول");
   assert.equal(createdOrder.body.database.orders[0].trackingEvents[0].note, "تم إنشاء الطرد وهو قيد الإنشاء.");
   assert.equal(createdOrder.body.database.orders[0].deliveryFee, 42);
+  assert.equal(createdOrder.body.database.orders[0].weightFee, 0);
   assert.equal(createdOrder.body.database.orders[0].oversizeFee, 7);
   assert.equal(createdOrder.body.database.orders[0].courierId, undefined);
   assert.equal(createdOrder.body.database.orders[0].shippedAt, undefined);
@@ -325,6 +444,7 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(managedDevice.status, 200);
   assert.equal(managedDevice.body.database.users.length, 1);
   assert.deepEqual(managedDevice.body.database.orders, []);
+  const managedCookie = sessionFrom(managedDevice);
 
   const employeeDevice = await call(worker, database, "login", {
     method: "POST",
@@ -345,6 +465,342 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(sameNameEmployeeDevice.status, 200);
   assert.deepEqual(sameNameEmployeeDevice.body.database.orders, []);
   const sameNameEmployeeCookie = sessionFrom(sameNameEmployeeDevice);
+
+  const merchantBroadcastAttempt = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: secondCookie,
+    payload: {
+      requestId: "release-merchant-attempt",
+      audience: "all",
+      title: "تحديث تجريبي",
+      message: "يجب ألا يستطيع التاجر إرسال هذا الإشعار.",
+    },
+  });
+  assert.equal(merchantBroadcastAttempt.status, 403);
+
+  const anonymousBroadcastAttempt = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    payload: {
+      requestId: "release-anonymous-attempt",
+      audience: "all",
+      title: "تحديث تجريبي",
+      message: "يجب ألا يستطيع الزائر إرسال هذا الإشعار.",
+    },
+  });
+  assert.equal(anonymousBroadcastAttempt.status, 401);
+
+  const courierBroadcastAttempt = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: employeeCookie,
+    payload: {
+      requestId: "release-courier-attempt",
+      audience: "all",
+      title: "تحديث تجريبي",
+      message: "يجب ألا يستطيع المندوب إرسال هذا الإشعار.",
+    },
+  });
+  assert.equal(courierBroadcastAttempt.status, 403);
+
+  const invalidBroadcast = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: { requestId: "short", audience: "unknown", title: "x", message: "x" },
+  });
+  assert.equal(invalidBroadcast.status, 400);
+
+  const nonStringBroadcast = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: { requestId: 12345678, audience: "all", title: { text: "عنوان" }, message: ["رسالة"] },
+  });
+  assert.equal(nonStringBroadcast.status, 400);
+
+  const adminBeforeBroadcast = await call(worker, database, "database", { cookie: adminCookie });
+  const preservedBeforeBroadcast = {
+    users: adminBeforeBroadcast.body.database.users,
+    orders: adminBeforeBroadcast.body.database.orders,
+    recipients: adminBeforeBroadcast.body.database.recipients,
+    collections: adminBeforeBroadcast.body.database.collections,
+    preferences: adminBeforeBroadcast.body.database.preferences,
+    nextOrder: adminBeforeBroadcast.body.database.nextOrder,
+    nextCollection: adminBeforeBroadcast.body.database.nextCollection,
+  };
+  const noticeIdsBeforeBroadcast = new Set(adminBeforeBroadcast.body.database.notices.map((notice) => notice.id));
+  const broadcastRequest = {
+    requestId: "release-2026-09-01-001",
+    audience: "all",
+    title: "آخر تحديثات المدينة إكسبرس",
+    message: "تم تحسين قارئ QR وإضافة مزايا جديدة للتطبيق.",
+  };
+  const broadcast = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: broadcastRequest,
+  });
+
+  assert.equal(broadcast.status, 200);
+  assert.equal(broadcast.body.recipientCount, 5);
+  assert.equal(broadcast.body.revision, adminBeforeBroadcast.body.revision + 1);
+  assert.deepEqual({
+    users: broadcast.body.database.users,
+    orders: broadcast.body.database.orders,
+    recipients: broadcast.body.database.recipients,
+    collections: broadcast.body.database.collections,
+    preferences: broadcast.body.database.preferences,
+    nextOrder: broadcast.body.database.nextOrder,
+    nextCollection: broadcast.body.database.nextCollection,
+  }, preservedBeforeBroadcast);
+  const deliveredBroadcasts = broadcast.body.database.notices.filter((notice) => notice.title === broadcastRequest.title);
+  assert.equal(deliveredBroadcasts.length, 5);
+  assert.ok(deliveredBroadcasts.every((notice) => notice.userId !== administrator.body.userId));
+  assert.ok(deliveredBroadcasts.every((notice) => notice.read === false && notice.icon === "sparkles"));
+  assert.ok(deliveredBroadcasts.every((notice) => notice.broadcastId === broadcastRequest.requestId && notice.audience === "all"));
+  assert.equal(new Set(deliveredBroadcasts.map((notice) => notice.userId)).size, 5);
+  assert.ok([...noticeIdsBeforeBroadcast].every((noticeId) => broadcast.body.database.notices.some((notice) => notice.id === noticeId)));
+
+  const repeatedBroadcast = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: broadcastRequest,
+  });
+  assert.equal(repeatedBroadcast.status, 200);
+  assert.equal(repeatedBroadcast.body.revision, broadcast.body.revision);
+  assert.equal(repeatedBroadcast.body.database.notices.filter((notice) => notice.title === broadcastRequest.title).length, 5);
+
+  const conflictingBroadcast = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: { ...broadcastRequest, title: "محتوى مختلف للمفتاح نفسه" },
+  });
+  assert.equal(conflictingBroadcast.status, 409);
+  assert.equal(conflictingBroadcast.body.revision, broadcast.body.revision);
+  assert.equal(conflictingBroadcast.body.database.notices.filter((notice) => notice.title === "محتوى مختلف للمفتاح نفسه").length, 0);
+
+  const [merchantOnlyBroadcast, courierOnlyBroadcast] = await Promise.all([
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: {
+        requestId: "release-merchants-2026-09-01",
+        audience: "merchants",
+        title: "تحديث خاص بالتجار",
+        message: "تمت إضافة تحسين جديد إلى أدوات إدارة الطرود.",
+      },
+    }),
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: {
+        requestId: "release-couriers-2026-09-01",
+        audience: "couriers",
+        title: "تحديث خاص بالمندوبين",
+        message: "تمت إضافة تحسين جديد إلى أدوات مسح الطرود.",
+      },
+    }),
+  ]);
+  assert.equal(merchantOnlyBroadcast.status, 200);
+  assert.equal(courierOnlyBroadcast.status, 200);
+  assert.equal(merchantOnlyBroadcast.body.recipientCount, 3);
+  assert.equal(courierOnlyBroadcast.body.recipientCount, 2);
+
+  const merchantAfterBroadcast = await call(worker, database, "database", { cookie: secondCookie });
+  const merchantBroadcasts = merchantAfterBroadcast.body.database.notices.filter((notice) => notice.title === broadcastRequest.title);
+  assert.equal(merchantBroadcasts.length, 1);
+  assert.equal(merchantBroadcasts[0].userId, firstDevice.body.userId);
+  assert.equal(merchantAfterBroadcast.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالتجار").length, 1);
+  assert.equal(merchantAfterBroadcast.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالمندوبين").length, 0);
+  const courierAfterBroadcast = await call(worker, database, "database", { cookie: employeeCookie });
+  const courierBroadcasts = courierAfterBroadcast.body.database.notices.filter((notice) => notice.title === broadcastRequest.title);
+  assert.equal(courierBroadcasts.length, 1);
+  assert.equal(courierBroadcasts[0].userId, employeeAccount.id);
+  assert.equal(courierAfterBroadcast.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالتجار").length, 0);
+  assert.equal(courierAfterBroadcast.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالمندوبين").length, 1);
+
+  const [premiumOnlyBroadcast, standardOnlyBroadcast] = await Promise.all([
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: {
+        requestId: "release-premium-2026-09-01",
+        audience: "premium",
+        title: "تحديث خاص بحسابات البريميوم",
+        message: "هذا الإشعار مخصص للتجار أصحاب حسابات البريميوم فقط.",
+      },
+    }),
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: {
+        requestId: "release-standard-2026-09-01",
+        audience: "standard",
+        title: "تحديث خاص بالحسابات العادية",
+        message: "هذا الإشعار مخصص للتجار أصحاب الحسابات العادية فقط.",
+      },
+    }),
+  ]);
+  assert.equal(premiumOnlyBroadcast.status, 200);
+  assert.equal(standardOnlyBroadcast.status, 200);
+  assert.equal(premiumOnlyBroadcast.body.recipientCount, 1);
+  assert.equal(standardOnlyBroadcast.body.recipientCount, 2);
+
+  const premiumMerchantAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: secondCookie });
+  const standardMerchantAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: otherCookie });
+  const managedStandardAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: managedCookie });
+  const courierAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: employeeCookie });
+  assert.equal(premiumMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بحسابات البريميوم" && notice.audience === "premium").length, 1);
+  assert.equal(premiumMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات العادية").length, 0);
+  assert.equal(standardMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بحسابات البريميوم").length, 0);
+  assert.equal(standardMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات العادية" && notice.audience === "standard").length, 1);
+  assert.equal(managedStandardAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات العادية" && notice.audience === "standard").length, 1);
+  assert.equal(courierAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بحسابات البريميوم" || notice.title === "تحديث خاص بالحسابات العادية").length, 0);
+
+  const readByMerchant = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: secondCookie,
+    payload: {
+      revision: premiumMerchantAfterMembershipBroadcasts.body.revision,
+      database: {
+        ...premiumMerchantAfterMembershipBroadcasts.body.database,
+        notices: premiumMerchantAfterMembershipBroadcasts.body.database.notices.map((notice) => notice.title === broadcastRequest.title ? { ...notice, read: true } : notice),
+      },
+    },
+  });
+  assert.equal(readByMerchant.status, 200);
+  assert.equal(readByMerchant.body.database.notices.find((notice) => notice.title === broadcastRequest.title).read, true);
+  const courierAfterMerchantRead = await call(worker, database, "database", { cookie: employeeCookie });
+  assert.equal(courierAfterMerchantRead.body.database.notices.find((notice) => notice.title === broadcastRequest.title).read, false);
+
+  const beforeTargetedBroadcast = await call(worker, database, "database", { cookie: adminCookie });
+  const targetedBroadcastRequest = {
+    requestId: "release-user-2026-09-01",
+    audience: "user",
+    recipientUserId: administratorCreatedAccount.id,
+    title: "تحديث لحساب محدد",
+    message: "هذا الإشعار مخصص للحساب الذي اختاره المسؤول فقط.",
+  };
+  const targetedBroadcast = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: targetedBroadcastRequest,
+  });
+  assert.equal(targetedBroadcast.status, 200);
+  assert.equal(targetedBroadcast.body.recipientCount, 1);
+  assert.equal(targetedBroadcast.body.revision, beforeTargetedBroadcast.body.revision + 1);
+  const targetedNotices = targetedBroadcast.body.database.notices.filter((notice) => notice.title === targetedBroadcastRequest.title);
+  assert.equal(targetedNotices.length, 1);
+  assert.equal(targetedNotices[0].userId, administratorCreatedAccount.id);
+  assert.equal(targetedNotices[0].audience, "user");
+
+  const repeatedTargetedBroadcast = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: targetedBroadcastRequest,
+  });
+  assert.equal(repeatedTargetedBroadcast.status, 200);
+  assert.equal(repeatedTargetedBroadcast.body.revision, targetedBroadcast.body.revision);
+  assert.equal(repeatedTargetedBroadcast.body.database.notices.filter((notice) => notice.title === targetedBroadcastRequest.title).length, 1);
+
+  const conflictingTargetedBroadcast = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: { ...targetedBroadcastRequest, recipientUserId: otherCustomer.body.userId },
+  });
+  assert.equal(conflictingTargetedBroadcast.status, 409);
+
+  const [missingTargetBroadcast, unknownTargetBroadcast, administratorTargetBroadcast, ambiguousGroupBroadcast] = await Promise.all([
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: { ...targetedBroadcastRequest, requestId: "release-user-missing-target", recipientUserId: "" },
+    }),
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: { ...targetedBroadcastRequest, requestId: "release-user-unknown-target", recipientUserId: "merchant-does-not-exist" },
+    }),
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: { ...targetedBroadcastRequest, requestId: "release-user-admin-target", recipientUserId: administrator.body.userId },
+    }),
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: { ...targetedBroadcastRequest, requestId: "release-user-ambiguous-group", audience: "all" },
+    }),
+  ]);
+  assert.equal(missingTargetBroadcast.status, 400);
+  assert.equal(unknownTargetBroadcast.status, 422);
+  assert.equal(administratorTargetBroadcast.status, 422);
+  assert.equal(ambiguousGroupBroadcast.status, 400);
+
+  const targetedRecipientDatabase = await call(worker, database, "database", { cookie: managedCookie });
+  const nonTargetedRecipientDatabase = await call(worker, database, "database", { cookie: otherCookie });
+  assert.equal(targetedRecipientDatabase.body.database.notices.filter((notice) => notice.title === targetedBroadcastRequest.title).length, 1);
+  assert.equal(nonTargetedRecipientDatabase.body.database.notices.filter((notice) => notice.title === targetedBroadcastRequest.title).length, 0);
+
+  const merchantBeforeNoticeClear = await call(worker, database, "database", { cookie: secondCookie });
+  const noticeIdsCapturedForClear = merchantBeforeNoticeClear.body.database.notices.map((notice) => notice.id);
+  const courierBeforeNoticeClear = await call(worker, database, "database", { cookie: employeeCookie });
+  const foreignCourierNoticeId = courierBeforeNoticeClear.body.database.notices[0]?.id;
+  assert.ok(noticeIdsCapturedForClear.length > 0);
+  assert.ok(foreignCourierNoticeId);
+
+  const arrivedAfterCaptureRequest = {
+    requestId: "release-after-clear-capture-2026",
+    audience: "user",
+    recipientUserId: firstDevice.body.userId,
+    title: "إشعار جديد بعد بدء المسح",
+    message: "يجب أن يبقى هذا الإشعار لأنه وصل بعد التقاط قائمة الإشعارات المطلوب مسحها.",
+  };
+  const arrivedAfterCapture = await call(worker, database, "notices/broadcast", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: arrivedAfterCaptureRequest,
+  });
+  assert.equal(arrivedAfterCapture.status, 200);
+  assert.equal(arrivedAfterCapture.body.recipientCount, 1);
+  const arrivedAfterCaptureNotice = arrivedAfterCapture.body.database.notices.find((notice) => notice.title === arrivedAfterCaptureRequest.title);
+  assert.ok(arrivedAfterCaptureNotice);
+  assert.equal(noticeIdsCapturedForClear.includes(arrivedAfterCaptureNotice.id), false);
+
+  const clearPayload = { noticeIds: [...noticeIdsCapturedForClear, foreignCourierNoticeId] };
+  const clearedCurrentAccountNotices = await call(worker, database, "notices/clear", {
+    method: "POST",
+    cookie: secondCookie,
+    payload: clearPayload,
+  });
+  assert.equal(clearedCurrentAccountNotices.status, 200);
+  assert.equal(clearedCurrentAccountNotices.body.removedCount, noticeIdsCapturedForClear.length);
+  assert.equal(clearedCurrentAccountNotices.body.revision, arrivedAfterCapture.body.revision + 1);
+  assert.ok(noticeIdsCapturedForClear.every((noticeId) => !clearedCurrentAccountNotices.body.database.notices.some((notice) => notice.id === noticeId)));
+  assert.ok(clearedCurrentAccountNotices.body.database.notices.some((notice) => notice.id === arrivedAfterCaptureNotice.id));
+
+  const courierAfterForeignClearAttempt = await call(worker, database, "database", { cookie: employeeCookie });
+  const otherMerchantAfterNoticeClear = await call(worker, database, "database", { cookie: otherCookie });
+  assert.ok(courierAfterForeignClearAttempt.body.database.notices.some((notice) => notice.id === foreignCourierNoticeId));
+  assert.ok(otherMerchantAfterNoticeClear.body.database.notices.some((notice) => notice.title === broadcastRequest.title));
+
+  const repeatedNoticeClear = await call(worker, database, "notices/clear", {
+    method: "POST",
+    cookie: secondCookie,
+    payload: clearPayload,
+  });
+  assert.equal(repeatedNoticeClear.status, 200);
+  assert.equal(repeatedNoticeClear.body.removedCount, 0);
+  assert.equal(repeatedNoticeClear.body.revision, clearedCurrentAccountNotices.body.revision);
+  assert.ok(repeatedNoticeClear.body.database.notices.some((notice) => notice.id === arrivedAfterCaptureNotice.id));
+
+  const adminCannotClearRecipientNotice = await call(worker, database, "notices/clear", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: { noticeIds: [arrivedAfterCaptureNotice.id] },
+  });
+  assert.equal(adminCannotClearRecipientNotice.status, 200);
+  assert.equal(adminCannotClearRecipientNotice.body.removedCount, 0);
+  assert.equal(adminCannotClearRecipientNotice.body.revision, repeatedNoticeClear.body.revision);
+  const merchantAfterAdminClearAttempt = await call(worker, database, "database", { cookie: secondCookie });
+  assert.ok(merchantAfterAdminClearAttempt.body.database.notices.some((notice) => notice.id === arrivedAfterCaptureNotice.id));
 
   const anonymousParcelScan = await call(worker, database, "orders/scan", {
     method: "POST",
@@ -881,7 +1337,7 @@ test("allows only the administrator to change merchant and courier account field
   assert.equal(unchangedAfterDuplicate.body.database.users.find((account) => account.id === courierId).email, courierUpdate.email);
 });
 
-test("recalculates one ₪7 oversize fee when any dimension exceeds 40 cm", async () => {
+test("recalculates progressive weight and dimension fees without trusting client totals", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
   const registration = await call(worker, database, "register", {
@@ -893,12 +1349,15 @@ test("recalculates one ₪7 oversize fee when any dimension exceeds 40 cm", asyn
 
   let snapshot = registration.body;
   const cases = [
-    { id: "parcel-at-limit", dimensions: [40, 40, 40], expectedFee: 35 },
-    { id: "parcel-one-over", dimensions: [41, 20, 20], expectedFee: 42 },
-    { id: "parcel-height-over", dimensions: [20, 20, 41], expectedFee: 42 },
-    { id: "parcel-all-over", dimensions: [50, 50, 50], expectedFee: 42 },
-    { id: "parcel-partial-width", dimensions: [undefined, 50, undefined], dimensionText: "50 سم", expectedDimensions: [0, 50, 0], expectedFee: 42 },
-    { id: "parcel-arabic-digits", dimensions: [undefined, undefined, undefined], dimensionText: "٥٠ × ٢٠ × ٢٠ سم", expectedDimensions: [50, 20, 20], expectedFee: 42 },
+    { id: "parcel-at-limit", weight: "0 - 5 كغم", dimensions: [40, 40, 40], expectedWeightFee: 0, expectedOversizeFee: 0, expectedFee: 35 },
+    { id: "parcel-one-over", weight: "5 - 10 كغم", dimensions: [41, 20, 20], expectedWeightFee: 5, expectedOversizeFee: 7, expectedFee: 47 },
+    { id: "parcel-first-tier-end", weight: "10 - 20 كغم", dimensions: [60, 20, 20], expectedWeightFee: 10, expectedOversizeFee: 7, expectedFee: 52 },
+    { id: "parcel-second-tier", weight: "20 - 30 كغم", dimensions: [61, 20, 20], expectedWeightFee: 15, expectedOversizeFee: 14, expectedFee: 64 },
+    { id: "parcel-third-tier", weight: "أكثر من 30 كغم", dimensions: [81, 20, 20], expectedWeightFee: 20, expectedOversizeFee: 21, expectedFee: 76 },
+    { id: "parcel-capped-size", weight: "أكثر من 30 كغم", dimensions: [101, 20, 20], expectedWeightFee: 20, expectedOversizeFee: 28, expectedFee: 83 },
+    { id: "parcel-all-over", weight: "0 - 5 كغم", dimensions: [50, 50, 50], expectedWeightFee: 0, expectedOversizeFee: 7, expectedFee: 42 },
+    { id: "parcel-partial-width", weight: undefined, dimensions: [undefined, 50, undefined], dimensionText: "50 سم", expectedDimensions: [0, 50, 0], expectedWeight: "0 - 5 كغم", expectedWeightFee: 0, expectedOversizeFee: 7, expectedFee: 42 },
+    { id: "parcel-arabic-digits", weight: "5 - 10 كغم", dimensions: [undefined, undefined, undefined], dimensionText: "٨١ × ٢٠ × ٢٠ سم", expectedDimensions: [81, 20, 20], expectedWeightFee: 5, expectedOversizeFee: 21, expectedFee: 61 },
   ];
 
   for (const [index, entry] of cases.entries()) {
@@ -919,11 +1378,12 @@ test("recalculates one ₪7 oversize fee when any dimension exceeds 40 cm", asyn
       amount: 100,
       deliveryFee: index % 2 ? 0 : 999,
       content: "طرد قياسات",
-      weight: "0 - 5 كغم",
+      weight: entry.weight,
       dimensions: entry.dimensionText ?? `${lengthCm} × ${widthCm} × ${heightCm} سم`,
       lengthCm,
       widthCm,
       heightCm,
+      weightFee: 999,
       oversizeFee: 999,
       notes: "",
       privateNotes: "",
@@ -952,7 +1412,9 @@ test("recalculates one ₪7 oversize fee when any dimension exceeds 40 cm", asyn
     assert.equal(response.status, 200);
     const saved = response.body.database.orders.find((order) => order.id === entry.id);
     assert.equal(saved.deliveryFee, entry.expectedFee);
-    assert.equal(saved.oversizeFee, entry.expectedFee - 35);
+    assert.equal(saved.weight, entry.expectedWeight ?? entry.weight);
+    assert.equal(saved.weightFee, entry.expectedWeightFee);
+    assert.equal(saved.oversizeFee, entry.expectedOversizeFee);
     assert.deepEqual(
       [saved.lengthCm ?? 0, saved.widthCm ?? 0, saved.heightCm ?? 0],
       entry.expectedDimensions ?? entry.dimensions,
@@ -998,11 +1460,12 @@ test("recalculates one ₪7 oversize fee when any dimension exceeds 40 cm", asyn
     amount: 100,
     deliveryFee: 999,
     content: "طرد قياسات",
-    weight: "0 - 5 كغم",
-    dimensions: "41 × 20 × 20 سم",
-    lengthCm: 41,
+    weight: "أكثر من 30 كغم",
+    dimensions: "101 × 20 × 20 سم",
+    lengthCm: 101,
     widthCm: 20,
     heightCm: 20,
+    weightFee: 999,
     oversizeFee: 999,
     notes: "",
     privateNotes: "",
@@ -1028,6 +1491,304 @@ test("recalculates one ₪7 oversize fee when any dimension exceeds 40 cm", asyn
   });
   assert.equal(premiumCreated.status, 200);
   const savedPremium = premiumCreated.body.database.orders.find((order) => order.id === premiumOversize.id);
-  assert.equal(savedPremium.deliveryFee, 37);
-  assert.equal(savedPremium.oversizeFee, 7);
+  assert.equal(savedPremium.deliveryFee, 78);
+  assert.equal(savedPremium.weightFee, 20);
+  assert.equal(savedPremium.oversizeFee, 28);
+});
+
+test("stores the app-lock PIN only as a server hash and gates device biometrics behind it", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const registration = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("تاجر القفل", "app-lock@example.test", "0593344556"),
+  });
+  assert.equal(registration.status, 201);
+  const cookie = sessionFrom(registration);
+
+  const initialStatus = await call(worker, database, "security/status", { cookie });
+  assert.deepEqual(initialStatus.body, { enabled: false, biometricEnabled: false });
+
+  const invalidPin = await call(worker, database, "security/pin", { method: "POST", cookie, payload: { pin: "12" } });
+  assert.equal(invalidPin.status, 400);
+
+  const enabled = await call(worker, database, "security/pin", { method: "POST", cookie, payload: { pin: "١٢٣٤" } });
+  assert.equal(enabled.status, 200);
+  assert.deepEqual(enabled.body, { enabled: true, biometricEnabled: false });
+  const storedLock = database.appLocks.get(registration.body.userId);
+  assert.ok(storedLock.pin_hash.startsWith("pbkdf2:"));
+  assert.ok(!storedLock.pin_hash.includes("1234"));
+  assert.ok(!database.state.payload.includes('"pin":"1234"'));
+
+  const rejected = await call(worker, database, "security/pin/verify", { method: "POST", cookie, payload: { pin: "0000" } });
+  assert.equal(rejected.status, 403);
+  const verified = await call(worker, database, "security/pin/verify", { method: "POST", cookie, payload: { pin: "1234" } });
+  assert.equal(verified.status, 200);
+  assert.equal(verified.body.verified, true);
+
+  const registrationOptions = await call(worker, database, "security/webauthn/register/options", { method: "POST", cookie });
+  assert.equal(registrationOptions.status, 200);
+  assert.equal(registrationOptions.body.rp.id, "almadina.test");
+  assert.equal(registrationOptions.body.authenticatorSelection.authenticatorAttachment, "platform");
+  assert.equal(registrationOptions.body.authenticatorSelection.userVerification, "required");
+  assert.equal(database.challenges.size, 1);
+
+  const disabled = await call(worker, database, "security/disable", { method: "POST", cookie, payload: { pin: "1234" } });
+  assert.equal(disabled.status, 200);
+  assert.deepEqual(disabled.body, { enabled: false, biometricEnabled: false });
+  assert.equal(database.appLocks.size, 0);
+  assert.equal(database.challenges.size, 0);
+});
+
+test("deletes only the authenticated eligible account and preserves every other hosted record", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+
+  const merchant = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("صاحب الحساب المحذوف", "delete-me@example.test", "0591111111"),
+  });
+  assert.equal(merchant.status, 201);
+  const merchantCookie = sessionFrom(merchant);
+  const merchantSecondDevice = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "delete-me@example.test", password: "Customer@123" },
+  });
+  assert.equal(merchantSecondDevice.status, 200);
+  const merchantSecondCookie = sessionFrom(merchantSecondDevice);
+
+  const otherMerchant = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("الحساب المحفوظ", "keep-me@example.test", "0592222222"),
+  });
+  assert.equal(otherMerchant.status, 201);
+  const otherMerchantCookie = sessionFrom(otherMerchant);
+
+  const administrator = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+  });
+  assert.equal(administrator.status, 200);
+  const adminCookie = sessionFrom(administrator);
+
+  const anonymousDeletion = await call(worker, database, "account/delete", {
+    method: "POST",
+    payload: { password: "Customer@123", confirmation: "حذف حسابي" },
+  });
+  assert.equal(anonymousDeletion.status, 401);
+
+  const administratorDeletion = await call(worker, database, "account/delete", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: { password: "Admin@123", confirmation: "حذف حسابي" },
+  });
+  assert.equal(administratorDeletion.status, 403);
+
+  const now = new Date().toISOString();
+  const ownedOrder = {
+    id: "order-account-deletion",
+    trackingNumber: "ALX-DELETE-1",
+    merchantId: merchant.body.userId,
+    merchantName: "صاحب الحساب المحذوف",
+    merchantStore: "متجر صاحب الحساب المحذوف",
+    recipientName: "مستلم الحذف",
+    recipientPhone: "0593333333",
+    governorate: "الخليل",
+    city: "الخليل",
+    address: "عنوان الاختبار",
+    pickupAddress: "عنوان الاستلام",
+    amount: 180,
+    deliveryFee: 25,
+    content: "طرد اختبار",
+    weight: "0 - 5 كغم",
+    dimensions: "20 × 20 × 20 سم",
+    notes: "",
+    privateNotes: "",
+    reference: "",
+    type: "طرد عادي",
+    status: "ready",
+    courierName: "بانتظار تعيين المندوب",
+    trackingEvents: [],
+    createdAt: now,
+    updatedAt: now,
+    deleted: false,
+  };
+  const ownedCollection = {
+    id: "collection-account-deletion",
+    merchantId: merchant.body.userId,
+    merchantName: "صاحب الحساب المحذوف",
+    invoiceNumber: "#DELETE-1",
+    orderIds: [ownedOrder.id],
+    grossAmount: 180,
+    deliveryFees: 25,
+    returnFees: 0,
+    netAmount: 155,
+    deliveredCount: 1,
+    returnedCount: 0,
+    status: "pending",
+    verificationCode: "1234",
+    authorizedRecipient: "",
+    createdAt: now,
+    updatedAt: now,
+    scheduledAt: now,
+  };
+  const prepared = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: administrator.body.revision,
+      database: {
+        ...administrator.body.database,
+        orders: [ownedOrder],
+        recipients: [{ id: "recipient-account-deletion", merchantId: merchant.body.userId, name: "مستلم الحذف", phone: "0593333333", city: "الخليل", address: "عنوان الاختبار", favorite: true }],
+        collections: [ownedCollection],
+        notices: [{ id: "notice-account-deletion", userId: merchant.body.userId, title: "إشعار خاص", message: "يجب حذف هذا الإشعار فقط.", icon: "bell", read: false, createdAt: now }],
+        preferences: { ...administrator.body.database.preferences, [merchant.body.userId]: { theme: "dark", notifications: true, sounds: false, orderUpdates: true, biometric: false, pin: "", rating: 0, compact: false } },
+      },
+    },
+  });
+  assert.equal(prepared.status, 200);
+
+  const blockedByOperations = await call(worker, database, "account/delete", {
+    method: "POST",
+    cookie: merchantCookie,
+    payload: { password: "Customer@123", confirmation: "حذف حسابي" },
+  });
+  assert.equal(blockedByOperations.status, 409);
+  assert.equal(blockedByOperations.body.activeOrderCount, 1);
+  assert.equal(blockedByOperations.body.unsettledCollectionCount, 1);
+
+  const settled = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: prepared.body.revision,
+      database: {
+        ...prepared.body.database,
+        orders: prepared.body.database.orders.map((order) => order.id === ownedOrder.id ? { ...order, status: "delivered", updatedAt: now } : order),
+        collections: prepared.body.database.collections.map((invoice) => invoice.id === ownedCollection.id ? { ...invoice, status: "paid", paidAt: now, updatedAt: now } : invoice),
+      },
+    },
+  });
+  assert.equal(settled.status, 200);
+
+  const wrongConfirmation = await call(worker, database, "account/delete", {
+    method: "POST",
+    cookie: merchantCookie,
+    payload: { password: "Customer@123", confirmation: "حذف الحساب" },
+  });
+  assert.equal(wrongConfirmation.status, 400);
+
+  const wrongPassword = await call(worker, database, "account/delete", {
+    method: "POST",
+    cookie: merchantCookie,
+    payload: { password: "WrongPassword", confirmation: "حذف حسابي" },
+  });
+  assert.equal(wrongPassword.status, 403);
+
+  const deleted = await call(worker, database, "account/delete", {
+    method: "POST",
+    cookie: merchantCookie,
+    payload: { password: "Customer@123", confirmation: "حذف حسابي" },
+  });
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.success, true);
+  assert.match(deleted.headers.get("set-cookie") ?? "", /Max-Age=0/);
+  assert.equal([...database.sessions.values()].some((session) => session.user_id === merchant.body.userId), false);
+
+  const deletedAccountSecondSession = await call(worker, database, "database", { cookie: merchantSecondCookie });
+  assert.equal(deletedAccountSecondSession.status, 401);
+  const preservedMerchantSession = await call(worker, database, "database", { cookie: otherMerchantCookie });
+  assert.equal(preservedMerchantSession.status, 200);
+  assert.equal(preservedMerchantSession.body.userId, otherMerchant.body.userId);
+
+  const afterDeletion = await call(worker, database, "database", { cookie: adminCookie });
+  assert.equal(afterDeletion.status, 200);
+  assert.equal(afterDeletion.body.database.users.some((account) => account.id === merchant.body.userId), false);
+  assert.equal(afterDeletion.body.database.users.some((account) => account.id === otherMerchant.body.userId), true);
+  assert.equal(afterDeletion.body.database.orders.some((order) => order.merchantId === merchant.body.userId), false);
+  assert.equal(afterDeletion.body.database.recipients.some((recipient) => recipient.merchantId === merchant.body.userId), false);
+  assert.equal(afterDeletion.body.database.collections.some((invoice) => invoice.merchantId === merchant.body.userId), false);
+  assert.equal(afterDeletion.body.database.notices.some((notice) => notice.userId === merchant.body.userId), false);
+  assert.equal(Object.hasOwn(afterDeletion.body.database.preferences, merchant.body.userId), false);
+
+  const courier = {
+    id: "courier-delete-account",
+    name: "مندوب سيحذف حسابه",
+    email: "delete-courier@example.test",
+    phone: "0564444444",
+    store: "قسم التوصيل",
+    password: "Courier@123",
+    role: "courier",
+    joinedAt: now,
+    avatarColor: "#6655a6",
+  };
+  const courierOrder = {
+    ...ownedOrder,
+    id: "order-preserved-after-courier-deletion",
+    trackingNumber: "ALX-KEEP-COURIER-1",
+    merchantId: otherMerchant.body.userId,
+    merchantName: "الحساب المحفوظ",
+    merchantStore: "متجر الحساب المحفوظ",
+    status: "shipped",
+    courierId: courier.id,
+    courierName: courier.name,
+    trackingEvents: [{ id: "courier-event", status: "shipped", title: "مشحون", location: "مع المندوب", actor: courier.name, note: "تم الشحن.", createdAt: now }],
+  };
+  const courierPrepared = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: afterDeletion.body.revision,
+      database: {
+        ...afterDeletion.body.database,
+        users: [...afterDeletion.body.database.users, courier],
+        orders: [courierOrder, ...afterDeletion.body.database.orders],
+      },
+    },
+  });
+  assert.equal(courierPrepared.status, 200);
+
+  const courierLogin = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: courier.email, password: "Courier@123" },
+  });
+  assert.equal(courierLogin.status, 200);
+  const courierCookie = sessionFrom(courierLogin);
+
+  const blockedCourier = await call(worker, database, "account/delete", {
+    method: "POST",
+    cookie: courierCookie,
+    payload: { password: "Courier@123", confirmation: "حذف حسابي" },
+  });
+  assert.equal(blockedCourier.status, 409);
+  assert.equal(blockedCourier.body.activeOrderCount, 1);
+
+  const completedCourierOrder = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: courierPrepared.body.revision,
+      database: {
+        ...courierPrepared.body.database,
+        orders: courierPrepared.body.database.orders.map((order) => order.id === courierOrder.id ? { ...order, status: "delivered", updatedAt: now } : order),
+      },
+    },
+  });
+  assert.equal(completedCourierOrder.status, 200);
+
+  const deletedCourier = await call(worker, database, "account/delete", {
+    method: "POST",
+    cookie: courierCookie,
+    payload: { password: "Courier@123", confirmation: "حذف حسابي" },
+  });
+  assert.equal(deletedCourier.status, 200);
+
+  const afterCourierDeletion = await call(worker, database, "database", { cookie: adminCookie });
+  const preservedOrder = afterCourierDeletion.body.database.orders.find((order) => order.id === courierOrder.id);
+  assert.ok(preservedOrder);
+  assert.equal(preservedOrder.merchantId, otherMerchant.body.userId);
+  assert.equal(preservedOrder.courierId, undefined);
+  assert.equal(preservedOrder.courierName, "مندوب سابق");
+  assert.equal(preservedOrder.trackingEvents[0].actor, "مندوب سابق");
 });

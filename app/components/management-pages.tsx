@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { downloadDocument, importTemplate, ordersCsv } from "../lib/download";
-import { createTrackingEvent, formatDate, getDeliveryFee, getOversizeFee, governorates, money, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Order } from "../lib/data";
+import { createTrackingEvent, formatDate, getDeliveryFee, getOversizeFee, getWeightFee, governorates, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Order } from "../lib/data";
 import { OrderCard } from "./dashboard";
 import { Icon } from "./icon";
 import { Avatar, Button, EmptyState, Field, IconButton, Modal, PageHeader, SectionCard, SelectField } from "./ui";
@@ -261,14 +261,16 @@ export function ImportPage() {
         const lengthCm = parseDimensionCm(row[6]);
         const widthCm = parseDimensionCm(row[7]);
         const heightCm = parseDimensionCm(row[8]);
+        const weight = normalizeWeightOption(row[9]);
+        const weightFee = getWeightFee(weight);
         const oversizeFee = getOversizeFee(lengthCm, widthCm, heightCm);
         const dimensions = [lengthCm, widthCm, heightCm].some(Boolean) ? `${lengthCm ?? 0} × ${widthCm ?? 0} × ${heightCm ?? 0} سم` : "غير محددة";
         const now = new Date().toISOString();
         const order: Order = {
           id: uid("order"), trackingNumber: `ALX-${counter++}`, merchantId: user.id, merchantName: user.name, merchantStore: user.store,
           recipientName: row[0], recipientPhone: row[1], governorate: region?.name, city: row[2] || "الخليل", address: row[3] || "يُحدد لاحقًا",
-          pickupAddress: user.store, amount: Number(row[4]) || 0, deliveryFee: getDeliveryFee(region ?? governorates[0], user.membership) + oversizeFee,
-          content: row[5] || "", weight: "0 - 5 كغم", dimensions, lengthCm, widthCm, heightCm, oversizeFee,
+          pickupAddress: user.store, amount: Number(row[4]) || 0, deliveryFee: getDeliveryFee(region ?? governorates[0], user.membership) + weightFee + oversizeFee,
+          content: row[5] || "", weight, dimensions, lengthCm, widthCm, heightCm, weightFee, oversizeFee,
           notes: "", privateNotes: "", reference: "", type: "طرد عادي", status: "draft", courierName: "بانتظار تعيين المندوب",
           trackingEvents: [createTrackingEvent("draft", user.name, { location: "مع المرسل", note: "تم إنشاء الطرد عبر ملف الاستيراد وحالته قيد الإنشاء.", createdAt: now })],
           createdAt: now, updatedAt: now, deleted: false,
@@ -280,7 +282,7 @@ export function ImportPage() {
     showToast(`تم استيراد ${rows.length} طرد بحالة قيد الإنشاء.`); setView("shipments");
   }
 
-  return <div className="page-content animate-page"><PageHeader title="استيراد طرود من Excel" subtitle="أنشئ عدة طرود دفعة واحدة" onBack={() => setView("home")} /><SectionCard title="تعليمات الاستيراد" icon="info"><ol className="instruction-list"><li>حمّل نموذج الاستيراد وافتحه باستخدام Excel أو Google Sheets.</li><li>املأ الاسم ورقم الجوال والمدينة والعنوان وقيمة الطرد.</li><li>أدخل الطول والعرض والارتفاع اختياريًا؛ يضيف النظام 7 ₪ مرة واحدة إذا تجاوز أي بُعد 40 سم.</li><li>احفظ الملف بصيغة CSV ثم اختره من منطقة الرفع.</li></ol><Button variant="outline" icon="download" onClick={() => { downloadDocument("نموذج-استيراد-طرود-المدينة-إكسبرس.csv", importTemplate); showToast("تم تنزيل نموذج الاستيراد."); }}>تحميل نموذج الاستيراد</Button></SectionCard><button className={`upload-zone ${fileName ? "has-file" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); openFile(event.dataTransfer.files[0]); }}><Icon name="upload" size={42} /><strong>{fileName || "اسحب ملف CSV إلى هنا أو اضغط لاختياره"}</strong><span>{rows.length ? `${rows.length} طلب جاهز للاستيراد` : "ملفات CSV المتوافقة مع Excel — بحد أقصى 1000 طلب"}</span></button><input ref={inputRef} type="file" accept=".csv,.txt,.xls,.xlsx" className="sr-only" onChange={(event) => openFile(event.target.files?.[0])} />{rows.length > 0 && <Button icon="upload" full onClick={importRows}>استيراد {rows.length} طلب</Button>}</div>;
+  return <div className="page-content animate-page"><PageHeader title="استيراد طرود من Excel" subtitle="أنشئ عدة طرود دفعة واحدة" onBack={() => setView("home")} /><SectionCard title="تعليمات الاستيراد" icon="info"><ol className="instruction-list"><li>حمّل نموذج الاستيراد وافتحه باستخدام Excel أو Google Sheets.</li><li>املأ الاسم ورقم الجوال والمدينة والعنوان وقيمة الطرد.</li><li>اختر الوزن، وأدخل الأبعاد اختياريًا؛ يحسب النظام رسوم الوزن والحجم تدريجيًا.</li><li>احفظ الملف بصيغة CSV ثم اختره من منطقة الرفع.</li></ol><Button variant="outline" icon="download" onClick={() => { downloadDocument("نموذج-استيراد-طرود-المدينة-إكسبرس.csv", importTemplate); showToast("تم تنزيل نموذج الاستيراد."); }}>تحميل نموذج الاستيراد</Button></SectionCard><button className={`upload-zone ${fileName ? "has-file" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); openFile(event.dataTransfer.files[0]); }}><Icon name="upload" size={42} /><strong>{fileName || "اسحب ملف CSV إلى هنا أو اضغط لاختياره"}</strong><span>{rows.length ? `${rows.length} طلب جاهز للاستيراد` : "ملفات CSV المتوافقة مع Excel — بحد أقصى 1000 طلب"}</span></button><input ref={inputRef} type="file" accept=".csv,.txt,.xls,.xlsx" className="sr-only" onChange={(event) => openFile(event.target.files?.[0])} />{rows.length > 0 && <Button icon="upload" full onClick={importRows}>استيراد {rows.length} طلب</Button>}</div>;
 }
 
 export function ProfilePage() {

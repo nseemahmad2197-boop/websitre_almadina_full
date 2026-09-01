@@ -67,6 +67,7 @@ export type Order = {
   lengthCm?: number;
   widthCm?: number;
   heightCm?: number;
+  weightFee?: number;
   oversizeFee?: number;
   notes: string;
   privateNotes: string;
@@ -240,7 +241,29 @@ export function getDeliveryFee(region: { name: string } | undefined, membership?
 }
 
 export const OVERSIZE_DIMENSION_LIMIT_CM = 40;
+export const OVERSIZE_DIMENSION_STEP_CM = 20;
 export const OVERSIZE_FEE = 7;
+export const MAX_OVERSIZE_FEE = 28;
+
+export const WEIGHT_OPTIONS = [
+  { label: "0 - 5 كغم", fee: 0 },
+  { label: "5 - 10 كغم", fee: 5 },
+  { label: "10 - 20 كغم", fee: 10 },
+  { label: "20 - 30 كغم", fee: 15 },
+  { label: "أكثر من 30 كغم", fee: 20 },
+] as const;
+
+export type WeightOption = typeof WEIGHT_OPTIONS[number]["label"];
+
+export function normalizeWeightOption(value: string | null | undefined): WeightOption {
+  const normalized = String(value ?? "").trim();
+  return WEIGHT_OPTIONS.find((option) => option.label === normalized)?.label ?? WEIGHT_OPTIONS[0].label;
+}
+
+export function getWeightFee(value: string | null | undefined): number {
+  const normalized = normalizeWeightOption(value);
+  return WEIGHT_OPTIONS.find((option) => option.label === normalized)?.fee ?? 0;
+}
 
 const arabicDigits = "٠١٢٣٤٥٦٧٨٩";
 
@@ -258,7 +281,10 @@ export function parseDimensionCm(value: number | string | null | undefined): num
 }
 
 export function getOversizeFee(...dimensions: Array<number | string | null | undefined>): number {
-  return dimensions.some((dimension) => validDimension(dimension) > OVERSIZE_DIMENSION_LIMIT_CM) ? OVERSIZE_FEE : 0;
+  const largestDimension = Math.max(0, ...dimensions.map(validDimension));
+  if (largestDimension <= OVERSIZE_DIMENSION_LIMIT_CM) return 0;
+  const tier = Math.ceil((largestDimension - OVERSIZE_DIMENSION_LIMIT_CM) / OVERSIZE_DIMENSION_STEP_CM);
+  return Math.min(tier * OVERSIZE_FEE, MAX_OVERSIZE_FEE);
 }
 
 function parsedOrderDimensions(value: string | undefined): [number, number, number] {
@@ -336,7 +362,9 @@ export function removeLegacyDemoData(database: Database & { compensations?: unkn
     recipients: database.recipients.filter((recipient) => merchantIds.has(recipient.merchantId)),
     collections: (database.collections ?? []).filter((invoice) => merchantIds.has(invoice.merchantId)),
     notices: database.notices.filter((notice) => accountIds.has(notice.userId)),
-    preferences: Object.fromEntries(Object.entries(database.preferences ?? {}).filter(([accountId]) => accountIds.has(accountId))),
+    preferences: Object.fromEntries(Object.entries(database.preferences ?? {})
+      .filter(([accountId]) => accountIds.has(accountId))
+      .map(([accountId, preference]) => [accountId, { ...preference, biometric: false, pin: "" }])),
     nextOrder: Math.max(20200001, database.nextOrder || 20200001),
     nextCollection: Math.max(618000, database.nextCollection || 618000),
   };
