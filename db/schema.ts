@@ -69,3 +69,20 @@ export const almadinaRateLimits = sqliteTable("almadina_rate_limits", {
   requestCount: integer("request_count").notNull().default(0),
   resetAt: integer("reset_at").notNull(),
 }, (table) => [index("almadina_rate_limits_reset_at_idx").on(table.resetAt)]);
+
+export const almadinaPasswordResetRequests = sqliteTable("almadina_password_reset_requests", {
+  requestHash: text("request_hash").primaryKey(),
+  userId: text("user_id").notNull(),
+  channel: text("channel").notNull(),
+  codeHash: text("code_hash").notNull(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  expiresAt: integer("expires_at").notNull(),
+  verifiedAt: integer("verified_at"),
+  resetTokenHash: text("reset_token_hash"),
+  resetExpiresAt: integer("reset_expires_at"),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  index("almadina_password_reset_requests_user_id_idx").on(table.userId),
+  index("almadina_password_reset_requests_expires_at_idx").on(table.expiresAt),
+  index("almadina_password_reset_requests_reset_token_hash_idx").on(table.resetTokenHash),
+]);

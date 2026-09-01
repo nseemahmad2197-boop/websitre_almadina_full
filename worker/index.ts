@@ -2,16 +2,30 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { handleAlmadinaApi } from "../app/lib/server-database";
+import type { PasswordResetDeliveryConfig, PasswordResetSender } from "../app/lib/password-reset-delivery";
 
-interface Env {
+interface Env extends PasswordResetDeliveryBindings {
   ASSETS: Fetcher;
   DB: D1Database;
+  PASSWORD_RESET_SENDER?: PasswordResetSender;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
         output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
       };
     };
+  };
+}
+
+function passwordResetDeliveryConfig(env: Env, ctx: ExecutionContext): PasswordResetDeliveryConfig {
+  return {
+    resendApiKey: env.RESEND_API_KEY,
+    resendFromEmail: env.RESEND_FROM_EMAIL,
+    twilioAccountSid: env.TWILIO_ACCOUNT_SID,
+    twilioAuthToken: env.TWILIO_AUTH_TOKEN,
+    twilioMessagingServiceSid: env.TWILIO_MESSAGING_SERVICE_SID,
+    sender: env.PASSWORD_RESET_SENDER,
+    defer: (promise) => ctx.waitUntil(promise),
   };
 }
 
@@ -32,7 +46,7 @@ const worker = {
 
     if (url.pathname.startsWith("/api/almadina/")) {
       if (!env.DB) return Response.json({ error: "قاعدة البيانات المشتركة غير متاحة على الخادم." }, { status: 503 });
-      return handleAlmadinaApi(request, env.DB);
+      return handleAlmadinaApi(request, env.DB, passwordResetDeliveryConfig(env, ctx));
     }
 
     if (url.pathname === "/_vinext/image") {

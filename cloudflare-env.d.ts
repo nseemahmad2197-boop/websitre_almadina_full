@@ -22,8 +22,26 @@ interface D1Database {
   exec(query: string): Promise<unknown>;
 }
 
+interface PasswordResetDeliveryBindings {
+  RESEND_API_KEY?: string;
+  RESEND_FROM_EMAIL?: string;
+  TWILIO_ACCOUNT_SID?: string;
+  TWILIO_AUTH_TOKEN?: string;
+  TWILIO_MESSAGING_SERVICE_SID?: string;
+}
+
+declare namespace NodeJS {
+  interface ProcessEnv {
+    RESEND_API_KEY?: string;
+    RESEND_FROM_EMAIL?: string;
+    TWILIO_ACCOUNT_SID?: string;
+    TWILIO_AUTH_TOKEN?: string;
+    TWILIO_MESSAGING_SERVICE_SID?: string;
+  }
+}
+
 declare module "cloudflare:workers" {
-  export const env: {
+  export const env: PasswordResetDeliveryBindings & {
     DB?: D1Database;
   };
 }

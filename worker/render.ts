@@ -2,9 +2,11 @@
 import handler from "vinext/server/app-router-entry";
 import { getRenderDatabase } from "../app/lib/postgres-d1-adapter";
 import { handleAlmadinaApi } from "../app/lib/server-database";
+import type { PasswordResetDeliveryConfig, PasswordResetSender } from "../app/lib/password-reset-delivery";
 
 interface Env {
   DB?: D1Database;
+  PASSWORD_RESET_SENDER?: PasswordResetSender;
   ASSETS?: {
     fetch(request: Request): Promise<Response> | Response;
   };
@@ -17,6 +19,18 @@ interface ExecutionContext {
 
 function resolveDatabase(env?: Env): D1Database {
   return env?.DB ?? getRenderDatabase();
+}
+
+function passwordResetDeliveryConfig(env: Env | undefined, ctx: ExecutionContext): PasswordResetDeliveryConfig {
+  return {
+    resendApiKey: process.env.RESEND_API_KEY,
+    resendFromEmail: process.env.RESEND_FROM_EMAIL,
+    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
+    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
+    twilioMessagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID,
+    sender: env?.PASSWORD_RESET_SENDER,
+    defer: (promise) => ctx.waitUntil(promise),
+  };
 }
 
 function unavailableDatabaseResponse(): Response {
@@ -44,7 +58,7 @@ const worker = {
 
     if (url.pathname.startsWith("/api/almadina/")) {
       try {
-        return await handleAlmadinaApi(request, resolveDatabase(env));
+        return await handleAlmadinaApi(request, resolveDatabase(env), passwordResetDeliveryConfig(env, ctx));
       } catch (error) {
         console.error("Almadina API could not reach PostgreSQL.", error);
         return unavailableDatabaseResponse();

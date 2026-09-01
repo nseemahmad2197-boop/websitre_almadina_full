@@ -9,9 +9,11 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
+import { deliverPasswordResetCode, isPasswordResetChannelConfigured, normalizeSmsDestination, type PasswordResetChannel, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 
 const SESSION_COOKIE = "almadina_session";
 const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
+const PASSWORD_RESET_COOKIE = "almadina_password_reset";
 const SESSION_DURATION = 30 * 24 * 60 * 60;
 const PASSWORD_ITERATIONS = 100_000;
 const APP_LOCK_CHALLENGE_DURATION = 5 * 60;
@@ -25,6 +27,16 @@ const COLLECTION_VERIFY_RATE_LIMIT = 6;
 const COLLECTION_VERIFY_GLOBAL_RATE_LIMIT = 20;
 const PASSWORD_CHANGE_RATE_LIMIT_WINDOW = 10 * 60;
 const PASSWORD_CHANGE_RATE_LIMIT = 5;
+const PASSWORD_RESET_CODE_DURATION = 10 * 60;
+const PASSWORD_RESET_TOKEN_DURATION = 10 * 60;
+const PASSWORD_RESET_RESEND_DELAY = 60;
+const PASSWORD_RESET_CODE_ITERATIONS = 120_000;
+const PASSWORD_RESET_MAX_FAILED_ATTEMPTS = 5;
+const PASSWORD_RESET_RATE_LIMIT_WINDOW = 15 * 60;
+const PASSWORD_RESET_REQUEST_IP_LIMIT = 10;
+const PASSWORD_RESET_REQUEST_IDENTIFIER_LIMIT = 3;
+const PASSWORD_RESET_VERIFY_IP_LIMIT = 20;
+const PASSWORD_RESET_COMPLETE_IP_LIMIT = 10;
 const DEVICE_ACTIVITY_UPDATE_INTERVAL = 5 * 60 * 1000;
 const initializedDatabases = new WeakMap<D1Database, Promise<void>>();
 
@@ -72,6 +84,19 @@ type AppLockStatus = {
   biometricLoginReady: boolean;
 };
 type RateLimitRow = { request_count: number; reset_at: number };
+type PasswordResetRow = {
+  request_hash: string;
+  user_id: string;
+  channel: PasswordResetChannel;
+  code_hash: string;
+  failed_attempts: number;
+  expires_at: number;
+  verified_at: number | null;
+  reset_token_hash: string | null;
+  reset_expires_at: number | null;
+};
+
+export type AlmadinaApiConfig = PasswordResetDeliveryConfig;
 
 class ApiRequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -111,11 +136,54 @@ async function sha256(value: string): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
 }
 
+function randomSecret(): string {
+  return toHex(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+function randomVerificationCode(): string {
+  const limit = Math.floor(0x1_0000_0000 / 1_000_000) * 1_000_000;
+  const values = new Uint32Array(1);
+  do crypto.getRandomValues(values); while (values[0] >= limit);
+  return String(values[0] % 1_000_000).padStart(6, "0");
+}
+
+function normalizeArabicDigits(value: string): string {
+  const arabicDigits = "٠١٢٣٤٥٦٧٨٩";
+  return value.replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)));
+}
+
+function normalizeAccountPhone(value: string): string | null {
+  const normalized = normalizeArabicDigits(value).trim().replace(/[\s().-]/g, "");
+  const international = normalized.startsWith("00") ? `+${normalized.slice(2)}` : normalized;
+  if (/^05\d{8}$/.test(international)) return international;
+  if (/^\+(?:970|972)5\d{8}$/.test(international)) return `0${international.slice(4)}`;
+  return null;
+}
+
+function normalizeResetIdentifier(value: unknown): { value: string; kind: "email" | "phone" } | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (validEmail(trimmed.toLowerCase())) return { value: trimmed.toLowerCase(), kind: "email" };
+  const phone = normalizeAccountPhone(trimmed);
+  return phone ? { value: phone, kind: "phone" } : null;
+}
+
 async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
   const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: PASSWORD_ITERATIONS }, key, 256);
   return `pbkdf2:${PASSWORD_ITERATIONS}:${toHex(salt)}:${toHex(derived)}`;
+}
+
+async function hashPasswordResetCode(requestToken: string, code: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(code), "PBKDF2", false, ["deriveBits"]);
+  const derived = await crypto.subtle.deriveBits({
+    name: "PBKDF2",
+    hash: "SHA-256",
+    salt: fromHex(requestToken),
+    iterations: PASSWORD_RESET_CODE_ITERATIONS,
+  }, key, 256);
+  return toHex(derived);
 }
 
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
@@ -210,6 +278,21 @@ async function initializeDatabase(database: D1Database): Promise<void> {
       reset_at INTEGER NOT NULL
     )`),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_rate_limits_reset_at_idx ON almadina_rate_limits (reset_at)"),
+    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_password_reset_requests (
+      request_hash TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      failed_attempts INTEGER DEFAULT 0 NOT NULL,
+      expires_at INTEGER NOT NULL,
+      verified_at INTEGER,
+      reset_token_hash TEXT,
+      reset_expires_at INTEGER,
+      created_at TEXT NOT NULL
+    )`),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_password_reset_requests_user_id_idx ON almadina_password_reset_requests (user_id)"),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_password_reset_requests_expires_at_idx ON almadina_password_reset_requests (expires_at)"),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_password_reset_requests_reset_token_hash_idx ON almadina_password_reset_requests (reset_token_hash)"),
   ]);
 
   const existing = await database.prepare("SELECT revision FROM almadina_state WHERE id = ?").bind("main").first<{ revision: number }>();
@@ -273,6 +356,7 @@ async function savePasswordChange(
       database.prepare(`DELETE FROM almadina_passkey_login_credentials WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
       database.prepare(`DELETE FROM almadina_webauthn_challenges WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
       database.prepare(`UPDATE almadina_app_locks SET biometric_enabled = 0, updated_at = ? WHERE user_id = ? AND ${stateMatches}`).bind(updatedAt, userId, "main", nextRevision, payload),
+      database.prepare(`DELETE FROM almadina_password_reset_requests WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
     ]);
     return { saved: (results[0]?.meta?.changes ?? 0) === 1 };
   }
@@ -292,9 +376,39 @@ async function savePasswordChange(
     database.prepare(`INSERT INTO almadina_session_devices (token_hash, user_id, device_name, device_type, browser_name, created_at, last_active_at)
       SELECT ?, ?, ?, ?, ?, ?, ? FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?`)
       .bind(replacementTokenHash, userId, descriptor.name, descriptor.type, descriptor.browser, updatedAt, updatedAt, "main", nextRevision, payload),
+    database.prepare(`DELETE FROM almadina_password_reset_requests WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
   ]);
   const saved = (results[0]?.meta?.changes ?? 0) === 1;
   return { saved, ...(saved ? { replacementSessionToken } : {}) };
+}
+
+async function savePasswordReset(
+  database: D1Database,
+  state: Database,
+  revision: number,
+  userId: string,
+  resetTokenHash: string,
+): Promise<boolean> {
+  const payload = JSON.stringify(removeLegacyDemoData(state));
+  const nextRevision = revision + 1;
+  const updatedAt = new Date().toISOString();
+  const now = Math.floor(Date.now() / 1000);
+  const stateMatches = "EXISTS (SELECT 1 FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?)";
+  const results = await database.batch<D1Result>([
+    database.prepare(`UPDATE almadina_state SET payload = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ?
+        AND EXISTS (SELECT 1 FROM almadina_password_reset_requests
+          WHERE reset_token_hash = ? AND user_id = ? AND verified_at IS NOT NULL AND reset_expires_at > ?)`)
+      .bind(payload, updatedAt, "main", revision, resetTokenHash, userId, now),
+    database.prepare(`DELETE FROM almadina_session_devices WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+    database.prepare(`DELETE FROM almadina_sessions WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+    database.prepare(`DELETE FROM almadina_webauthn_credentials WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+    database.prepare(`DELETE FROM almadina_passkey_login_credentials WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+    database.prepare(`DELETE FROM almadina_webauthn_challenges WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+    database.prepare(`DELETE FROM almadina_app_locks WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+    database.prepare(`DELETE FROM almadina_password_reset_requests WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+  ]);
+  return (results[0]?.meta?.changes ?? 0) === 1;
 }
 
 function getCookie(request: Request, cookieName: string): string | null {
@@ -318,6 +432,11 @@ function sessionCookie(request: Request, token: string, maxAge = SESSION_DURATIO
 function passkeyLoginCookie(request: Request, token: string, maxAge = APP_LOCK_CHALLENGE_DURATION): string {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return `${PASSKEY_LOGIN_COOKIE}=${token}; Path=/api/almadina; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+}
+
+function passwordResetCookie(request: Request, token: string, maxAge = PASSWORD_RESET_CODE_DURATION): string {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${PASSWORD_RESET_COOKIE}=${token}; Path=/api/almadina/password-reset; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
 }
 
 async function enforcePublicPasskeyRateLimit(database: D1Database, request: Request, action: "options" | "verify", limit: number): Promise<void> {
@@ -394,6 +513,65 @@ async function enforcePasswordChangeRateLimit(database: D1Database, userId: stri
   if (!rate || rate.request_count > PASSWORD_CHANGE_RATE_LIMIT) {
     throw new ApiRequestError("محاولات كثيرة لتغيير كلمة المرور. انتظر عشر دقائق ثم حاول مجددًا.", 429);
   }
+}
+
+function requestClientAddress(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
+  const cloudflareAddress = "cf" in request ? request.headers.get("cf-connecting-ip")?.trim() : "";
+  return (cloudflareAddress || forwarded.at(0) || "unknown").slice(0, 128).toLowerCase();
+}
+
+async function enforcePasswordResetRateLimit(
+  database: D1Database,
+  keyMaterial: string,
+  action: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<void> {
+  const keyHash = await sha256(`password-reset:${action}:${keyMaterial}`);
+  const now = Math.floor(Date.now() / 1000);
+  const resetAt = now + windowSeconds;
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
+  const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT (key_hash) DO UPDATE SET
+      action = excluded.action,
+      request_count = CASE WHEN almadina_rate_limits.reset_at <= ? THEN 1 ELSE almadina_rate_limits.request_count + 1 END,
+      reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
+    RETURNING request_count, reset_at`)
+    .bind(keyHash, `password-reset-${action}`, resetAt, now, now).first<RateLimitRow>();
+  if (!rate || rate.request_count > limit) {
+    throw new ApiRequestError("محاولات كثيرة لإعادة تعيين كلمة المرور. انتظر بضع دقائق ثم حاول مجددًا.", 429);
+  }
+}
+
+async function enforcePasswordResetRequestRateLimits(
+  database: D1Database,
+  request: Request,
+  identifier: string,
+  channel: PasswordResetChannel,
+): Promise<void> {
+  await enforcePasswordResetRateLimit(
+    database,
+    identifier,
+    "request-cooldown",
+    1,
+    PASSWORD_RESET_RESEND_DELAY,
+  );
+  await enforcePasswordResetRateLimit(
+    database,
+    requestClientAddress(request),
+    "request-ip",
+    PASSWORD_RESET_REQUEST_IP_LIMIT,
+    PASSWORD_RESET_RATE_LIMIT_WINDOW,
+  );
+  await enforcePasswordResetRateLimit(
+    database,
+    `${channel}:${identifier}`,
+    "request-identifier",
+    PASSWORD_RESET_REQUEST_IDENTIFIER_LIMIT,
+    PASSWORD_RESET_RATE_LIMIT_WINDOW,
+  );
 }
 
 function describeDevice(request: Request): DeviceDescriptor {
@@ -1036,17 +1214,20 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
   const previous = new Map(current.users.map((entry) => [entry.id, entry]));
   const users: User[] = [];
   const emails = new Set<string>();
+  const phones = new Set<string>();
 
   for (const candidate of submitted.users) {
     const existing = previous.get(candidate.id);
     const email = candidate.email.trim().toLowerCase();
     const name = candidate.name.trim();
-    const phone = candidate.phone.trim();
+    const phone = normalizeAccountPhone(candidate.phone) ?? "";
     const store = candidate.store.trim();
     if (!validEmail(email)) throw new ApiRequestError("البريد الإلكتروني غير صحيح.", 400);
     if (emails.has(email)) throw new ApiRequestError("البريد الإلكتروني مسجل لحساب آخر.", 409);
+    if (phone && phones.has(phone)) throw new ApiRequestError("رقم الجوال مسجل لحساب آخر.", 409);
     if (!name || !store || !/^05\d{8}$/.test(phone)) throw new ApiRequestError("تحقق من الاسم والمتجر ورقم الجوال.", 400);
     emails.add(email);
+    phones.add(phone);
 
     if (existing) {
       users.push({
@@ -1500,6 +1681,7 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
       database.prepare("DELETE FROM almadina_passkey_login_credentials WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_webauthn_challenges WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_app_locks WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_password_reset_requests WHERE user_id = ?").bind(account.id),
     ]);
     return json({ success: true }, 200, { "Set-Cookie": sessionCookie(request, "", 0) });
   }
@@ -1567,6 +1749,242 @@ async function changeOwnPassword(database: D1Database, request: Request, session
   return json({ error: "تم تحديث الحساب من جهاز آخر. حاول تغيير كلمة المرور مجددًا." }, 409);
 }
 
+function invalidPasswordResetCode(): Response {
+  return json({ error: "رمز التحقق غير صحيح أو انتهت صلاحيته." }, 422);
+}
+
+function invalidPasswordResetToken(request: Request): Response {
+  return json(
+    { error: "انتهت صلاحية طلب إعادة التعيين. ابدأ طلبًا جديدًا." },
+    422,
+    { "Set-Cookie": passwordResetCookie(request, "", 0) },
+  );
+}
+
+async function requestPasswordReset(
+  database: D1Database,
+  request: Request,
+  config: AlmadinaApiConfig,
+): Promise<Response> {
+  let submitted: unknown;
+  try {
+    submitted = await request.json();
+  } catch {
+    return json({ error: "أدخل بريدًا إلكترونيًا أو رقم جوال صالحًا." }, 400);
+  }
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) {
+    return json({ error: "أدخل بريدًا إلكترونيًا أو رقم جوال صالحًا." }, 400);
+  }
+
+  const payload = submitted as Record<string, unknown>;
+  const identifier = normalizeResetIdentifier(payload.identifier);
+  const channel = payload.channel === "email" || payload.channel === "sms" ? payload.channel : null;
+  if (!identifier || !channel) return json({ error: "اختر وسيلة التحقق وأدخل بيانات حساب صالحة." }, 400);
+  if (!isPasswordResetChannelConfigured(config, channel)) {
+    return json({ error: "خدمة إرسال رموز التحقق غير مهيأة حاليًا. تواصل مع إدارة الموقع." }, 503);
+  }
+
+  await enforcePasswordResetRequestRateLimits(database, request, identifier.value, channel);
+
+  const state = await readState(database);
+  const matches = state.database.users.filter((account) => (
+    identifier.kind === "email"
+      ? account.email.trim().toLowerCase() === identifier.value
+      : normalizeAccountPhone(account.phone) === identifier.value
+  ));
+  const account = matches.length === 1 ? matches[0] : null;
+  const destination = account
+    ? channel === "email"
+      ? (validEmail(account.email.trim().toLowerCase()) ? account.email.trim().toLowerCase() : null)
+      : normalizeSmsDestination(account.phone)
+    : null;
+
+  const requestToken = randomSecret();
+  const requestHash = await sha256(requestToken);
+  const verificationCode = randomVerificationCode();
+  const codeHash = await hashPasswordResetCode(requestToken, verificationCode);
+  const now = Math.floor(Date.now() / 1000);
+  const createdAt = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [
+    database.prepare(`DELETE FROM almadina_password_reset_requests
+      WHERE (verified_at IS NULL AND expires_at <= ?)
+        OR (verified_at IS NOT NULL AND reset_expires_at <= ?)`)
+      .bind(now, now),
+  ];
+  statements.push(database.prepare(`INSERT INTO almadina_password_reset_requests
+    (request_hash, user_id, channel, code_hash, failed_attempts, expires_at, verified_at, reset_token_hash, reset_expires_at, created_at)
+    VALUES (?, ?, ?, ?, 0, ?, NULL, NULL, NULL, ?)`)
+    .bind(requestHash, account && destination ? account.id : "", channel, codeHash, now + PASSWORD_RESET_CODE_DURATION, createdAt));
+  await database.batch(statements);
+
+  if (account && destination) {
+    const delivery = deliverPasswordResetCode(config, {
+      channel,
+      destination,
+      code: verificationCode,
+      expiresInMinutes: Math.floor(PASSWORD_RESET_CODE_DURATION / 60),
+    }).catch(async (error) => {
+      console.error("Password reset delivery failed.", error instanceof Error ? error.message : "Unknown delivery error.");
+      await database.prepare(`UPDATE almadina_password_reset_requests
+        SET user_id = '', code_hash = '', failed_attempts = ?, verified_at = NULL,
+          reset_token_hash = NULL, reset_expires_at = NULL
+        WHERE request_hash = ?`)
+        .bind(PASSWORD_RESET_MAX_FAILED_ATTEMPTS, requestHash).run();
+    });
+    if (config.defer) config.defer(delivery);
+    else await delivery;
+  }
+
+  return json({
+    success: true,
+    expiresIn: PASSWORD_RESET_CODE_DURATION,
+    resendAfter: PASSWORD_RESET_RESEND_DELAY,
+    message: "إذا كانت البيانات مطابقة لحساب مسجل، فسيصل رمز التحقق إلى الوسيلة المختارة.",
+  }, 202, { "Set-Cookie": passwordResetCookie(request, requestToken) });
+}
+
+async function verifyPasswordReset(database: D1Database, request: Request): Promise<Response> {
+  let submitted: unknown;
+  try {
+    submitted = await request.json();
+  } catch {
+    return json({ error: "أدخل رمز التحقق المكوّن من 6 أرقام." }, 400);
+  }
+  const code = submitted && typeof submitted === "object" && !Array.isArray(submitted)
+    ? normalizeArabicDigits(String((submitted as Record<string, unknown>).code ?? "")).trim()
+    : "";
+  if (!/^\d{6}$/.test(code)) return json({ error: "أدخل رمز التحقق المكوّن من 6 أرقام." }, 400);
+
+  const requestToken = getCookie(request, PASSWORD_RESET_COOKIE) ?? "";
+  await enforcePasswordResetRateLimit(
+    database,
+    requestClientAddress(request),
+    "verify-ip",
+    PASSWORD_RESET_VERIFY_IP_LIMIT,
+    PASSWORD_RESET_RATE_LIMIT_WINDOW,
+  );
+  if (!/^[\da-f]{64}$/i.test(requestToken)) return invalidPasswordResetCode();
+
+  const requestHash = await sha256(requestToken);
+  const row = await database.prepare(`SELECT request_hash, user_id, channel, code_hash, failed_attempts, expires_at,
+    verified_at, reset_token_hash, reset_expires_at FROM almadina_password_reset_requests WHERE request_hash = ?`)
+    .bind(requestHash).first<PasswordResetRow>();
+  const now = Math.floor(Date.now() / 1000);
+  if (!row || row.expires_at <= now || row.verified_at !== null || row.failed_attempts >= PASSWORD_RESET_MAX_FAILED_ATTEMPTS) {
+    return invalidPasswordResetCode();
+  }
+
+  const submittedCodeHash = await hashPasswordResetCode(requestToken, code);
+  if (!equalIdentifier(submittedCodeHash, row.code_hash)) {
+    await database.prepare(`UPDATE almadina_password_reset_requests
+      SET failed_attempts = failed_attempts + 1
+      WHERE request_hash = ? AND verified_at IS NULL AND expires_at > ? AND failed_attempts < ?`)
+      .bind(requestHash, now, PASSWORD_RESET_MAX_FAILED_ATTEMPTS).run();
+    return invalidPasswordResetCode();
+  }
+  if (!row.user_id) {
+    await database.prepare("UPDATE almadina_password_reset_requests SET failed_attempts = ? WHERE request_hash = ?")
+      .bind(PASSWORD_RESET_MAX_FAILED_ATTEMPTS, requestHash).run();
+    return invalidPasswordResetCode();
+  }
+
+  const resetToken = randomSecret();
+  const resetTokenHash = await sha256(resetToken);
+  const resetExpiresAt = now + PASSWORD_RESET_TOKEN_DURATION;
+  const verified = await database.prepare(`UPDATE almadina_password_reset_requests
+    SET verified_at = ?, reset_token_hash = ?, reset_expires_at = ?, code_hash = '', failed_attempts = ?
+    WHERE request_hash = ? AND user_id = ? AND code_hash = ? AND verified_at IS NULL
+      AND expires_at > ? AND failed_attempts < ?
+    RETURNING user_id`)
+    .bind(
+      now,
+      resetTokenHash,
+      resetExpiresAt,
+      PASSWORD_RESET_MAX_FAILED_ATTEMPTS,
+      requestHash,
+      row.user_id,
+      submittedCodeHash,
+      now,
+      PASSWORD_RESET_MAX_FAILED_ATTEMPTS,
+    )
+    .first<{ user_id: string }>();
+  if (!verified) return invalidPasswordResetCode();
+
+  return json(
+    { success: true, expiresIn: PASSWORD_RESET_TOKEN_DURATION },
+    200,
+    { "Set-Cookie": passwordResetCookie(request, resetToken, PASSWORD_RESET_TOKEN_DURATION) },
+  );
+}
+
+async function completePasswordReset(database: D1Database, request: Request): Promise<Response> {
+  let submitted: unknown;
+  try {
+    submitted = await request.json();
+  } catch {
+    return json({ error: "بيانات كلمة المرور الجديدة غير صالحة." }, 400);
+  }
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) {
+    return json({ error: "بيانات كلمة المرور الجديدة غير صالحة." }, 400);
+  }
+  const payload = submitted as Record<string, unknown>;
+  const newPassword = typeof payload.newPassword === "string" ? payload.newPassword : "";
+  const confirmPassword = typeof payload.confirmPassword === "string" ? payload.confirmPassword : "";
+  if (newPassword !== confirmPassword) return json({ error: "تأكيد كلمة المرور الجديدة غير مطابق." }, 400);
+  if (!validNewPassword(newPassword)) {
+    return json({ error: "يجب أن تتكون كلمة المرور الجديدة من 8 أحرف على الأقل وتحتوي على حرف ورقم ورمز." }, 400);
+  }
+
+  const resetToken = getCookie(request, PASSWORD_RESET_COOKIE) ?? "";
+  await enforcePasswordResetRateLimit(
+    database,
+    requestClientAddress(request),
+    "complete-ip",
+    PASSWORD_RESET_COMPLETE_IP_LIMIT,
+    PASSWORD_RESET_RATE_LIMIT_WINDOW,
+  );
+  if (!/^[\da-f]{64}$/i.test(resetToken)) return invalidPasswordResetToken(request);
+
+  const resetTokenHash = await sha256(resetToken);
+  await enforcePasswordResetRateLimit(
+    database,
+    resetTokenHash,
+    "complete-token",
+    PASSWORD_RESET_MAX_FAILED_ATTEMPTS,
+    PASSWORD_RESET_RATE_LIMIT_WINDOW,
+  );
+  const now = Math.floor(Date.now() / 1000);
+  const reset = await database.prepare(`SELECT request_hash, user_id, channel, code_hash, failed_attempts, expires_at,
+    verified_at, reset_token_hash, reset_expires_at FROM almadina_password_reset_requests
+    WHERE reset_token_hash = ? AND verified_at IS NOT NULL AND reset_expires_at > ?`)
+    .bind(resetTokenHash, now).first<PasswordResetRow>();
+  if (!reset?.user_id) return invalidPasswordResetToken(request);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const account = state.database.users.find((entry) => entry.id === reset.user_id);
+    if (!account) return invalidPasswordResetToken(request);
+    if (await verifyPassword(newPassword, account.password)) {
+      return json({ error: "اختر كلمة مرور جديدة مختلفة عن الحالية." }, 400);
+    }
+
+    const password = await hashPassword(newPassword);
+    const next: Database = {
+      ...state.database,
+      users: state.database.users.map((entry) => entry.id === account.id ? { ...entry, password } : entry),
+    };
+    if (!await savePasswordReset(database, next, state.revision, account.id, resetTokenHash)) continue;
+
+    return json({ success: true, email: account.email }, 200, cookieHeaders(
+      sessionCookie(request, "", 0),
+      passkeyLoginCookie(request, "", 0),
+      passwordResetCookie(request, "", 0),
+    ));
+  }
+
+  return json({ error: "تم تحديث الحساب من جهاز آخر. حاول إكمال إعادة التعيين مجددًا." }, 409);
+}
+
 async function login(database: D1Database, request: Request): Promise<Response> {
   const payload = await request.json() as { email?: string; password?: string };
   const email = payload.email?.trim().toLowerCase() ?? "";
@@ -1585,7 +2003,7 @@ async function login(database: D1Database, request: Request): Promise<Response> 
 async function register(database: D1Database, request: Request): Promise<Response> {
   const payload = await request.json() as Partial<User>;
   const name = payload.name?.trim() ?? "";
-  const phone = payload.phone?.trim() ?? "";
+  const phone = normalizeAccountPhone(payload.phone ?? "") ?? "";
   const store = payload.store?.trim() ?? "";
   const email = payload.email?.trim().toLowerCase() ?? "";
   const password = payload.password ?? "";
@@ -1602,8 +2020,8 @@ async function register(database: D1Database, request: Request): Promise<Respons
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const state = await readState(database);
-    if (state.database.users.some((entry) => entry.email.toLowerCase() === email)) {
-      return json({ error: "يوجد حساب مسجل بهذا البريد الإلكتروني." }, 409);
+    if (state.database.users.some((entry) => entry.email.toLowerCase() === email || normalizeAccountPhone(entry.phone) === phone)) {
+      return json({ error: "يوجد حساب مسجل بهذا البريد الإلكتروني أو رقم الجوال." }, 409);
     }
 
     const next = { ...state.database, users: [...state.database.users, account] };
@@ -1752,7 +2170,7 @@ async function verifyCollection(database: D1Database, request: Request, session:
   return json({ error: "تم تحديث الفاتورة من جهاز آخر. حاول قراءة الكود مجددًا." }, 409);
 }
 
-export async function handleAlmadinaApi(request: Request, database: D1Database): Promise<Response> {
+export async function handleAlmadinaApi(request: Request, database: D1Database, config: AlmadinaApiConfig = {}): Promise<Response> {
   try {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
@@ -1762,6 +2180,9 @@ export async function handleAlmadinaApi(request: Request, database: D1Database):
 
     if (url.pathname === "/api/almadina/login" && request.method === "POST") return await login(database, request);
     if (url.pathname === "/api/almadina/register" && request.method === "POST") return await register(database, request);
+    if (url.pathname === "/api/almadina/password-reset/request" && request.method === "POST") return await requestPasswordReset(database, request, config);
+    if (url.pathname === "/api/almadina/password-reset/verify" && request.method === "POST") return await verifyPasswordReset(database, request);
+    if (url.pathname === "/api/almadina/password-reset/complete" && request.method === "POST") return await completePasswordReset(database, request);
     if (url.pathname === "/api/almadina/passkey/login/options" && request.method === "POST") return await publicPasskeyLoginOptions(database, request);
     if (url.pathname === "/api/almadina/passkey/login/verify" && request.method === "POST") return await verifyPublicPasskeyLogin(database, request);
     if (url.pathname === "/api/almadina/track" && request.method === "GET") return await publicTracking(database, request);

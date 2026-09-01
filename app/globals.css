@@ -84,6 +84,46 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .auth-switch { text-align: center; color: var(--muted); font-size: 12px; }
 .auth-switch button { padding: 0; border: 0; background: none; color: var(--green); font-weight: 750; cursor: pointer; }
 .auth-legal { color: var(--muted); font-size: 10px; line-height: 1.8; text-align: center; }
+.auth-forgot-link { min-height: 28px; justify-self: end; padding: 0 3px; margin-top: -7px; border: 0; background: transparent; color: var(--green); cursor: pointer; font-size: 11px; font-weight: 750; }
+.auth-forgot-link:hover:not(:disabled) { color: var(--green-dark); text-decoration: underline; text-underline-offset: 3px; }
+.auth-forgot-link:disabled { cursor: not-allowed; opacity: .5; }
+.password-recovery { display: grid; }
+.password-recovery__header { margin-bottom: 13px; }
+.password-recovery__header p { max-width: 300px; margin-right: auto; margin-left: auto; line-height: 1.75; }
+.password-recovery__progress { display: grid; gap: 7px; margin-bottom: 17px; }
+.password-recovery__progress > strong { color: var(--muted); font-size: 9px; font-weight: 750; text-align: center; }
+.password-recovery__steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.password-recovery__steps > span { height: 4px; border-radius: 999px; background: var(--line); transition: background-color .2s, box-shadow .2s; }
+.password-recovery__steps > span.is-active { background: var(--green); box-shadow: 0 2px 6px rgb(8 124 69 / 18%); }
+.password-recovery__form { animation: fade-in .2s ease both; }
+.password-recovery__form > .field .field__control input { font-size: 16px; }
+.password-recovery__methods { display: grid; min-width: 0; gap: 8px; padding: 0; margin: 0; border: 0; }
+.password-recovery__methods > legend { padding: 0; margin-bottom: 1px; font-size: 12px; font-weight: 750; }
+.password-recovery__method { position: relative; display: grid; min-height: 67px; grid-template-columns: 42px minmax(0, 1fr) 20px; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-muted); cursor: pointer; transition: border-color .18s, background-color .18s, box-shadow .18s, transform .18s; }
+.password-recovery__method:hover { border-color: color-mix(in srgb, var(--green), var(--line) 55%); transform: translateY(-1px); }
+.password-recovery__method > input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.password-recovery__method:has(input:focus-visible) { outline: 3px solid rgb(22 162 92 / 35%); outline-offset: 2px; }
+.password-recovery__method:has(input:checked) { border-color: color-mix(in srgb, var(--green), var(--line) 24%); background: color-mix(in srgb, var(--green-pale), var(--surface) 42%); box-shadow: 0 7px 17px rgb(8 124 69 / 8%); }
+.password-recovery__methods:disabled .password-recovery__method { cursor: not-allowed; opacity: .6; transform: none; }
+.password-recovery__method-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 12px; background: var(--surface); color: var(--green); box-shadow: 0 3px 9px rgb(24 32 28 / 5%); }
+.password-recovery__method-copy { display: grid; min-width: 0; gap: 3px; }
+.password-recovery__method-copy > strong { font-size: 11px; font-weight: 800; }
+.password-recovery__method-copy > small { color: var(--muted); font-size: 9px; line-height: 1.6; }
+.password-recovery__method-check { color: var(--green); opacity: 0; transform: scale(.7); transition: opacity .18s, transform .18s; }
+.password-recovery__method:has(input:checked) .password-recovery__method-check { opacity: 1; transform: scale(1); }
+.password-recovery__notice { display: flex; align-items: flex-start; gap: 7px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 74%); border-radius: 12px; background: color-mix(in srgb, var(--green-pale), var(--surface) 62%); color: var(--muted); font-size: 9px; line-height: 1.75; }
+.password-recovery__notice > svg { flex: 0 0 auto; margin-top: 1px; color: var(--green); }
+.password-recovery__code-control { height: 59px; padding-right: 18px; padding-left: 18px; }
+.password-recovery__code-control input[dir="ltr"] { direction: ltr; color: var(--text); font-size: 25px !important; font-variant-numeric: tabular-nums; font-weight: 800; letter-spacing: .42em; text-align: center; text-indent: .42em; }
+.password-recovery__code-control input::placeholder { color: color-mix(in srgb, var(--muted), transparent 42%); }
+.password-recovery__status { display: flex; align-items: center; gap: 6px; color: var(--green); font-size: 10px; font-weight: 700; }
+.password-recovery__resend { display: grid; justify-items: center; gap: 2px; padding-top: 2px; }
+.password-recovery__resend > p { display: flex; min-height: 20px; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
+.password-recovery__resend > .button { margin-top: 0; }
+.password-recovery__back { display: inline-flex; min-height: 32px; justify-self: center; align-items: center; gap: 4px; padding: 0 7px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 700; }
+.password-recovery__back > svg { transform: rotate(180deg); }
+.password-recovery__back:hover:not(:disabled) { color: var(--green); }
+.password-recovery__back:disabled { cursor: not-allowed; opacity: .5; }
 .tracking-box { display: grid; gap: 10px; padding-top: 17px; margin-top: 17px; border-top: 1px dashed var(--line); }
 .tracking-box h2 { font-size: 13px; font-weight: 750; }
 .tracking-box__row { display: grid; grid-template-columns: 1fr 46px; gap: 8px; }
@@ -1022,6 +1062,17 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .auth-card__header h1 { font-size: 20px; }
   .auth-card__header p { font-size: 10px; }
   .auth-form { gap: 10px; }
+  .auth-forgot-link { min-height: 26px; margin-top: -6px; font-size: 10px; }
+  .password-recovery__header { margin-bottom: 11px; }
+  .password-recovery__progress { gap: 6px; margin-bottom: 14px; }
+  .password-recovery__method { min-height: 62px; grid-template-columns: 38px minmax(0, 1fr) 18px; gap: 8px; padding: 8px 9px; border-radius: 12px; }
+  .password-recovery__method-icon { width: 38px; height: 38px; border-radius: 11px; }
+  .password-recovery__method-copy > strong { font-size: 10px; }
+  .password-recovery__method-copy > small { font-size: 8px; }
+  .password-recovery__notice { padding: 9px 10px; font-size: 8px; }
+  .password-recovery__code-control { height: 56px; }
+  .password-recovery__code-control input[dir="ltr"] { font-size: 23px !important; }
+  .password-recovery__back { min-height: 30px; font-size: 9px; }
   .available-accounts-button { min-height: 57px; gap: 8px; padding: 8px 9px; border-radius: 12px; }
   .available-accounts-button__icon { width: 36px; height: 36px; border-radius: 11px; }
   .available-accounts-button__copy > strong { font-size: 10px; }

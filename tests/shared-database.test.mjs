@@ -74,6 +74,39 @@ class FakeD1Statement {
       return challenge;
     }
 
+    if (this.sql.includes("FROM almadina_password_reset_requests WHERE request_hash = ?")) {
+      return this.database.passwordResets.get(this.values[0]) ?? null;
+    }
+
+    if (this.sql.includes("FROM almadina_password_reset_requests") && this.sql.includes("WHERE reset_token_hash = ?")) {
+      const [resetTokenHash, now] = this.values;
+      return [...this.database.passwordResets.values()].find((entry) => (
+        entry.reset_token_hash === resetTokenHash
+        && entry.verified_at !== null
+        && entry.reset_expires_at > now
+      )) ?? null;
+    }
+
+    if (this.sql.startsWith("UPDATE almadina_password_reset_requests SET verified_at") && this.sql.includes("RETURNING user_id")) {
+      const [verifiedAt, resetTokenHash, resetExpiresAt, failedAttempts, requestHash, userId, codeHash, now, maxFailedAttempts] = this.values;
+      const reset = this.database.passwordResets.get(requestHash);
+      if (!reset
+        || reset.user_id !== userId
+        || reset.code_hash !== codeHash
+        || reset.verified_at !== null
+        || reset.expires_at <= now
+        || reset.failed_attempts >= maxFailedAttempts) return null;
+
+      Object.assign(reset, {
+        verified_at: verifiedAt,
+        reset_token_hash: resetTokenHash,
+        reset_expires_at: resetExpiresAt,
+        code_hash: "",
+        failed_attempts: failedAttempts,
+      });
+      return { user_id: reset.user_id };
+    }
+
     throw new Error(`Unsupported mock D1 first() query: ${this.sql}`);
   }
 
@@ -126,6 +159,19 @@ class FakeD1Statement {
     if (this.sql.startsWith("UPDATE almadina_state SET payload")) {
       if (!this.database.state || this.database.state.id !== this.values[2] || this.database.state.revision !== this.values[3]) {
         return { success: true, meta: { changes: 0 } };
+      }
+
+      if (this.sql.includes("EXISTS (SELECT 1 FROM almadina_password_reset_requests")) {
+        const resetTokenHash = this.values[4];
+        const userId = this.values[5];
+        const now = this.values[6];
+        const reset = [...this.database.passwordResets.values()].find((entry) => (
+          entry.reset_token_hash === resetTokenHash
+          && entry.user_id === userId
+          && entry.verified_at !== null
+          && entry.reset_expires_at > now
+        ));
+        if (!reset) return { success: true, meta: { changes: 0 } };
       }
 
       this.database.state = {
@@ -300,6 +346,98 @@ class FakeD1Statement {
       return { success: true, meta: { changes: Number(this.database.challenges.delete(`${this.values[0]}:${this.values[1]}`)) } };
     }
 
+    if (this.sql.startsWith("INSERT INTO almadina_password_reset_requests")) {
+      const [requestHash, userId, channel, codeHash, expiresAt, createdAt] = this.values;
+      this.database.passwordResets.set(requestHash, {
+        request_hash: requestHash,
+        user_id: userId,
+        channel,
+        code_hash: codeHash,
+        failed_attempts: 0,
+        expires_at: expiresAt,
+        verified_at: null,
+        reset_token_hash: null,
+        reset_expires_at: null,
+        created_at: createdAt,
+      });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_password_reset_requests") && this.sql.includes("verified_at IS NULL AND expires_at")) {
+      const [now, resetNow] = this.values;
+      let changes = 0;
+      for (const [requestHash, reset] of this.database.passwordResets) {
+        const expired = reset.verified_at === null
+          ? reset.expires_at <= now
+          : reset.reset_expires_at !== null && reset.reset_expires_at <= resetNow;
+        if (!expired) continue;
+        this.database.passwordResets.delete(requestHash);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_password_reset_requests WHERE user_id")) {
+      const userId = this.values[0];
+      if (this.sql.includes("AND EXISTS")) {
+        const [, stateId, revision, payload] = this.values;
+        if (!this.database.state
+          || this.database.state.id !== stateId
+          || this.database.state.revision !== revision
+          || this.database.state.payload !== payload) return { success: true, meta: { changes: 0 } };
+      }
+
+      let changes = 0;
+      for (const [requestHash, reset] of this.database.passwordResets) {
+        if (reset.user_id !== userId) continue;
+        this.database.passwordResets.delete(requestHash);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("UPDATE almadina_password_reset_requests SET user_id")) {
+      if (this.sql.includes("SET user_id = '', code_hash = ''")) {
+        const [failedAttempts, requestHash] = this.values;
+        const reset = this.database.passwordResets.get(requestHash);
+        if (!reset) return { success: true, meta: { changes: 0 } };
+        Object.assign(reset, {
+          user_id: "",
+          code_hash: "",
+          failed_attempts: failedAttempts,
+          verified_at: null,
+          reset_token_hash: null,
+          reset_expires_at: null,
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+
+      const [userId, codeHash, requestHash] = this.values;
+      const reset = this.database.passwordResets.get(requestHash);
+      if (!reset) return { success: true, meta: { changes: 0 } };
+      Object.assign(reset, { user_id: userId, code_hash: codeHash });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("UPDATE almadina_password_reset_requests SET failed_attempts = failed_attempts + 1")) {
+      const [requestHash, now, maxFailedAttempts] = this.values;
+      const reset = this.database.passwordResets.get(requestHash);
+      if (!reset
+        || reset.verified_at !== null
+        || reset.expires_at <= now
+        || reset.failed_attempts >= maxFailedAttempts) return { success: true, meta: { changes: 0 } };
+      reset.failed_attempts += 1;
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("UPDATE almadina_password_reset_requests SET failed_attempts = ?")) {
+      const [failedAttempts, requestHash] = this.values;
+      const reset = this.database.passwordResets.get(requestHash);
+      if (!reset) return { success: true, meta: { changes: 0 } };
+      reset.failed_attempts = failedAttempts;
+      return { success: true, meta: { changes: 1 } };
+    }
+
     if (this.sql.startsWith("DELETE FROM almadina_rate_limits WHERE reset_at")) {
       let changes = 0;
       for (const [keyHash, rateLimit] of this.database.rateLimits) {
@@ -323,6 +461,7 @@ class FakeD1Database {
   passkeyLoginCredentials = new Map();
   challenges = new Map();
   rateLimits = new Map();
+  passwordResets = new Map();
 
   prepare(sql) {
     return new FakeD1Statement(this, sql);
@@ -336,7 +475,12 @@ class FakeD1Database {
 async function loadWorker() {
   if (process.env.ALMADINA_SERVER_TEST_MODULE) {
     const { handleAlmadinaApi } = await import(process.env.ALMADINA_SERVER_TEST_MODULE);
-    return { fetch: (request, environment) => handleAlmadinaApi(request, environment.DB) };
+    return {
+      fetch: (request, environment, context) => handleAlmadinaApi(request, environment.DB, {
+        sender: environment.PASSWORD_RESET_SENDER,
+        defer: (promise) => context.waitUntil(promise),
+      }),
+    };
   }
 
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -345,12 +489,13 @@ async function loadWorker() {
   return worker;
 }
 
-async function call(worker, database, path, { method = "GET", payload, cookie, origin, headers: extraHeaders } = {}) {
+async function call(worker, database, path, { method = "GET", payload, cookie, origin, headers: extraHeaders, environment = {} } = {}) {
   const headers = new Headers(extraHeaders);
   if (payload) headers.set("Content-Type", "application/json");
   if (cookie) headers.set("Cookie", cookie);
   if (origin) headers.set("Origin", origin);
 
+  const backgroundTasks = [];
   const response = await worker.fetch(
     new Request(`http://almadina.test/api/almadina/${path}`, {
       method,
@@ -358,11 +503,17 @@ async function call(worker, database, path, { method = "GET", payload, cookie, o
       ...(payload ? { body: JSON.stringify(payload) } : {}),
     }),
     {
+      ...environment,
       DB: database,
       ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
     },
-    { waitUntil() {}, passThroughOnException() {} },
+    {
+      waitUntil(promise) { backgroundTasks.push(Promise.resolve(promise)); },
+      passThroughOnException() {},
+    },
   );
+
+  for (let index = 0; index < backgroundTasks.length; index += 1) await backgroundTasks[index];
 
   return { status: response.status, headers: response.headers, body: await response.json() };
 }
@@ -376,6 +527,14 @@ function sessionFrom(result) {
   assert.ok(value);
   assert.match(value, /HttpOnly/);
   return value.split(";")[0];
+}
+
+function namedCookieFrom(result, name) {
+  const value = result.headers.get("set-cookie");
+  assert.ok(value);
+  const match = value.match(new RegExp(`(?:^|,\\s*)(${name}=[^;,]*)`));
+  assert.ok(match, `expected ${name} cookie in ${value}`);
+  return match[1];
 }
 
 test("shares accounts and orders across devices while isolating customers and protecting sessions", async () => {
@@ -2741,4 +2900,250 @@ test("rate limits repeated wrong current-password attempts without changing host
   assert.equal(database.state.revision, revision);
   assert.equal(JSON.parse(database.state.payload).users.find((account) => account.id === registration.body.userId).password, passwordHash);
   assert.equal((await call(worker, database, "database", { cookie })).status, 200);
+});
+
+test("resets passwords through generic email and SMS verification flows and consumes every security grant once", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const delivered = [];
+  const environment = {
+    PASSWORD_RESET_SENDER: async (message) => {
+      delivered.push(structuredClone(message));
+    },
+  };
+
+  const emailAccount = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("حساب استعادة البريد", "recovery-email@example.test", "0597000001"),
+  });
+  const smsAccount = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("حساب استعادة الهاتف", "recovery-sms@example.test", "0597000002"),
+  });
+  assert.equal(emailAccount.status, 201);
+  assert.equal(smsAccount.status, 201);
+
+  const emailFirstCookie = sessionFrom(emailAccount);
+  const smsFirstCookie = sessionFrom(smsAccount);
+  const emailSecond = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "recovery-email@example.test", password: "Customer@123" },
+  });
+  const smsSecond = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "recovery-sms@example.test", password: "Customer@123" },
+  });
+  assert.equal(emailSecond.status, 200);
+  assert.equal(smsSecond.status, 200);
+  const emailSecondCookie = sessionFrom(emailSecond);
+  const smsSecondCookie = sessionFrom(smsSecond);
+
+  function addSecurityFixtures(userId, suffix) {
+    database.appLocks.set(userId, {
+      user_id: userId,
+      pin_hash: `pbkdf2:${suffix}`,
+      enabled: 1,
+      biometric_enabled: 1,
+      failed_attempts: 0,
+      locked_until: 0,
+    });
+    database.credentials.set(`credential-${suffix}`, { credential_id: `credential-${suffix}`, user_id: userId });
+    database.passkeyLoginCredentials.set(`credential-${suffix}`, { credential_id: `credential-${suffix}`, user_id: userId });
+    database.challenges.set(`${suffix}:registration`, { user_id: userId, kind: "registration" });
+  }
+
+  addSecurityFixtures(emailAccount.body.userId, "recovery-email");
+  addSecurityFixtures(smsAccount.body.userId, "recovery-sms");
+
+  const unknown = await call(worker, database, "password-reset/request", {
+    method: "POST",
+    payload: { identifier: "unknown-recovery@example.test", channel: "email" },
+    environment,
+  });
+  assert.equal(unknown.status, 202);
+  assert.equal(unknown.headers.get("cache-control"), "no-store");
+  assert.deepEqual(Object.keys(unknown.body).sort(), ["expiresIn", "message", "resendAfter", "success"].sort());
+  assert.equal(unknown.body.success, true);
+  assert.equal(delivered.length, 0);
+  assert.equal([...database.passwordResets.values()].filter((reset) => reset.user_id === "").length, 1);
+
+  async function exerciseReset({
+    userId,
+    email,
+    identifier,
+    channel,
+    destination,
+    newPassword,
+    oldCookies,
+    preservedCookie,
+  }) {
+    const revisionBeforeRequest = database.state.revision;
+    const deliveryCount = delivered.length;
+    const requested = await call(worker, database, "password-reset/request", {
+      method: "POST",
+      payload: { identifier, channel },
+      environment,
+    });
+    assert.equal(requested.status, 202);
+    assert.deepEqual(requested.body, unknown.body);
+    assert.equal(requested.headers.get("cache-control"), "no-store");
+    assert.equal(database.state.revision, revisionBeforeRequest);
+    assert.equal(delivered.length, deliveryCount + 1);
+
+    const message = delivered.at(-1);
+    assert.deepEqual(
+      { channel: message.channel, destination: message.destination, expiresInMinutes: message.expiresInMinutes },
+      { channel, destination, expiresInMinutes: 10 },
+    );
+    assert.match(message.code, /^\d{6}$/);
+    assert.equal(Object.hasOwn(requested.body, "code"), false);
+    assert.equal(Object.hasOwn(requested.body, "userId"), false);
+
+    const requestCookie = namedCookieFrom(requested, "almadina_password_reset");
+    const requestToken = requestCookie.split("=")[1];
+    assert.match(requestToken, /^[\da-f]{64}$/);
+    assert.equal(database.passwordResets.has(requestToken), false);
+    const resetBeforeVerification = [...database.passwordResets.values()].find((reset) => reset.user_id === userId);
+    assert.ok(resetBeforeVerification);
+    assert.equal(resetBeforeVerification.channel, channel);
+    assert.notEqual(resetBeforeVerification.code_hash, message.code);
+    assert.ok(!JSON.stringify(resetBeforeVerification).includes(message.code));
+
+    const wrongCode = message.code === "000000" ? "000001" : "000000";
+    const rejectedCode = await call(worker, database, "password-reset/verify", {
+      method: "POST",
+      cookie: requestCookie,
+      payload: { code: wrongCode },
+      environment,
+    });
+    assert.equal(rejectedCode.status, 422);
+    assert.match(rejectedCode.body.error, /غير صحيح|انتهت/);
+    assert.equal(resetBeforeVerification.failed_attempts, 1);
+    assert.equal(database.state.revision, revisionBeforeRequest);
+
+    const verified = await call(worker, database, "password-reset/verify", {
+      method: "POST",
+      cookie: requestCookie,
+      payload: { code: message.code },
+      environment,
+    });
+    assert.equal(verified.status, 200);
+    assert.deepEqual(Object.keys(verified.body).sort(), ["expiresIn", "success"].sort());
+    assert.equal(verified.body.success, true);
+    const resetCookie = namedCookieFrom(verified, "almadina_password_reset");
+    const resetToken = resetCookie.split("=")[1];
+    const verifiedReset = [...database.passwordResets.values()].find((reset) => reset.user_id === userId);
+    assert.ok(verifiedReset);
+    assert.equal(verifiedReset.code_hash, "");
+    assert.notEqual(verifiedReset.reset_token_hash, resetToken);
+    assert.ok(verifiedReset.verified_at);
+
+    const replayedCode = await call(worker, database, "password-reset/verify", {
+      method: "POST",
+      cookie: requestCookie,
+      payload: { code: message.code },
+      environment,
+    });
+    assert.equal(replayedCode.status, 422);
+
+    const revisionBeforeComplete = database.state.revision;
+    const completed = await call(worker, database, "password-reset/complete", {
+      method: "POST",
+      cookie: resetCookie,
+      payload: { newPassword, confirmPassword: newPassword },
+      environment,
+    });
+    assert.equal(completed.status, 200);
+    assert.equal(completed.body.success, true);
+    assert.equal(completed.body.email, email);
+    assert.equal(Object.hasOwn(completed.body, "database"), false);
+    assert.equal(database.state.revision, revisionBeforeComplete + 1);
+    assert.equal([...database.passwordResets.values()].some((reset) => reset.user_id === userId), false);
+    assert.equal([...database.sessions.values()].some((session) => session.user_id === userId), false);
+    assert.equal([...database.sessionDevices.values()].some((device) => device.user_id === userId), false);
+    assert.equal([...database.credentials.values()].some((credential) => credential.user_id === userId), false);
+    assert.equal([...database.passkeyLoginCredentials.values()].some((credential) => credential.user_id === userId), false);
+    assert.equal([...database.challenges.values()].some((challenge) => challenge.user_id === userId), false);
+    assert.equal(database.appLocks.has(userId), false);
+
+    for (const staleCookie of oldCookies) {
+      assert.equal((await call(worker, database, "database", { cookie: staleCookie })).status, 401);
+    }
+    if (preservedCookie) assert.equal((await call(worker, database, "database", { cookie: preservedCookie })).status, 200);
+
+    assert.equal((await call(worker, database, "login", {
+      method: "POST",
+      payload: { email, password: "Customer@123" },
+    })).status, 401);
+    const newLogin = await call(worker, database, "login", {
+      method: "POST",
+      payload: { email, password: newPassword },
+    });
+    assert.equal(newLogin.status, 200);
+    assert.equal(newLogin.body.userId, userId);
+
+    const replayedReset = await call(worker, database, "password-reset/complete", {
+      method: "POST",
+      cookie: resetCookie,
+      payload: { newPassword: `${newPassword}x`, confirmPassword: `${newPassword}x` },
+      environment,
+    });
+    assert.equal(replayedReset.status, 422);
+    return sessionFrom(newLogin);
+  }
+
+  const emailNewCookie = await exerciseReset({
+    userId: emailAccount.body.userId,
+    email: "recovery-email@example.test",
+    identifier: " RECOVERY-EMAIL@EXAMPLE.TEST ",
+    channel: "email",
+    destination: "recovery-email@example.test",
+    newPassword: "بريدNew!123",
+    oldCookies: [emailFirstCookie, emailSecondCookie],
+    preservedCookie: smsFirstCookie,
+  });
+  assert.equal(database.credentials.has("credential-recovery-sms"), true);
+  assert.equal(database.passkeyLoginCredentials.has("credential-recovery-sms"), true);
+  assert.equal(database.challenges.has("recovery-sms:registration"), true);
+  assert.equal(database.appLocks.has(smsAccount.body.userId), true);
+
+  await exerciseReset({
+    userId: smsAccount.body.userId,
+    email: "recovery-sms@example.test",
+    identifier: "0597000002",
+    channel: "sms",
+    destination: "+970597000002",
+    newPassword: "هاتفNew!456",
+    oldCookies: [smsFirstCookie, smsSecondCookie],
+    preservedCookie: emailNewCookie,
+  });
+
+  assert.equal(delivered.length, 2);
+  assert.deepEqual(delivered.map((message) => message.channel), ["email", "sms"]);
+
+  const deliveryFailureAccount = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("حساب فشل الإرسال", "recovery-delivery-failure@example.test", "0597000003"),
+  });
+  assert.equal(deliveryFailureAccount.status, 201);
+  const previousConsoleError = console.error;
+  let failedDelivery;
+  try {
+    console.error = () => {};
+    failedDelivery = await call(worker, database, "password-reset/request", {
+      method: "POST",
+      payload: { identifier: "recovery-delivery-failure@example.test", channel: "email" },
+      environment: { PASSWORD_RESET_SENDER: async () => { throw new Error("simulated delivery failure"); } },
+    });
+  } finally {
+    console.error = previousConsoleError;
+  }
+  assert.equal(failedDelivery.status, 202);
+  assert.deepEqual(failedDelivery.body, unknown.body);
+  const invalidatedDelivery = [...database.passwordResets.values()].at(-1);
+  assert.ok(invalidatedDelivery);
+  assert.equal(invalidatedDelivery.user_id, "");
+  assert.equal(invalidatedDelivery.code_hash, "");
+  assert.equal(invalidatedDelivery.failed_attempts, 5);
+  assert.equal(invalidatedDelivery.reset_token_hash, null);
 });

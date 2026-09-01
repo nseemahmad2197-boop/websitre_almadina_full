@@ -6,12 +6,13 @@ import { detectBiometricAvailability } from "../lib/app-lock-client";
 import { AVAILABLE_ACCOUNTS_EVENT, AVAILABLE_ACCOUNTS_STORAGE_KEY, readAvailableAccounts, type AvailableAccount } from "../lib/available-accounts";
 import type { Order } from "../lib/data";
 import { Icon } from "./icon";
+import { PasswordRecovery } from "./password-recovery";
 import { TrackingHistory } from "./tracking-history";
 import { Avatar, Brand, Button, Field, IconButton, Modal, StatusPill } from "./ui";
 
 export function Authentication() {
   const { login, loginWithBiometric, register, preferences, updatePreferences, showToast, openScanner } = useApp();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register" | "recover">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -76,7 +77,7 @@ export function Authentication() {
     setBusy(true);
     try {
       const created = await register({ name: form.name.trim(), phone: form.phone, store: form.store.trim(), email: form.email.trim().toLowerCase(), password: form.password });
-      if (!created) setError("يوجد حساب مسجل بهذا البريد الإلكتروني.");
+      if (!created) setError("يوجد حساب مسجل بهذا البريد الإلكتروني أو رقم الجوال.");
     } catch (error) {
       setError(error instanceof Error ? error.message : "تعذّر إنشاء الحساب. حاول مرة أخرى.");
     } finally {
@@ -118,6 +119,27 @@ export function Authentication() {
     showToast(`تم اختيار حساب ${account.name} وملء بريده لتسجيل الدخول بكلمة المرور. عند استخدام حماية الجهاز سيختار الجهاز الحساب المرتبط بالبصمة.`, "info");
   }
 
+  function openPasswordRecovery() {
+    if (loginOperationBusy) return;
+    setPassword("");
+    setShowPassword(false);
+    setError("");
+    setMode("recover");
+  }
+
+  function closePasswordRecovery() {
+    setPassword("");
+    setShowPassword(false);
+    setError("");
+    setMode("login");
+  }
+
+  function completePasswordRecovery(loginEmail?: string) {
+    setEmail(loginEmail ?? "");
+    closePasswordRecovery();
+    showToast("تم تعيين كلمة المرور الجديدة بنجاح. يمكنك تسجيل الدخول الآن.");
+  }
+
   return (
     <main className="auth-page">
       <div className="auth-page__halo auth-page__halo--one" /><div className="auth-page__halo auth-page__halo--two" />
@@ -131,46 +153,51 @@ export function Authentication() {
       <div className={`auth-shell ${mode === "register" ? "auth-shell--register" : ""}`}>
         <Brand inverse />
         <section className="auth-card" key={mode}>
-          <header className="auth-card__header"><h1>{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h1><p>{mode === "login" ? "أهلًا بعودتك — أدخل بيانات حسابك للمتابعة" : "سجّل متجرك وابدأ التوصيل مع المدينة إكسبرس"}</p></header>
-          {mode === "login" ? (
-            <form className="auth-form" onSubmit={onLogin} noValidate>
-              <Field icon="mail" type="email" placeholder="البريد الإلكتروني" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" dir="ltr" disabled={loginOperationBusy} />
-              <Field icon="lock" type={showPassword ? "text" : "password"} placeholder="كلمة المرور" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" suffix={passwordToggle} disabled={loginOperationBusy} />
-              {error && <p className="form-error"><Icon name="alert" size={15} />{error}</p>}
-              <Button type="submit" full loading={busy} disabled={biometricBusy}>تسجيل الدخول</Button>
-              {biometricAvailable && <Button type="button" variant="secondary" icon="fingerprint" full loading={biometricBusy} disabled={busy} onClick={() => { void onBiometricLogin(); }}>الدخول ببصمة الوجه أو حماية الجهاز</Button>}
-              <button
-                type="button"
-                className="available-accounts-button"
-                disabled={availableAccounts.length === 0 || loginOperationBusy}
-                aria-haspopup="dialog"
-                onClick={() => setAccountsOpen(true)}
-              >
-                <span className="available-accounts-button__icon"><Icon name="users" size={20} /></span>
-                <span className="available-accounts-button__copy"><strong>الحسابات المتاحة</strong><small>{availableAccounts.length ? `${availableAccounts.length.toLocaleString("ar-EG")} حساب على هذا الجهاز` : "لا توجد حسابات مسجلة على هذا الجهاز"}</small></span>
-                {availableAccounts.length ? <span className="available-accounts-button__count">{availableAccounts.length.toLocaleString("ar-EG")}</span> : <Icon name="lock" size={17} />}
-              </button>
-              <div className="auth-divider"><span>أو</span></div>
-              <p className="auth-switch">ليس لديك حساب؟ <button type="button" disabled={loginOperationBusy} onClick={() => { setMode("register"); setError(""); }}>أنشئ حسابًا جديدًا</button></p>
-            </form>
+          {mode === "recover" ? (
+            <PasswordRecovery initialIdentifier={email} onCancel={closePasswordRecovery} onComplete={completePasswordRecovery} />
           ) : (
-            <form className="auth-form" onSubmit={onRegister} noValidate>
-              <Field icon="user" placeholder="الاسم الكامل" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} autoComplete="name" />
-              <Field icon="phone" placeholder="05xxxxxxxx" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} inputMode="numeric" autoComplete="tel" dir="ltr" />
-              <Field icon="store" placeholder="اسم المتجر (التجاري)" value={form.store} onChange={(event) => setForm({ ...form, store: event.target.value })} />
-              <Field icon="mail" placeholder="البريد الإلكتروني" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} autoComplete="email" dir="ltr" />
-              <Field icon="lock" placeholder="كلمة المرور (8 أحرف فأكثر)" type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} autoComplete="new-password" suffix={passwordToggle} />
-              <Field icon="lock" placeholder="تأكيد كلمة المرور" type={showPassword ? "text" : "password"} value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} autoComplete="new-password" />
-              {error && <p className="form-error"><Icon name="alert" size={15} />{error}</p>}
-              <Button type="submit" full loading={busy}>إنشاء الحساب</Button>
-              <p className="auth-switch">لديك حساب بالفعل؟ <button type="button" onClick={() => { setMode("login"); setError(""); }}>سجّل الدخول</button></p>
-              <p className="auth-legal">بإنشاء الحساب أنت توافق على شروط الاستخدام وسياسة الخصوصية.</p>
-            </form>
-          )}
+            <>
+              <header className="auth-card__header"><h1>{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h1><p>{mode === "login" ? "أهلًا بعودتك — أدخل بيانات حسابك للمتابعة" : "سجّل متجرك وابدأ التوصيل مع المدينة إكسبرس"}</p></header>
+              {mode === "login" ? (
+                <form className="auth-form" onSubmit={onLogin} noValidate>
+                  <Field icon="mail" type="email" placeholder="البريد الإلكتروني" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" dir="ltr" disabled={loginOperationBusy} />
+                  <Field icon="lock" type={showPassword ? "text" : "password"} placeholder="كلمة المرور" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" suffix={passwordToggle} disabled={loginOperationBusy} />
+                  <button type="button" className="auth-forgot-link" disabled={loginOperationBusy} onClick={openPasswordRecovery}>نسيت كلمة المرور؟</button>
+                  {error && <p className="form-error"><Icon name="alert" size={15} />{error}</p>}
+                  <Button type="submit" full loading={busy} disabled={biometricBusy}>تسجيل الدخول</Button>
+                  {biometricAvailable && <Button type="button" variant="secondary" icon="fingerprint" full loading={biometricBusy} disabled={busy} onClick={() => { void onBiometricLogin(); }}>الدخول ببصمة الوجه أو حماية الجهاز</Button>}
+                  <button
+                    type="button"
+                    className="available-accounts-button"
+                    disabled={availableAccounts.length === 0 || loginOperationBusy}
+                    aria-haspopup="dialog"
+                    onClick={() => setAccountsOpen(true)}
+                  >
+                    <span className="available-accounts-button__icon"><Icon name="users" size={20} /></span>
+                    <span className="available-accounts-button__copy"><strong>الحسابات المتاحة</strong><small>{availableAccounts.length ? `${availableAccounts.length.toLocaleString("ar-EG")} حساب على هذا الجهاز` : "لا توجد حسابات مسجلة على هذا الجهاز"}</small></span>
+                    {availableAccounts.length ? <span className="available-accounts-button__count">{availableAccounts.length.toLocaleString("ar-EG")}</span> : <Icon name="lock" size={17} />}
+                  </button>
+                  <div className="auth-divider"><span>أو</span></div>
+                  <p className="auth-switch">ليس لديك حساب؟ <button type="button" disabled={loginOperationBusy} onClick={() => { setMode("register"); setError(""); }}>أنشئ حسابًا جديدًا</button></p>
+                </form>
+              ) : (
+                <form className="auth-form" onSubmit={onRegister} noValidate>
+                  <Field icon="user" placeholder="الاسم الكامل" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} autoComplete="name" />
+                  <Field icon="phone" placeholder="05xxxxxxxx" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} inputMode="numeric" autoComplete="tel" dir="ltr" />
+                  <Field icon="store" placeholder="اسم المتجر (التجاري)" value={form.store} onChange={(event) => setForm({ ...form, store: event.target.value })} />
+                  <Field icon="mail" placeholder="البريد الإلكتروني" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} autoComplete="email" dir="ltr" />
+                  <Field icon="lock" placeholder="كلمة المرور (8 أحرف فأكثر)" type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} autoComplete="new-password" suffix={passwordToggle} />
+                  <Field icon="lock" placeholder="تأكيد كلمة المرور" type={showPassword ? "text" : "password"} value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} autoComplete="new-password" />
+                  {error && <p className="form-error"><Icon name="alert" size={15} />{error}</p>}
+                  <Button type="submit" full loading={busy}>إنشاء الحساب</Button>
+                  <p className="auth-switch">لديك حساب بالفعل؟ <button type="button" onClick={() => { setMode("login"); setError(""); }}>سجّل الدخول</button></p>
+                  <p className="auth-legal">بإنشاء الحساب أنت توافق على شروط الاستخدام وسياسة الخصوصية.</p>
+                </form>
+              )}
 
-          {mode === "login" && <>
-            <div className="tracking-box"><h2>تتبّع طردك بدون تسجيل دخول</h2><div className="tracking-box__row"><Field icon="scan" placeholder="ALX-20200001" value={tracking} onChange={(event) => setTracking(event.target.value.toUpperCase())} dir="ltr" /><IconButton name="camera" label="مسح رمز التتبع" className="tracking-box__camera" onClick={() => openScanner((value) => { setTracking(value); void findShipment(value); })} /></div><Button variant="secondary" full disabled={!tracking.trim()} onClick={() => { void findShipment(tracking); }}>تتبّع الطرد</Button></div>
-          </>}
+              {mode === "login" && <div className="tracking-box"><h2>تتبّع طردك بدون تسجيل دخول</h2><div className="tracking-box__row"><Field icon="scan" placeholder="ALX-20200001" value={tracking} onChange={(event) => setTracking(event.target.value.toUpperCase())} dir="ltr" /><IconButton name="camera" label="مسح رمز التتبع" className="tracking-box__camera" onClick={() => openScanner((value) => { setTracking(value); void findShipment(value); })} /></div><Button variant="secondary" full disabled={!tracking.trim()} onClick={() => { void findShipment(tracking); }}>تتبّع الطرد</Button></div>}
+            </>
+          )}
         </section>
         <footer className="auth-footer">توصيل أسرع، متابعة أسهل — إلى كل فلسطين</footer>
       </div>
