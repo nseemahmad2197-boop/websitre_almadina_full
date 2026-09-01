@@ -187,7 +187,9 @@ html[data-theme="dark"] .topbar__import { color: #80d9a8; }
 .membership-badge { display: inline-flex; min-height: 25px; flex: 0 0 auto; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid transparent; border-radius: 999px; font-size: 9px; font-weight: 750; white-space: nowrap; }
 .membership-badge--standard { border-color: var(--line); background: var(--surface-muted); color: var(--muted); }
 .membership-badge--premium { border-color: rgb(201 149 49 / 26%); background: #fff7e6; color: #a86e17; }
+.membership-badge--diamond { border-color: rgb(68 129 207 / 30%); background: #ebf5ff; color: #286aa8; }
 html[data-theme="dark"] .membership-badge--premium { background: #342b18; color: #edc475; }
+html[data-theme="dark"] .membership-badge--diamond { background: #172b42; color: #8cc9ff; }
 .balance-card { position: relative; display: grid; min-height: 182px; grid-template-columns: 1fr auto; gap: 14px; padding: 21px 23px 17px; border-radius: 21px; background: linear-gradient(122deg, #15a05c, #08663b 65%, #064729); color: #fff; box-shadow: 0 17px 30px rgb(8 124 69 / 19%); }
 .balance-card__total { display: grid; align-content: start; gap: 2px; }
 .balance-card__total > span, .balance-card__total > small { color: rgb(255 255 255 / 80%); font-size: 12px; }
@@ -830,7 +832,9 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .membership-switch__option { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; gap: 4px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 700; white-space: nowrap; transition: background-color .18s, color .18s, box-shadow .18s; }
 .membership-switch__option.is-selected { background: var(--surface); color: var(--green); box-shadow: 0 2px 7px rgb(0 0 0 / 6%); }
 .membership-switch__option--premium.is-selected { background: #fff7e6; color: #a86e17; }
+.membership-switch__option--diamond.is-selected { background: #ebf5ff; color: #286aa8; }
 html[data-theme="dark"] .membership-switch__option--premium.is-selected { background: #342b18; color: #edc475; }
+html[data-theme="dark"] .membership-switch__option--diamond.is-selected { background: #172b42; color: #8cc9ff; }
 .admin-collection-card { display: grid; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
 .admin-collection-card > div:first-child { display: flex; align-items: center; gap: 10px; }
 .admin-collection-card > div:first-child > div { display: grid; flex: 1; gap: 4px; }
@@ -1149,6 +1153,8 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .admin-user-card--merchant { column-gap: 9px; row-gap: 10px; }
   .admin-user-card__identity { gap: 5px; }
   .admin-user-card__identity > .membership-badge { min-height: 22px; padding: 3px 7px; font-size: 8px; }
+  .admin-user-card--merchant .admin-user-card__actions { flex-wrap: wrap; justify-content: flex-end; }
+  .admin-user-card--merchant .membership-switch { width: 100%; flex: 1 0 100%; }
   .admin-page { gap: 11px; padding-top: 13px; }
   .admin-title { align-items: flex-start; }
   .admin-notification-button { min-height: 44px; gap: 5px; padding-right: 10px; padding-left: 10px; font-size: 10px; }

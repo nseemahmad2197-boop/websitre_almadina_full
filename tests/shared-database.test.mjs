@@ -453,7 +453,7 @@ test("shares accounts and orders across devices while isolating customers and pr
     store: "متجر الإدارة",
     password: "Managed@123",
     role: "merchant",
-    membership: "standard",
+    membership: "diamond",
     joinedAt: new Date().toISOString(),
     avatarColor: "#187a50",
   };
@@ -672,7 +672,7 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(courierAfterBroadcast.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالتجار").length, 0);
   assert.equal(courierAfterBroadcast.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالمندوبين").length, 1);
 
-  const [premiumOnlyBroadcast, standardOnlyBroadcast] = await Promise.all([
+  const [premiumOnlyBroadcast, diamondOnlyBroadcast, standardOnlyBroadcast] = await Promise.all([
     call(worker, database, "notices/broadcast", {
       method: "POST",
       cookie: adminCookie,
@@ -687,6 +687,16 @@ test("shares accounts and orders across devices while isolating customers and pr
       method: "POST",
       cookie: adminCookie,
       payload: {
+        requestId: "release-diamond-2026-09-01",
+        audience: "diamond",
+        title: "تحديث خاص بالحسابات الماسية",
+        message: "هذا الإشعار مخصص للتجار أصحاب الحسابات الماسية فقط.",
+      },
+    }),
+    call(worker, database, "notices/broadcast", {
+      method: "POST",
+      cookie: adminCookie,
+      payload: {
         requestId: "release-standard-2026-09-01",
         audience: "standard",
         title: "تحديث خاص بالحسابات العادية",
@@ -695,20 +705,25 @@ test("shares accounts and orders across devices while isolating customers and pr
     }),
   ]);
   assert.equal(premiumOnlyBroadcast.status, 200);
+  assert.equal(diamondOnlyBroadcast.status, 200);
   assert.equal(standardOnlyBroadcast.status, 200);
   assert.equal(premiumOnlyBroadcast.body.recipientCount, 1);
-  assert.equal(standardOnlyBroadcast.body.recipientCount, 2);
+  assert.equal(diamondOnlyBroadcast.body.recipientCount, 1);
+  assert.equal(standardOnlyBroadcast.body.recipientCount, 1);
 
   const premiumMerchantAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: secondCookie });
   const standardMerchantAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: otherCookie });
-  const managedStandardAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: managedCookie });
+  const diamondMerchantAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: managedCookie });
   const courierAfterMembershipBroadcasts = await call(worker, database, "database", { cookie: employeeCookie });
   assert.equal(premiumMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بحسابات البريميوم" && notice.audience === "premium").length, 1);
+  assert.equal(premiumMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات الماسية").length, 0);
   assert.equal(premiumMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات العادية").length, 0);
   assert.equal(standardMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بحسابات البريميوم").length, 0);
+  assert.equal(standardMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات الماسية").length, 0);
   assert.equal(standardMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات العادية" && notice.audience === "standard").length, 1);
-  assert.equal(managedStandardAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات العادية" && notice.audience === "standard").length, 1);
-  assert.equal(courierAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بحسابات البريميوم" || notice.title === "تحديث خاص بالحسابات العادية").length, 0);
+  assert.equal(diamondMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بالحسابات الماسية" && notice.audience === "diamond").length, 1);
+  assert.equal(diamondMerchantAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بحسابات البريميوم" || notice.title === "تحديث خاص بالحسابات العادية").length, 0);
+  assert.equal(courierAfterMembershipBroadcasts.body.database.notices.filter((notice) => notice.title === "تحديث خاص بحسابات البريميوم" || notice.title === "تحديث خاص بالحسابات الماسية" || notice.title === "تحديث خاص بالحسابات العادية").length, 0);
 
   const readByMerchant = await call(worker, database, "database", {
     method: "PUT",
@@ -1577,6 +1592,102 @@ test("recalculates progressive weight and dimension fees without trusting client
   assert.equal(savedPremium.deliveryFee, 78);
   assert.equal(savedPremium.weightFee, 20);
   assert.equal(savedPremium.oversizeFee, 28);
+});
+
+test("persists diamond membership and enforces its 15/25/55 regional prices on the server", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const registration = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("تاجر ماسي", "diamond@example.test", "0599988776"),
+  });
+  assert.equal(registration.status, 201);
+  const merchantCookie = sessionFrom(registration);
+
+  const administrator = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+  });
+  assert.equal(administrator.status, 200);
+  const diamondUpgrade = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: sessionFrom(administrator),
+    payload: {
+      revision: administrator.body.revision,
+      database: {
+        ...administrator.body.database,
+        users: administrator.body.database.users.map((account) => account.id === registration.body.userId
+          ? { ...account, membership: "diamond" }
+          : account),
+      },
+    },
+  });
+  assert.equal(diamondUpgrade.status, 200);
+  assert.equal(
+    diamondUpgrade.body.database.users.find((account) => account.id === registration.body.userId).membership,
+    "diamond",
+  );
+
+  const merchant = await call(worker, database, "database", { cookie: merchantCookie });
+  assert.equal(merchant.body.database.users[0].membership, "diamond");
+  const destinations = [
+    { id: "diamond-west-bank", governorate: "الخليل", city: "الخليل", expectedFee: 15 },
+    { id: "diamond-jerusalem", governorate: "القدس", city: "القدس", expectedFee: 25 },
+    { id: "diamond-interior", governorate: "الداخل", city: "حيفا", expectedFee: 55 },
+  ];
+  const now = new Date().toISOString();
+  const orders = destinations.map((destination, index) => ({
+    id: destination.id,
+    trackingNumber: `FORGED-DIAMOND-${index}`,
+    merchantId: registration.body.userId,
+    merchantName: "قيمة غير موثوقة",
+    merchantStore: "قيمة غير موثوقة",
+    recipientName: `مستلم ماسي ${index + 1}`,
+    recipientPhone: "0597654321",
+    governorate: destination.governorate,
+    city: destination.city,
+    address: "عنوان الاختبار",
+    pickupAddress: "الخليل",
+    amount: 100,
+    deliveryFee: 999,
+    content: "اختبار السعر الماسي",
+    weight: "0 - 5 كغم",
+    dimensions: "20 × 20 × 20 سم",
+    lengthCm: 20,
+    widthCm: 20,
+    heightCm: 20,
+    weightFee: 999,
+    oversizeFee: 999,
+    notes: "",
+    privateNotes: "",
+    reference: "",
+    type: "طرد عادي",
+    status: "ready",
+    courierName: "بانتظار تعيين المندوب",
+    createdAt: now,
+    updatedAt: now,
+    deleted: false,
+  }));
+
+  const created = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: merchantCookie,
+    payload: {
+      revision: merchant.body.revision,
+      database: {
+        ...merchant.body.database,
+        orders: [...orders, ...merchant.body.database.orders],
+        nextOrder: merchant.body.database.nextOrder + orders.length,
+      },
+    },
+  });
+  assert.equal(created.status, 200);
+  for (const destination of destinations) {
+    const saved = created.body.database.orders.find((order) => order.id === destination.id);
+    assert.equal(saved.deliveryFee, destination.expectedFee);
+    assert.equal(saved.weightFee, 0);
+    assert.equal(saved.oversizeFee, 0);
+  }
 });
 
 test("stores the app-lock PIN only as a server hash and gates device biometrics behind it", async () => {

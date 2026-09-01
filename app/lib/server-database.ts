@@ -8,7 +8,7 @@ import {
   type Base64URLString,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
 
 const SESSION_COOKIE = "almadina_session";
 const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
@@ -731,7 +731,7 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
         email,
         phone,
         store,
-        ...(existing.role === "merchant" ? { membership: candidate.membership === "premium" ? "premium" : "standard" } : {}),
+        ...(existing.role === "merchant" ? { membership: normalizeMembership(candidate.membership) } : {}),
       });
       continue;
     }
@@ -744,7 +744,7 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
       ...candidate,
       email,
       password: await hashPassword(candidate.password),
-      ...(candidate.role === "merchant" ? { membership: candidate.membership === "premium" ? "premium" : "standard" } : {}),
+      ...(candidate.role === "merchant" ? { membership: normalizeMembership(candidate.membership) } : {}),
     });
   }
 
@@ -994,7 +994,7 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
   const message = typeof payload.message === "string" ? payload.message.trim() : "";
 
   if (!/^[a-zA-Z0-9_-]{8,120}$/.test(requestId)) return json({ error: "معرّف طلب الإشعار غير صالح." }, 400);
-  if (audience !== "all" && audience !== "merchants" && audience !== "couriers" && audience !== "premium" && audience !== "standard" && audience !== "user") return json({ error: "فئة مستلمي الإشعار غير صالحة." }, 400);
+  if (audience !== "all" && audience !== "merchants" && audience !== "couriers" && audience !== "premium" && audience !== "diamond" && audience !== "standard" && audience !== "user") return json({ error: "فئة مستلمي الإشعار غير صالحة." }, 400);
   if (audience === "user" && !/^[a-zA-Z0-9_-]{1,120}$/.test(recipientUserId)) return json({ error: "اختر مستخدمًا صالحًا لاستلام الإشعار." }, 400);
   if (audience !== "user" && recipientUserId) return json({ error: "لا يمكن تحديد مستخدم مع فئة جماعية." }, 400);
   if (title.length < 3 || title.length > 80) return json({ error: "يجب أن يكون عنوان الإشعار بين 3 و80 حرفًا." }, 400);
@@ -1025,7 +1025,8 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
         || (audience === "merchants" && account.role === "merchant")
         || (audience === "couriers" && account.role === "courier")
         || (audience === "premium" && account.role === "merchant" && account.membership === "premium")
-        || (audience === "standard" && account.role === "merchant" && account.membership !== "premium")
+        || (audience === "diamond" && account.role === "merchant" && account.membership === "diamond")
+        || (audience === "standard" && account.role === "merchant" && normalizeMembership(account.membership) === "standard")
     ));
     if (!recipients.length) return json({ error: "لا توجد حسابات ضمن الفئة المحددة." }, 422);
 

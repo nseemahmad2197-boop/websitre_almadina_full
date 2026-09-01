@@ -476,7 +476,7 @@ test("lets courier employees scan a ready parcel with the camera and mark it shi
   assert.doesNotMatch(appSources, /openCollectionScanner/);
 });
 
-test("lets administrators switch merchants between standard and premium accounts", async () => {
+test("lets administrators switch merchants between standard, premium, and diamond accounts", async () => {
   const [admin, data, server, application, dashboard, styles] = await Promise.all([
     readFile(new URL("../app/components/admin.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/data.ts", import.meta.url), "utf8"),
@@ -486,16 +486,21 @@ test("lets administrators switch merchants between standard and premium accounts
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(data, /export type Membership = "standard" \| "premium"/);
+  assert.match(data, /export type Membership = "standard" \| "premium" \| "diamond"/);
   assert.match(admin, /function changeMembership\(account: User, membership: Membership\)/);
   assert.match(admin, /changeMembership\(user, "standard"\)/);
   assert.match(admin, /changeMembership\(user, "premium"\)/);
+  assert.match(admin, /changeMembership\(user, "diamond"\)/);
   assert.match(admin, /role="group" aria-label=\{`تغيير نوع حساب/);
   assert.match(admin, /<option value="premium">بريميوم<\/option>/);
+  assert.match(admin, /<option value="diamond">ماسي<\/option>/);
   assert.match(server, /membership:\s*"standard"/);
+  assert.match(server, /membership:\s*normalizeMembership\(candidate\.membership\)/);
   assert.match(application, /sharedRequest\("database"/);
-  assert.match(dashboard, /membership-badge--\$\{user\?\.membership/);
+  assert.match(dashboard, /membership-badge--\$\{membership\}/);
+  assert.match(dashboard, /membership === "diamond" \? "ماسي"/);
   assert.match(styles, /\.membership-switch__option--premium\.is-selected/);
+  assert.match(styles, /\.membership-switch__option--diamond\.is-selected/);
 });
 
 test("preserves ₪25 West Bank, ₪35 Jerusalem, and ₪80 interior standard delivery prices", async () => {
@@ -527,7 +532,6 @@ test("automatically applies ₪20 West Bank, ₪30 Jerusalem, and ₪65 interior
   ]);
 
   assert.match(data, /premium:\s*\{\s*westBank:\s*20,\s*jerusalem:\s*30,\s*interior:\s*65\s*\}/);
-  assert.match(data, /membership === "premium" \? "premium" : "standard"/);
   assert.match(data, /if \(region\.name === "القدس"\) return prices\.jerusalem/);
   assert.match(data, /if \(region\.name === "الداخل"\) return prices\.interior/);
   assert.match(data, /return prices\.westBank/);
@@ -536,6 +540,16 @@ test("automatically applies ₪20 West Bank, ₪30 Jerusalem, and ₪65 interior
   assert.match(orderForm, /resolveDeliveryRegion\(form\.governorate, form\.city\)/);
   assert.match(orderForm, /أسعار بريميوم/);
   assert.match(management, /getDeliveryFee\(region, user\.membership\) \+ weightFee \+ oversizeFee/);
+});
+
+test("applies exactly ₪15 West Bank, ₪25 Jerusalem, and ₪55 interior diamond delivery prices", async () => {
+  const { deliveryPricing, getDeliveryFee, getMembershipPrices } = await import(new URL("../app/lib/data.ts", import.meta.url));
+
+  assert.deepEqual(deliveryPricing.diamond, { westBank: 15, jerusalem: 25, interior: 55 });
+  assert.deepEqual(getMembershipPrices("diamond"), deliveryPricing.diamond);
+  assert.equal(getDeliveryFee({ name: "الخليل" }, "diamond"), 15);
+  assert.equal(getDeliveryFee({ name: "القدس" }, "diamond"), 25);
+  assert.equal(getDeliveryFee({ name: "الداخل" }, "diamond"), 55);
 });
 
 test("allows freely typing the parcel governorate and city while resolving regional delivery prices", async () => {
@@ -951,7 +965,7 @@ test("lets only the administrator broadcast app-update notifications to membersh
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(data, /export type NoticeAudience = "all" \| "merchants" \| "couriers" \| "premium" \| "standard" \| "user"/);
+  assert.match(data, /export type NoticeAudience = "all" \| "merchants" \| "couriers" \| "premium" \| "diamond" \| "standard" \| "user"/);
   assert.match(context, /broadcastNotice:\s*\(notice:[\s\S]*recipientUserId\?: string[\s\S]*Promise<number \| null>/);
   assert.match(application, /sharedRequest\("notices\/broadcast"/);
   assert.match(application, /broadcastRequestIds\.current\.get\(requestKey\) \?\? uid\("broadcast"\)/);
@@ -972,21 +986,25 @@ test("lets only the administrator broadcast app-update notifications to membersh
   assert.match(admin, /جميع المستخدمين/);
   assert.match(admin, /التجار فقط/);
   assert.match(admin, /<option value="premium">حسابات البريميوم فقط<\/option>/);
+  assert.match(admin, /<option value="diamond">الحسابات الماسية فقط<\/option>/);
   assert.match(admin, /<option value="standard">الحسابات العادية فقط<\/option>/);
   assert.match(admin, /المندوبون فقط/);
   assert.match(admin, /مستخدم محدد/);
   assert.match(admin, /label="اختر المستخدم"/);
   assert.match(admin, /recipientUserId/);
   assert.match(admin, /audience === "premium" && account\.role === "merchant" && account\.membership === "premium"/);
-  assert.match(admin, /audience === "standard" && account\.role === "merchant" && account\.membership !== "premium"/);
+  assert.match(admin, /audience === "diamond" && account\.role === "merchant" && account\.membership === "diamond"/);
+  assert.match(admin, /audience === "standard" && account\.role === "merchant" && normalizeMembership\(account\.membership\) === "standard"/);
   assert.match(admin, /announcement\.audience === "premium" \? merchants\.filter\(\(account\) => account\.membership === "premium"\)\.length/);
-  assert.match(admin, /announcement\.audience === "standard" \? merchants\.filter\(\(account\) => account\.membership !== "premium"\)\.length/);
+  assert.match(admin, /announcement\.audience === "diamond" \? merchants\.filter\(\(account\) => account\.membership === "diamond"\)\.length/);
+  assert.match(admin, /announcement\.audience === "standard" \? merchants\.filter\(\(account\) => normalizeMembership\(account\.membership\) === "standard"\)\.length/);
   assert.match(admin, /await broadcastNotice\(/);
   assert.match(server, /session\.account\.role !== "admin"[\s\S]*هذه الميزة متاحة للمسؤول فقط/);
   assert.match(server, /url\.pathname === "\/api\/almadina\/notices\/broadcast"/);
-  assert.match(server, /audience !== "premium" && audience !== "standard"/);
+  assert.match(server, /audience !== "premium" && audience !== "diamond" && audience !== "standard"/);
   assert.match(server, /audience === "premium" && account\.role === "merchant" && account\.membership === "premium"/);
-  assert.match(server, /audience === "standard" && account\.role === "merchant" && account\.membership !== "premium"/);
+  assert.match(server, /audience === "diamond" && account\.role === "merchant" && account\.membership === "diamond"/);
+  assert.match(server, /audience === "standard" && account\.role === "merchant" && normalizeMembership\(account\.membership\) === "standard"/);
   assert.match(server, /sha256\(`\$\{requestId\}:\$\{account\.id\}`\)/);
   assert.match(server, /notice\.broadcastId === requestId/);
   assert.match(server, /notice\.title !== title \|\| notice\.message !== message \|\| notice\.audience !== audience \|\| \(audience === "user" && notice\.userId !== recipientUserId\)/);

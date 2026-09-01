@@ -2,7 +2,7 @@ import type { IconName } from "../components/icon";
 import { INTERIOR_LOCALITIES, WEST_BANK_LOCALITIES } from "./palestine-locations.generated.ts";
 
 export type Role = "admin" | "merchant" | "courier";
-export type Membership = "standard" | "premium";
+export type Membership = "standard" | "premium" | "diamond";
 export type OrderStatus =
   | "draft"
   | "ready"
@@ -110,7 +110,7 @@ export type CollectionInvoice = {
   paidAt?: string;
 };
 
-export type NoticeAudience = "all" | "merchants" | "couriers" | "premium" | "standard" | "user";
+export type NoticeAudience = "all" | "merchants" | "couriers" | "premium" | "diamond" | "standard" | "user";
 
 export type Notice = {
   id: string;
@@ -302,10 +302,17 @@ export function resolveDeliveryRegion(governorate: string, city = "") {
 export const deliveryPricing = {
   standard: { westBank: 25, jerusalem: 35, interior: 80 },
   premium: { westBank: 20, jerusalem: 30, interior: 65 },
+  diamond: { westBank: 15, jerusalem: 25, interior: 55 },
 } as const;
 
+export function normalizeMembership(membership?: string): Membership {
+  if (membership === "diamond") return "diamond";
+  if (membership === "premium") return "premium";
+  return "standard";
+}
+
 export function getMembershipPrices(membership?: Membership) {
-  return deliveryPricing[membership === "premium" ? "premium" : "standard"];
+  return deliveryPricing[normalizeMembership(membership)];
 }
 
 export function getDeliveryFee(region: { name: string } | undefined, membership?: Membership): number {

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type CSSProperties } from "react";
 import { useApp } from "../lib/app-context";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, normalizeMembership, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
 import { createQrMatrix } from "../lib/qr-code";
 import { Icon } from "./icon";
 import { TrackingHistory, TrackingNoteComposer } from "./tracking-history";
@@ -20,6 +20,8 @@ export function OrderCard({ order, showMerchant = false, compact = false }: { or
 
 export function Dashboard() {
   const { database, user, setView } = useApp();
+  const membership = normalizeMembership(user?.membership);
+  const membershipLabel = membership === "diamond" ? "ماسي" : membership === "premium" ? "بريميوم" : "عادي";
   const [segment, setSegment] = useState("orders");
   const orders = database.orders.filter((order) => order.merchantId === user?.id && !order.deleted);
   const totalAmount = orders.reduce((sum, order) => sum + order.amount, 0);
@@ -28,7 +30,7 @@ export function Dashboard() {
 
   return (
     <div className="page-content dashboard-page animate-page">
-      <div className="greeting"><span><Icon name="sparkles" size={17} /> سعداء بالتعامل معك</span><div className="greeting__identity"><h1>{user?.store}</h1><span className={`membership-badge membership-badge--${user?.membership ?? "standard"}`}><Icon name={user?.membership === "premium" ? "star" : "user"} size={13} />{user?.membership === "premium" ? "بريميوم" : "عادي"}</span></div></div>
+      <div className="greeting"><span><Icon name="sparkles" size={17} /> سعداء بالتعامل معك</span><div className="greeting__identity"><h1>{user?.store}</h1><span className={`membership-badge membership-badge--${membership}`}><Icon name={membership === "diamond" ? "sparkles" : membership === "premium" ? "star" : "user"} size={13} />{membershipLabel}</span></div></div>
       <div className="balance-card"><div className="balance-card__total"><span>إجمالي الرصيد</span><strong>{money(totalAmount)}</strong><small>شيكل</small></div><div className="balance-card__stats"><div><Icon name="truck" size={18} /><strong>{inProgress}</strong><span>قيد التوصيل</span></div><div><Icon name="wallet" size={18} /><strong>{delivered}</strong><span>طلبات مكتملة</span></div></div><button className="balance-card__banner" onClick={() => setView("new-order")}><Icon name="sparkles" size={18} />أنشئ طردًا — توصيل نفس اليوم داخل فلسطين<Icon name="chevronLeft" size={18} /></button></div>
 
       <div className="section-heading"><h2>حالات الطرود</h2><button onClick={() => setView("shipments")}>الطرود <Icon name="chevronLeft" size={16} /></button></div>

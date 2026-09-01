@@ -2,13 +2,17 @@
 
 import { useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { appendOrderTrackingEvent, formatDate, getStatus, money, relativeDate, statusDefinitions, uid, type Membership, type NoticeAudience, type OrderStatus, type User } from "../lib/data";
+import { appendOrderTrackingEvent, formatDate, getStatus, money, normalizeMembership, relativeDate, statusDefinitions, uid, type Membership, type NoticeAudience, type OrderStatus, type User } from "../lib/data";
 import { Icon } from "./icon";
 import { TrackingNoteComposer } from "./tracking-history";
 import { Avatar, Button, EmptyState, Field, IconButton, Modal, Segmented, SelectField, StatusPill } from "./ui";
 
 type AdminTab = "orders" | "users" | "collections" | "couriers";
 type AccountEditor = { id: string; name: string; email: string; phone: string; store: string; role: "merchant" | "courier" };
+
+function membershipLabel(membership: Membership): string {
+  return membership === "diamond" ? "ماسي" : membership === "premium" ? "بريميوم" : "عادي";
+}
 
 export function AdminDashboard() {
   const { database, user, updateDatabase, verifyCollectionCode, broadcastNotice, confirm, showToast, notify, setView, setSelectedOrderId } = useApp();
@@ -64,12 +68,12 @@ export function AdminDashboard() {
       users: current.users.map((entry) => entry.id === account.id ? { ...entry, membership } : entry),
     }));
 
-    const label = membership === "premium" ? "بريميوم" : "عادي";
+    const label = membershipLabel(membership);
     notify({
       userId: account.id,
       title: "تم تحديث نوع حسابك",
       message: `تم تغيير نوع حسابك إلى ${label} من قبل الإدارة.`,
-      icon: membership === "premium" ? "star" : "user",
+      icon: membership === "diamond" ? "sparkles" : membership === "premium" ? "star" : "user",
     });
     showToast(`تم تغيير حساب ${account.name} إلى ${label}.`);
   }
@@ -139,14 +143,15 @@ export function AdminDashboard() {
         || (audience === "merchants" && account.role === "merchant")
         || (audience === "couriers" && account.role === "courier")
         || (audience === "premium" && account.role === "merchant" && account.membership === "premium")
-        || (audience === "standard" && account.role === "merchant" && account.membership !== "premium")
+        || (audience === "diamond" && account.role === "merchant" && account.membership === "diamond")
+        || (audience === "standard" && account.role === "merchant" && normalizeMembership(account.membership) === "standard")
     ));
 
     if (title.length < 3) return showToast("أدخل عنوانًا واضحًا للإشعار.", "error");
     if (message.length < 5) return showToast("أدخل تفاصيل التحديث قبل الإرسال.", "error");
     if (!recipients.length) return showToast("لا توجد حسابات ضمن الفئة المحددة.", "error");
 
-    const audienceLabel = audience === "merchants" ? "التجار" : audience === "couriers" ? "المندوبين" : audience === "premium" ? "حسابات التجار البريميوم" : audience === "standard" ? "حسابات التجار العادية" : "جميع المستخدمين";
+    const audienceLabel = audience === "merchants" ? "التجار" : audience === "couriers" ? "المندوبين" : audience === "premium" ? "حسابات التجار البريميوم" : audience === "diamond" ? "حسابات التجار الماسية" : audience === "standard" ? "حسابات التجار العادية" : "جميع المستخدمين";
     confirm({
       title: "إرسال إشعار التحديث؟",
       message: audience === "user"
@@ -172,7 +177,7 @@ export function AdminDashboard() {
   const selectedAnnouncementRecipient = announcement.audience === "user"
     ? notificationUsers.find((account) => account.id === announcement.recipientUserId)
     : undefined;
-  const announcementRecipientCount = announcement.audience === "user" ? (selectedAnnouncementRecipient ? 1 : 0) : announcement.audience === "merchants" ? merchants.length : announcement.audience === "couriers" ? couriers.length : announcement.audience === "premium" ? merchants.filter((account) => account.membership === "premium").length : announcement.audience === "standard" ? merchants.filter((account) => account.membership !== "premium").length : merchants.length + couriers.length;
+  const announcementRecipientCount = announcement.audience === "user" ? (selectedAnnouncementRecipient ? 1 : 0) : announcement.audience === "merchants" ? merchants.length : announcement.audience === "couriers" ? couriers.length : announcement.audience === "premium" ? merchants.filter((account) => account.membership === "premium").length : announcement.audience === "diamond" ? merchants.filter((account) => account.membership === "diamond").length : announcement.audience === "standard" ? merchants.filter((account) => normalizeMembership(account.membership) === "standard").length : merchants.length + couriers.length;
 
   return <div className="page-content admin-page animate-page"><header className="admin-title"><div><h1>لوحة الإدارة</h1><p>المدينة إكسبرس — تحكم كامل</p></div><Button type="button" icon="send" className="admin-notification-button" onClick={() => setNotificationOpen(true)}>إرسال تحديث</Button></header><div className="admin-stats"><button className="admin-stat" onClick={() => setTab("users")}><span style={{ color: "#187a50", background: "#e6f4ed" }}><Icon name="users" size={21} /></span><strong>{merchants.length}</strong><small>تاجر</small></button><button className="admin-stat" onClick={() => setTab("orders")}><span style={{ color: "#6257ad", background: "#efedff" }}><Icon name="package" size={21} /></span><strong>{orders.length}</strong><small>طرد</small></button><button className="admin-stat" onClick={() => setTab("collections")}><span style={{ color: "#bf862d", background: "#fff4dc" }}><Icon name="receipt" size={21} /></span><strong>{money(collectionAmount)}</strong><small>تحصيلات مستحقة</small></button><button className="admin-stat admin-stat--courier" onClick={() => setTab("couriers")}><span style={{ color: "#218391", background: "#e4f4f5" }}><Icon name="bike" size={21} /></span><strong>{couriers.length}</strong><small>مندوب</small></button></div><Segmented className="admin-tabs" value={tab} onChange={(value) => { setTab(value as AdminTab); setQuery(""); setStatus("all"); }} items={[{ value: "orders", label: "الطرود" }, { value: "users", label: "المستخدمون" }, { value: "collections", label: "التحصيلات" }, { value: "couriers", label: "المندوبون" }]} /><div className="admin-toolbar"><Field icon="search" placeholder={searchPlaceholders[tab]} value={query} onChange={(event) => setQuery(event.target.value)} wrapperClassName="admin-search" />{(tab === "users" || tab === "couriers") && <IconButton name="plus" label={tab === "users" ? "إضافة مستخدم" : "إضافة مندوب"} className="admin-add-button" onClick={() => { setForm({ ...form, role: tab === "couriers" ? "courier" : "merchant" }); setAddUserOpen(true); }} />}</div>
 
@@ -181,7 +186,7 @@ export function AdminDashboard() {
   {tab === "users" && (visibleUsers.length ? (
     <div className="admin-user-list">
       {visibleUsers.map((user) => {
-        const membership = user.membership ?? "standard";
+        const membership = normalizeMembership(user.membership);
 
         return (
           <article className="admin-user-card admin-user-card--merchant" key={user.id}>
@@ -191,8 +196,8 @@ export function AdminDashboard() {
               <div className="admin-user-card__identity">
                 <strong>{user.name}</strong>
                 <span className={`membership-badge membership-badge--${membership}`}>
-                  <Icon name={membership === "premium" ? "star" : "user"} size={13} />
-                  {membership === "premium" ? "بريميوم" : "عادي"}
+                  <Icon name={membership === "diamond" ? "sparkles" : membership === "premium" ? "star" : "user"} size={13} />
+                  {membershipLabel(membership)}
                 </span>
               </div>
               <a href={`mailto:${user.email}`}>{user.email}</a>
@@ -214,6 +219,12 @@ export function AdminDashboard() {
                   aria-pressed={membership === "premium"}
                   onClick={() => changeMembership(user, "premium")}
                 ><Icon name="star" size={13} />بريميوم</button>
+                <button
+                  type="button"
+                  className={membership === "diamond" ? "membership-switch__option membership-switch__option--diamond is-selected" : "membership-switch__option membership-switch__option--diamond"}
+                  aria-pressed={membership === "diamond"}
+                  onClick={() => changeMembership(user, "diamond")}
+                ><Icon name="sparkles" size={13} />ماسي</button>
               </div>
               <IconButton name="edit" label={`تعديل بيانات حساب ${user.name}`} className="admin-account-edit" onClick={() => openAccountEditor(user)} />
               <IconButton name="trash" label={`حذف حساب ${user.name}`} className="is-danger" onClick={() => deleteUser(user)} />
@@ -245,7 +256,7 @@ export function AdminDashboard() {
     </div>
   ) : <EmptyState icon="receipt" title="لا توجد فواتير تحصيل" description="ستظهر هنا الفواتير التي ينشئها التجار بعد وصول طرودهم." />)}
 
-  {notificationOpen && <Modal title="إرسال إشعار تحديث" onClose={() => setNotificationOpen(false)} closeDisabled={sendingAnnouncement} className="admin-notification-modal" sheet><form className="modal-form" onSubmit={submitAnnouncement} aria-busy={sendingAnnouncement}><div className="admin-notification-intro"><span><Icon name="sparkles" size={24} /></span><div><h3>أخبر المستخدمين بآخر تحديثات التطبيق</h3><p>سيظهر الإشعار في أيقونة الجرس وصفحة الإشعارات لكل حساب تختاره.</p></div></div><Field icon="bell" label="عنوان الإشعار" placeholder="مثال: تحديث جديد في المدينة إكسبرس" value={announcement.title} onChange={(event) => setAnnouncement({ ...announcement, title: event.target.value.slice(0, 80) })} minLength={3} maxLength={80} required hint={<bdi dir="ltr">{announcement.title.length.toLocaleString("ar-EG")} / ٨٠</bdi>} autoFocus /><label className="field admin-notification-message"><span className="field__label">تفاصيل التحديث</span><span className="field__control"><textarea aria-label="تفاصيل التحديث" placeholder="اكتب تفاصيل الميزة أو التحديث الجديد..." value={announcement.message} onChange={(event) => setAnnouncement({ ...announcement, message: event.target.value.slice(0, 500) })} minLength={5} maxLength={500} rows={5} required /></span><span className="field__hint" dir="ltr">{announcement.message.length.toLocaleString("ar-EG")} / ٥٠٠</span></label><SelectField label="المستلمون" value={announcement.audience} onChange={(event) => { const audience = event.target.value as NoticeAudience; setAnnouncement({ ...announcement, audience, recipientUserId: audience === "user" ? announcement.recipientUserId : "" }); }}><option value="all">جميع المستخدمين</option><option value="merchants">التجار فقط</option><option value="premium">حسابات البريميوم فقط</option><option value="standard">الحسابات العادية فقط</option><option value="couriers">المندوبون فقط</option><option value="user">مستخدم محدد</option></SelectField>{announcement.audience === "user" && <><SelectField label="اختر المستخدم" value={announcement.recipientUserId} onChange={(event) => setAnnouncement({ ...announcement, recipientUserId: event.target.value })} required><option value="">اختر حسابًا...</option>{merchants.length > 0 && <optgroup label="التجار">{merchants.map((account) => <option key={account.id} value={account.id}>{account.name} — {account.store}</option>)}</optgroup>}{couriers.length > 0 && <optgroup label="المندوبون">{couriers.map((account) => <option key={account.id} value={account.id}>{account.name} — {account.store}</option>)}</optgroup>}</SelectField>{selectedAnnouncementRecipient && <div className="admin-notification-recipient"><Avatar name={selectedAnnouncementRecipient.name} color={selectedAnnouncementRecipient.avatarColor} /><div><strong>{selectedAnnouncementRecipient.name}</strong><span>{selectedAnnouncementRecipient.role === "courier" ? "مندوب" : "تاجر"} · {selectedAnnouncementRecipient.store}</span><small dir="ltr">{selectedAnnouncementRecipient.email}</small></div><Icon name="check" size={19} /></div>}</>}<footer className="admin-notification-summary" aria-live="polite"><div><strong>{announcementRecipientCount.toLocaleString("ar-EG")}</strong><span>عدد الحسابات المستلمة</span></div><Button type="submit" icon="send" loading={sendingAnnouncement} disabled={!announcementRecipientCount}>{sendingAnnouncement ? "جارٍ الإرسال…" : "مراجعة وإرسال"}</Button></footer></form></Modal>}
+  {notificationOpen && <Modal title="إرسال إشعار تحديث" onClose={() => setNotificationOpen(false)} closeDisabled={sendingAnnouncement} className="admin-notification-modal" sheet><form className="modal-form" onSubmit={submitAnnouncement} aria-busy={sendingAnnouncement}><div className="admin-notification-intro"><span><Icon name="sparkles" size={24} /></span><div><h3>أخبر المستخدمين بآخر تحديثات التطبيق</h3><p>سيظهر الإشعار في أيقونة الجرس وصفحة الإشعارات لكل حساب تختاره.</p></div></div><Field icon="bell" label="عنوان الإشعار" placeholder="مثال: تحديث جديد في المدينة إكسبرس" value={announcement.title} onChange={(event) => setAnnouncement({ ...announcement, title: event.target.value.slice(0, 80) })} minLength={3} maxLength={80} required hint={<bdi dir="ltr">{announcement.title.length.toLocaleString("ar-EG")} / ٨٠</bdi>} autoFocus /><label className="field admin-notification-message"><span className="field__label">تفاصيل التحديث</span><span className="field__control"><textarea aria-label="تفاصيل التحديث" placeholder="اكتب تفاصيل الميزة أو التحديث الجديد..." value={announcement.message} onChange={(event) => setAnnouncement({ ...announcement, message: event.target.value.slice(0, 500) })} minLength={5} maxLength={500} rows={5} required /></span><span className="field__hint" dir="ltr">{announcement.message.length.toLocaleString("ar-EG")} / ٥٠٠</span></label><SelectField label="المستلمون" value={announcement.audience} onChange={(event) => { const audience = event.target.value as NoticeAudience; setAnnouncement({ ...announcement, audience, recipientUserId: audience === "user" ? announcement.recipientUserId : "" }); }}><option value="all">جميع المستخدمين</option><option value="merchants">التجار فقط</option><option value="premium">حسابات البريميوم فقط</option><option value="diamond">الحسابات الماسية فقط</option><option value="standard">الحسابات العادية فقط</option><option value="couriers">المندوبون فقط</option><option value="user">مستخدم محدد</option></SelectField>{announcement.audience === "user" && <><SelectField label="اختر المستخدم" value={announcement.recipientUserId} onChange={(event) => setAnnouncement({ ...announcement, recipientUserId: event.target.value })} required><option value="">اختر حسابًا...</option>{merchants.length > 0 && <optgroup label="التجار">{merchants.map((account) => <option key={account.id} value={account.id}>{account.name} — {account.store}</option>)}</optgroup>}{couriers.length > 0 && <optgroup label="المندوبون">{couriers.map((account) => <option key={account.id} value={account.id}>{account.name} — {account.store}</option>)}</optgroup>}</SelectField>{selectedAnnouncementRecipient && <div className="admin-notification-recipient"><Avatar name={selectedAnnouncementRecipient.name} color={selectedAnnouncementRecipient.avatarColor} /><div><strong>{selectedAnnouncementRecipient.name}</strong><span>{selectedAnnouncementRecipient.role === "courier" ? "مندوب" : "تاجر"} · {selectedAnnouncementRecipient.store}</span><small dir="ltr">{selectedAnnouncementRecipient.email}</small></div><Icon name="check" size={19} /></div>}</>}<footer className="admin-notification-summary" aria-live="polite"><div><strong>{announcementRecipientCount.toLocaleString("ar-EG")}</strong><span>عدد الحسابات المستلمة</span></div><Button type="submit" icon="send" loading={sendingAnnouncement} disabled={!announcementRecipientCount}>{sendingAnnouncement ? "جارٍ الإرسال…" : "مراجعة وإرسال"}</Button></footer></form></Modal>}
 
   {statusUpdate && <Modal title="تحديث حالة الطرد" onClose={() => setStatusUpdate(null)} className="tracking-status-modal" sheet><p className="modal-description">اخترت حالة «{getStatus(statusUpdate.status).label}». أضف ملاحظة اختيارية توضح هذا التحديث للمستخدم.</p><TrackingNoteComposer status={statusUpdate.status} value={statusUpdate.note} onChange={(note) => setStatusUpdate({ ...statusUpdate, note })} onSubmit={saveOrderStatus} submitLabel="حفظ الحالة والملاحظة" optional /></Modal>}
 
@@ -253,5 +264,5 @@ export function AdminDashboard() {
 
   {editingAccount && <Modal title={editingAccount.role === "courier" ? "تعديل بيانات المندوب" : "تعديل بيانات المستخدم"} onClose={() => setEditingAccount(null)} className="admin-account-edit-modal" sheet><form className="modal-form" onSubmit={saveAccount}><p className="modal-description"><Icon name="shield" size={16} />المسؤول فقط يستطيع حفظ التغييرات على بيانات هذا الحساب.</p><Field icon="user" label="الاسم الكامل" value={editingAccount.name} onChange={(event) => setEditingAccount({ ...editingAccount, name: event.target.value })} autoFocus /><Field icon="phone" label="رقم الجوال" value={editingAccount.phone} onChange={(event) => setEditingAccount({ ...editingAccount, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} inputMode="numeric" dir="ltr" /><Field icon="store" label={editingAccount.role === "courier" ? "المنطقة" : "اسم المتجر"} value={editingAccount.store} onChange={(event) => setEditingAccount({ ...editingAccount, store: event.target.value })} /><Field icon="mail" label="البريد الإلكتروني" type="email" value={editingAccount.email} onChange={(event) => setEditingAccount({ ...editingAccount, email: event.target.value })} dir="ltr" /><Button type="submit" icon="check" full>حفظ التغييرات</Button></form></Modal>}
 
-  {addUserOpen && <Modal title={form.role === "courier" ? "إضافة مندوب جديد" : "إضافة مستخدم جديد"} onClose={() => setAddUserOpen(false)} sheet><form className="modal-form" onSubmit={createUser}><SelectField label="نوع الحساب" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as "merchant" | "courier" })}><option value="merchant">تاجر</option><option value="courier">مندوب توصيل</option></SelectField>{form.role === "merchant" && <SelectField label="نوع الاشتراك" value={form.membership} onChange={(event) => setForm({ ...form, membership: event.target.value as Membership })}><option value="standard">عادي</option><option value="premium">بريميوم</option></SelectField>}<Field icon="user" label="الاسم الكامل" placeholder="اسم المستخدم" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><Field icon="phone" label="رقم الجوال" placeholder="05xxxxxxxx" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} dir="ltr" /><Field icon="store" label={form.role === "courier" ? "المنطقة" : "اسم المتجر"} placeholder={form.role === "courier" ? "منطقة التوصيل" : "اسم المتجر"} value={form.store} onChange={(event) => setForm({ ...form, store: event.target.value })} /><Field icon="mail" label="البريد الإلكتروني" type="email" placeholder="name@example.com" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} dir="ltr" /><Field icon="lock" label="كلمة المرور" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /><Button type="submit" icon="plus" full>إضافة الحساب</Button></form></Modal>}</div>;
+  {addUserOpen && <Modal title={form.role === "courier" ? "إضافة مندوب جديد" : "إضافة مستخدم جديد"} onClose={() => setAddUserOpen(false)} sheet><form className="modal-form" onSubmit={createUser}><SelectField label="نوع الحساب" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as "merchant" | "courier" })}><option value="merchant">تاجر</option><option value="courier">مندوب توصيل</option></SelectField>{form.role === "merchant" && <SelectField label="نوع الاشتراك" value={form.membership} onChange={(event) => setForm({ ...form, membership: event.target.value as Membership })}><option value="standard">عادي</option><option value="premium">بريميوم</option><option value="diamond">ماسي</option></SelectField>}<Field icon="user" label="الاسم الكامل" placeholder="اسم المستخدم" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><Field icon="phone" label="رقم الجوال" placeholder="05xxxxxxxx" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} dir="ltr" /><Field icon="store" label={form.role === "courier" ? "المنطقة" : "اسم المتجر"} placeholder={form.role === "courier" ? "منطقة التوصيل" : "اسم المتجر"} value={form.store} onChange={(event) => setForm({ ...form, store: event.target.value })} /><Field icon="mail" label="البريد الإلكتروني" type="email" placeholder="name@example.com" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} dir="ltr" /><Field icon="lock" label="كلمة المرور" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /><Button type="submit" icon="plus" full>إضافة الحساب</Button></form></Modal>}</div>;
 }

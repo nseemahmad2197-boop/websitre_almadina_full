@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { createTrackingEvent, deliveryLocalities, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, normalizeMembership, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
 import { Icon } from "./icon";
 import { Button, Field, PageHeader, SectionCard, SelectField } from "./ui";
 
@@ -42,6 +42,7 @@ export function NewOrder() {
   const [usingSaved, setUsingSaved] = useState(false);
   const region = resolveDeliveryRegion(form.governorate, form.city);
   const membershipPrices = getMembershipPrices(user?.membership);
+  const membership = normalizeMembership(user?.membership);
   const baseDeliveryFee = getDeliveryFee(region, user?.membership);
   const selectedWeightFee = getWeightFee(form.weight);
   const dimensionOversizeFee = getOversizeFee(form.length, form.width, form.height);
@@ -134,7 +135,7 @@ export function NewOrder() {
         <button type="button" className={`favorite-recipient ${form.favorite ? "is-selected" : ""}`} onClick={() => setForm({ ...form, favorite: !form.favorite })}><Icon name="star" size={18} />إضافة كمستلم مفضل لدي<span className="radio-indicator" /></button>
       </SectionCard>
 
-      <SectionCard title="عنوان التوصيل" icon="mapPin" action={user?.membership === "premium" ? <span className="membership-badge membership-badge--premium"><Icon name="star" size={13} />أسعار بريميوم</span> : undefined}>
+      <SectionCard title="عنوان التوصيل" icon="mapPin" action={membership === "diamond" ? <span className="membership-badge membership-badge--diamond"><Icon name="sparkles" size={13} />أسعار ماسية</span> : membership === "premium" ? <span className="membership-badge membership-badge--premium"><Icon name="star" size={13} />أسعار بريميوم</span> : undefined}>
         <div className="delivery-rates" aria-label="أسعار التوصيل حسب المنطقة">
           <span className={deliveryZone === "west-bank" ? "delivery-rate is-active" : "delivery-rate"}>الضفة <strong>{membershipPrices.westBank} ₪</strong></span>
           <span className={deliveryZone === "jerusalem" ? "delivery-rate is-active" : "delivery-rate"}>القدس <strong>{membershipPrices.jerusalem} ₪</strong></span>
