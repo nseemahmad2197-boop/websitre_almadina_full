@@ -193,7 +193,8 @@ export function RecipientsPage() {
 function governates() { return governorates.map((item) => item.name); }
 
 export function NotificationsPage() {
-  const { database, user, updateDatabase, setView, showToast } = useApp();
+  const { database, user, updateDatabase, clearNotices, setView, confirm, showToast } = useApp();
+  const [clearingNotices, setClearingNotices] = useState(false);
   const notices = database.notices.filter((notice) => notice.userId === user?.id);
 
   function markAllRead() {
@@ -201,7 +202,29 @@ export function NotificationsPage() {
     showToast("تم تحديد جميع الإشعارات كمقروءة.");
   }
 
-  return <div className="page-content animate-page"><PageHeader title="الإشعارات" subtitle="آخر التحديثات المتعلقة بحسابك وطرودك" onBack={() => setView("home")} action={notices.some((notice) => !notice.read) ? <Button variant="ghost" icon="check" onClick={markAllRead}>قراءة الكل</Button> : undefined} />{notices.length ? <div className="notification-list">{notices.map((notice) => <button className={`notification-card ${notice.read ? "" : "is-unread"}`} key={notice.id} onClick={() => updateDatabase((current) => ({ ...current, notices: current.notices.map((entry) => entry.id === notice.id && entry.userId === user?.id ? { ...entry, read: true } : entry) }))}><span><Icon name={notice.icon} size={21} /></span><div><strong>{notice.title}</strong><p>{notice.message}</p><small>{relativeDate(notice.createdAt)}</small></div>{!notice.read && <i />}</button>)}</div> : <EmptyState icon="bell" title="لا توجد إشعارات" description="ستظهر هنا التحديثات المتعلقة بطرودك وحسابك." />}</div>;
+  async function performClearNotices(noticeIds: string[]) {
+    setClearingNotices(true);
+    const removedCount = await clearNotices(noticeIds);
+    setClearingNotices(false);
+    if (removedCount === null) return;
+    showToast(removedCount > 0 ? `تم مسح ${removedCount.toLocaleString("ar-EG")} من الإشعارات.` : "الإشعارات المحددة لم تعد موجودة.");
+  }
+
+  function requestClearNotices() {
+    const visibleNoticeIds = notices.map((notice) => notice.id);
+    if (!visibleNoticeIds.length) return;
+    confirm({
+      title: "مسح جميع الإشعارات؟",
+      message: `سيتم مسح ${visibleNoticeIds.length.toLocaleString("ar-EG")} من إشعارات هذا الحساب فقط. لن تتأثر الطرود أو بيانات الحساب أو إشعارات المستخدمين الآخرين، ولا يمكن استعادة الإشعارات المحذوفة.`,
+      confirmLabel: "مسح الإشعارات",
+      danger: true,
+      onConfirm: () => { void performClearNotices(visibleNoticeIds); },
+    });
+  }
+
+  const notificationActions = notices.length ? <div className="notification-page-actions">{notices.some((notice) => !notice.read) && <Button variant="ghost" icon="check" disabled={clearingNotices} onClick={markAllRead}>قراءة الكل</Button>}<Button variant="ghost" icon="trash" className="notification-clear-button" loading={clearingNotices} onClick={requestClearNotices}>{clearingNotices ? "جارٍ المسح…" : "مسح الكل"}</Button></div> : undefined;
+
+  return <div className="page-content animate-page"><PageHeader title="الإشعارات" subtitle="آخر التحديثات المتعلقة بحسابك وطرودك" onBack={() => setView("home")} action={notificationActions} />{notices.length ? <div className="notification-list">{notices.map((notice) => <button className={`notification-card ${notice.read ? "" : "is-unread"}`} key={notice.id} onClick={() => updateDatabase((current) => ({ ...current, notices: current.notices.map((entry) => entry.id === notice.id && entry.userId === user?.id ? { ...entry, read: true } : entry) }))}><span><Icon name={notice.icon} size={21} /></span><div><strong>{notice.title}</strong><p>{notice.message}</p><small>{relativeDate(notice.createdAt)}</small></div>{!notice.read && <i />}</button>)}</div> : <EmptyState icon="bell" title="لا توجد إشعارات" description="ستظهر هنا التحديثات المتعلقة بطرودك وحسابك." />}</div>;
 }
 
 export function TrashPage() {

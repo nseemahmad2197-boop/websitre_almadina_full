@@ -633,6 +633,10 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .notification-card > div > p { color: var(--muted); font-size: 10px; line-height: 1.7; }
 .notification-card > div > small { color: var(--muted); font-size: 9px; }
 .notification-card > i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.notification-page-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }
+.notification-page-actions .button { min-height: 38px; padding-right: 10px; padding-left: 10px; white-space: nowrap; }
+.notification-clear-button { color: var(--danger); }
+.notification-clear-button:hover { background: var(--danger-soft); color: var(--danger); }
 .trash-item { display: flex; justify-content: space-between; align-items: center; }
 .trash-item > div:first-child { display: grid; gap: 5px; }
 .trash-item > div:first-child > strong { font-size: 12px; }
@@ -1127,6 +1131,9 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .admin-stat > span { width: 32px; height: 32px; }
   .admin-stat > strong { font-size: 18px; }
   .admin-tabs > button { padding: 4px; font-size: 9px; }
+  .notification-page-actions { gap: 0; }
+  .notification-page-actions .button { min-height: 36px; gap: 4px; padding-right: 7px; padding-left: 7px; font-size: 9px; }
+  .notification-page-actions .button svg { width: 15px; height: 15px; }
   .notification-card { padding: 10px; }
 }
 

@@ -11,7 +11,7 @@ import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/availabl
 import { createSeedDatabase, defaultPreferences, uid, type Database, type Notice, type NoticeAudience, type Preferences, type User } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
-type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number };
+type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number; removedCount?: number };
 type DatabaseUpdater = (current: Database) => Database;
 type ThemePreference = Preferences["theme"];
 type WebkitAudioWindow = Window & { webkitAudioContext?: typeof AudioContext };
@@ -96,6 +96,7 @@ async function sharedRequest(path: string, options: RequestInit = {}): Promise<S
     revision: payload.revision,
     userId: payload.userId,
     ...(typeof payload.recipientCount === "number" ? { recipientCount: payload.recipientCount } : {}),
+    ...(typeof payload.removedCount === "number" ? { removedCount: payload.removedCount } : {}),
   };
 }
 
@@ -511,6 +512,44 @@ export default function AlmadinaApplication() {
     }
   }
 
+  async function clearNotices(noticeIds: string[]): Promise<number | null> {
+    if (!user || !noticeIds.length) return 0;
+    if (!await waitForPendingUpdates()) {
+      showToast("انتظر اكتمال حفظ التغييرات ثم أعد مسح الإشعارات.", "error");
+      return null;
+    }
+
+    remoteMutationInFlight.current = true;
+    try {
+      const snapshot = await sharedRequest("notices/clear", {
+        method: "POST",
+        body: JSON.stringify({ noticeIds }),
+      });
+      authoritativeDatabase.current = snapshot.database;
+      serverRevision.current = snapshot.revision;
+      visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), snapshot.database);
+      setDatabase(visibleDatabase.current);
+      return snapshot.removedCount ?? 0;
+    } catch (error) {
+      if (error instanceof SharedApiError) {
+        if (error.snapshot) {
+          authoritativeDatabase.current = error.snapshot.database;
+          serverRevision.current = error.snapshot.revision;
+          visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), error.snapshot.database);
+          setDatabase(visibleDatabase.current);
+        }
+        if (error.status === 401) logout();
+        showToast(error.message, "error");
+        return null;
+      }
+      showToast("تعذّر مسح الإشعارات. حاول مجددًا.", "error");
+      return null;
+    } finally {
+      remoteMutationInFlight.current = false;
+      if (pendingUpdates.current.length) void savePendingUpdates();
+    }
+  }
+
   async function shipScannedOrder(trackingNumber: string): Promise<boolean> {
     try {
       const snapshot = await sharedRequest("orders/scan", {
@@ -679,5 +718,5 @@ export default function AlmadinaApplication() {
     if (user) { setSelectedOrderId(order.id); setView("order-detail"); showToast("تم العثور على الطرد."); } else showToast(`الطرد ${order.trackingNumber}: ${order.recipientName}.`, "info");
   }
 
-  return <AppContext.Provider value={{ database, user, view, preferences, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, login, logout, register, deleteAccount, verifyCollectionCode, broadcastNotice, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>{user ? <ApplicationShell /> : <Authentication />}{confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}{accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}{scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div></AppContext.Provider>;
+  return <AppContext.Provider value={{ database, user, view, preferences, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, login, logout, register, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>{user ? <ApplicationShell /> : <Authentication />}{confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}{accountSwitcher && user && <Modal title="تبديل الحساب" onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم أدخل بيانات الحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full onClick={logout}>تسجيل الخروج وتبديل الحساب</Button></Modal>}{scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div></AppContext.Provider>;
 }

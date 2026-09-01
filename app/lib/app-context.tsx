@@ -54,6 +54,7 @@ export type AppContextValue = {
   confirm: (options: ConfirmOptions) => void;
   notify: (notice: Omit<Notice, "id" | "read" | "createdAt">) => void;
   broadcastNotice: (notice: { audience: NoticeAudience; recipientUserId?: string; title: string; message: string }) => Promise<number | null>;
+  clearNotices: (noticeIds: string[]) => Promise<number | null>;
   openScanner: (callback?: (value: string) => void) => void;
   openAccountSwitcher: () => void;
 };

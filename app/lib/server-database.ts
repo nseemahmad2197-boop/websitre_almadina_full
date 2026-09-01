@@ -521,7 +521,7 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
   const message = typeof payload.message === "string" ? payload.message.trim() : "";
 
   if (!/^[a-zA-Z0-9_-]{8,120}$/.test(requestId)) return json({ error: "معرّف طلب الإشعار غير صالح." }, 400);
-  if (audience !== "all" && audience !== "merchants" && audience !== "couriers" && audience !== "user") return json({ error: "فئة مستلمي الإشعار غير صالحة." }, 400);
+  if (audience !== "all" && audience !== "merchants" && audience !== "couriers" && audience !== "premium" && audience !== "standard" && audience !== "user") return json({ error: "فئة مستلمي الإشعار غير صالحة." }, 400);
   if (audience === "user" && !/^[a-zA-Z0-9_-]{1,120}$/.test(recipientUserId)) return json({ error: "اختر مستخدمًا صالحًا لاستلام الإشعار." }, 400);
   if (audience !== "user" && recipientUserId) return json({ error: "لا يمكن تحديد مستخدم مع فئة جماعية." }, 400);
   if (title.length < 3 || title.length > 80) return json({ error: "يجب أن يكون عنوان الإشعار بين 3 و80 حرفًا." }, 400);
@@ -551,6 +551,8 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
       audience === "all"
         || (audience === "merchants" && account.role === "merchant")
         || (audience === "couriers" && account.role === "courier")
+        || (audience === "premium" && account.role === "merchant" && account.membership === "premium")
+        || (audience === "standard" && account.role === "merchant" && account.membership !== "premium")
     ));
     if (!recipients.length) return json({ error: "لا توجد حسابات ضمن الفئة المحددة." }, 422);
 
@@ -583,6 +585,37 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
   return administrator
     ? json({ error: "تم تحديث البيانات من جهاز آخر. أعد إرسال الإشعار.", ...snapshot(latest, administrator) }, 409)
     : json({ error: "لم يعد حساب المسؤول متاحًا." }, 403);
+}
+
+async function clearNotices(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  const submitted = await request.json() as unknown;
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) return json({ error: "بيانات مسح الإشعارات غير صالحة." }, 400);
+  const payload = submitted as Record<string, unknown>;
+  if (!Array.isArray(payload.noticeIds) || payload.noticeIds.length > 5_000 || payload.noticeIds.some((id) => typeof id !== "string" || !id.trim() || id.trim().length > 160)) {
+    return json({ error: "قائمة الإشعارات المطلوب مسحها غير صالحة." }, 400);
+  }
+  const noticeIds = new Set(payload.noticeIds.map((id) => (id as string).trim()));
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const account = state.database.users.find((entry) => entry.id === session.account.id);
+    if (!account) return json({ error: "لم يعد الحساب متاحًا." }, 403);
+
+    const notices = state.database.notices.filter((notice) => notice.userId !== account.id || !noticeIds.has(notice.id));
+    const removedCount = state.database.notices.length - notices.length;
+    if (!removedCount) return json({ ...snapshot(state, account), removedCount: 0 });
+
+    const next: Database = { ...state.database, notices };
+    if (await saveState(database, next, state.revision)) {
+      return json({ ...snapshot({ database: next, revision: state.revision + 1 }, account), removedCount });
+    }
+  }
+
+  const latest = await readState(database);
+  const account = latest.database.users.find((entry) => entry.id === session.account.id);
+  return account
+    ? json({ error: "تم تحديث الإشعارات من جهاز آخر. أعد محاولة المسح.", ...snapshot(latest, account) }, 409)
+    : json({ error: "لم يعد الحساب متاحًا." }, 403);
 }
 
 type AccountDeletionEligibility = {
@@ -868,6 +901,10 @@ export async function handleAlmadinaApi(request: Request, database: D1Database):
 
     if (url.pathname === "/api/almadina/notices/broadcast" && request.method === "POST") {
       return broadcastNotice(database, request, session);
+    }
+
+    if (url.pathname === "/api/almadina/notices/clear" && request.method === "POST") {
+      return clearNotices(database, request, session);
     }
 
     if (url.pathname === "/api/almadina/account/delete" && request.method === "POST") {
