@@ -20,6 +20,9 @@ const APP_LOCK_COOLDOWN = 5 * 60;
 const PASSKEY_RATE_LIMIT_WINDOW = 5 * 60;
 const PASSKEY_OPTIONS_RATE_LIMIT = 30;
 const PASSKEY_VERIFY_RATE_LIMIT = 60;
+const COLLECTION_VERIFY_RATE_LIMIT_WINDOW = 10 * 60;
+const COLLECTION_VERIFY_RATE_LIMIT = 6;
+const COLLECTION_VERIFY_GLOBAL_RATE_LIMIT = 20;
 const initializedDatabases = new WeakMap<D1Database, Promise<void>>();
 
 type StateRow = { payload: string; revision: number };
@@ -266,6 +269,40 @@ async function enforcePublicPasskeyRateLimit(database: D1Database, request: Requ
     RETURNING request_count, reset_at`)
     .bind(keyHash, `passkey-login-${action}`, resetAt, now, now).first<RateLimitRow>();
   if (!rate || rate.request_count > limit) throw new ApiRequestError("محاولات كثيرة. انتظر بضع دقائق ثم حاول مجددًا.", 429);
+}
+
+async function enforceCollectionVerificationRateLimit(database: D1Database, userId: string, invoiceId: string, enforceGlobalLimit: boolean): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const resetAt = now + COLLECTION_VERIFY_RATE_LIMIT_WINDOW;
+
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
+
+  const limits = [
+    ...(enforceGlobalLimit ? [{
+      keyHash: await sha256(`collection-verification-user:${userId}`),
+      action: "collection-verification-user",
+      limit: COLLECTION_VERIFY_GLOBAL_RATE_LIMIT,
+      message: "محاولات كثيرة للتحقق من الفواتير. انتظر عشر دقائق ثم حاول مجددًا.",
+    }] : []),
+    {
+      keyHash: await sha256(`collection-verification:${userId}:${invoiceId}`),
+      action: "collection-verification",
+      limit: COLLECTION_VERIFY_RATE_LIMIT,
+      message: "محاولات كثيرة لقراءة هذا الكود. انتظر عشر دقائق ثم حاول مجددًا.",
+    },
+  ];
+
+  for (const entry of limits) {
+    const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
+      VALUES (?, ?, 1, ?)
+      ON CONFLICT (key_hash) DO UPDATE SET
+        action = excluded.action,
+        request_count = CASE WHEN almadina_rate_limits.reset_at <= ? THEN 1 ELSE almadina_rate_limits.request_count + 1 END,
+        reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
+      RETURNING request_count, reset_at`)
+      .bind(entry.keyHash, entry.action, resetAt, now, now).first<RateLimitRow>();
+    if (!rate || rate.request_count > entry.limit) throw new ApiRequestError(entry.message, 429);
+  }
 }
 
 async function createSession(database: D1Database, userId: string): Promise<string> {
@@ -656,6 +693,32 @@ function orderForCourier(order: Order): Order {
   return { ...order, privateNotes: "", trackingEvents };
 }
 
+function collectionForCourier(invoice: CollectionInvoice): CollectionInvoice {
+  return {
+    id: invoice.id,
+    merchantId: "",
+    merchantName: invoice.merchantName,
+    invoiceNumber: invoice.invoiceNumber,
+    orderIds: [],
+    grossAmount: 0,
+    deliveryFees: 0,
+    returnFees: 0,
+    netAmount: 0,
+    deliveredCount: 0,
+    returnedCount: 0,
+    status: invoice.status,
+    verificationCode: "",
+    authorizedRecipient: "",
+    createdAt: "",
+    updatedAt: "",
+    scheduledAt: "",
+    shippedAt: invoice.status === "shipped" ? invoice.shippedAt : undefined,
+    verifiedAt: invoice.status === "shipped" ? invoice.verifiedAt : undefined,
+    verifiedById: invoice.status === "shipped" ? invoice.verifiedById : undefined,
+    verifiedByName: invoice.status === "shipped" ? invoice.verifiedByName : undefined,
+  };
+}
+
 function scopeDatabase(database: Database, account: User): Database {
   if (account.role === "admin") {
     return {
@@ -672,7 +735,9 @@ function scopeDatabase(database: Database, account: User): Database {
         .filter((order) => !order.deleted && order.courierId === account.id)
         .map(orderForCourier),
       recipients: [],
-      collections: [],
+      collections: database.collections
+        .filter((invoice) => invoice.status === "ready" || (invoice.status === "shipped" && invoice.verifiedById === account.id))
+        .map(collectionForCourier),
       notices: database.notices.filter((notice) => notice.userId === account.id),
       preferences: database.preferences[account.id] ? { [account.id]: database.preferences[account.id] } : {},
       nextOrder: database.nextOrder,
@@ -1305,8 +1370,8 @@ async function shipScannedOrder(database: D1Database, request: Request, session:
 }
 
 async function verifyCollection(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
-  if (session.account.role !== "admin") {
-    return json({ error: "هذه العملية متاحة لموظف الإدارة فقط." }, 403);
+  if (session.account.role !== "admin" && session.account.role !== "courier") {
+    return json({ error: "هذه العملية متاحة للمسؤول أو الموظف فقط." }, 403);
   }
 
   const payload = await request.json() as { invoiceId?: string; verificationCode?: string };
@@ -1315,18 +1380,27 @@ async function verifyCollection(database: D1Database, request: Request, session:
   if (!invoiceId || !/^\d{4}$/.test(verificationCode)) {
     return json({ error: "أدخل كود تحقق صحيحًا من 4 أرقام." }, 400);
   }
+  await enforceCollectionVerificationRateLimit(database, session.account.id, invoiceId, session.account.role === "courier");
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const state = attempt === 0 ? session.state : await readState(database);
     const employee = state.database.users.find((account) => account.id === session.account.id);
-    if (!employee || employee.role !== "admin") return json({ error: "لم تعد صلاحية الموظف متاحة." }, 403);
+    if (!employee || (employee.role !== "admin" && employee.role !== "courier")) return json({ error: "لم تعد صلاحية الموظف متاحة." }, 403);
 
     const invoice = state.database.collections.find((entry) => entry.id === invoiceId);
-    if (!invoice) return json({ error: "فاتورة التحصيل غير موجودة." }, 404);
+    const courierInvalidMessage = "رقم الفاتورة أو كود التحقق غير صحيح.";
+    if (!invoice) return employee.role === "courier"
+      ? json({ error: courierInvalidMessage }, 422)
+      : json({ error: "فاتورة التحصيل غير موجودة." }, 404);
+    if (employee.role === "courier" && invoice.verificationCode !== verificationCode) {
+      return json({ error: courierInvalidMessage }, 422);
+    }
     if (invoice.status === "shipped") return json({ error: "تم اعتماد هذا الكود وشحن التحصيل مسبقًا." }, 409);
     if (invoice.status === "paid") return json({ error: "تم إكمال هذه الفاتورة مسبقًا." }, 409);
     if (invoice.status !== "ready") return json({ error: "يجب تجهيز الفاتورة قبل قراءة كود التحقق." }, 409);
-    if (invoice.verificationCode !== verificationCode) return json({ error: "كود التحقق غير صحيح." }, 422);
+    if (employee.role === "admin" && invoice.verificationCode !== verificationCode) {
+      return json({ error: "كود التحقق غير صحيح." }, 422);
+    }
 
     const now = new Date().toISOString();
     const next: Database = {

@@ -414,6 +414,45 @@ test("replaces compensation requests with responsive collection invoices and ver
   assert.doesNotMatch(`${shell}\n${management}\n${settings}`, /التعويضات|طلب تعويض/);
 });
 
+test("lets courier employees verify a ready collection invoice with the customer's code", async () => {
+  const [employee, server, context, application, styles] = await Promise.all([
+    readFile(new URL("../app/components/employee.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  const verificationHandler = server.split("async function verifyCollection")[1]?.split("export async function handleAlmadinaApi")[0] ?? "";
+
+  assert.match(employee, /database\.collections/);
+  assert.match(employee, /invoice\.status === "ready"|status === "ready"/);
+  assert.match(employee, /verifyCollectionCode/);
+  assert.match(employee, /قراءة كود التحقق/);
+  assert.match(employee, /كود تحقق فاتورة التحصيل|label="كود التحقق"/);
+  assert.match(employee, /inputMode="numeric"/);
+  assert.match(employee, /maxLength=\{4\}/);
+  assert.match(employee, /(?:تحقق وشحن التحصيل|تأكيد وجعلها مشحون)/);
+  assert.match(employee, /مشحون/);
+  assert.match(context, /verifyCollectionCode:\s*\(invoiceId: string, verificationCode: string\) => Promise<boolean>/);
+  assert.match(application, /sharedRequest\("collections\/verify"/);
+  assert.match(verificationHandler, /"admin"/);
+  assert.match(verificationHandler, /"courier"/);
+  assert.match(verificationHandler, /status !== "ready"/);
+  assert.match(verificationHandler, /invoice\.verificationCode !== verificationCode/);
+  assert.match(verificationHandler, /status:\s*"shipped"/);
+  assert.match(verificationHandler, /verifiedById:\s*employee\.id/);
+  assert.match(verificationHandler, /verifiedByName:\s*employee\.name/);
+  assert.match(server, /merchantId:\s*""/);
+  assert.match(server, /grossAmount:\s*0/);
+  assert.match(server, /deliveryFees:\s*0/);
+  assert.match(server, /returnFees:\s*0/);
+  assert.match(server, /netAmount:\s*0/);
+  assert.match(server, /deliveredCount:\s*0/);
+  assert.match(server, /returnedCount:\s*0/);
+  assert.match(server, /verificationCode:\s*""/);
+  assert.match(styles, /employee-collection/);
+});
+
 test("lets courier employees scan a ready parcel with the camera and mark it shipped", async () => {
   const [application, context, shell, admin, employee, dashboard, orderForm, server, data, styles, appSources] = await Promise.all([
     readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
@@ -459,7 +498,9 @@ test("lets courier employees scan a ready parcel with the camera and mark it shi
   assert.match(server, /filter\(\(event\) => event\.kind !== "note"\)/);
   assert.match(server, /courierId:\s*undefined/);
   assert.match(server, /shippedAt:\s*undefined/);
-  assert.match(server, /collections:\s*\[\]/);
+  assert.match(server, /collections:\s*database\.collections/);
+  assert.match(server, /\.map\(collectionForCourier\)/);
+  assert.match(server, /verificationCode:\s*""/);
   assert.match(server, /recipients:\s*\[\]/);
   assert.match(employee, /order\.notes/);
   assert.match(employee, /تعليمات المندوب/);

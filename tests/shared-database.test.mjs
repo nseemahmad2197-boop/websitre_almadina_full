@@ -1030,6 +1030,16 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(pendingVerificationUpdate.body.database.collections[0].verificationCode, "2468");
   assert.equal(pendingVerificationUpdate.body.database.collections[0].authorizedRecipient, "مستلم أثناء التجهيز");
 
+  const pendingCollectionVerificationByCourier = await call(worker, database, "collections/verify", {
+    method: "POST",
+    cookie: employeeCookie,
+    payload: {
+      invoiceId: pendingVerificationUpdate.body.database.collections[0].id,
+      verificationCode: "2468",
+    },
+  });
+  assert.equal(pendingCollectionVerificationByCourier.status, 409);
+
   const isolatedCollections = await call(worker, database, "database", { cookie: otherCookie });
   assert.deepEqual(isolatedCollections.body.database.collections, []);
 
@@ -1068,6 +1078,25 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(securedMerchantUpdate.body.database.collections[0].authorizedRecipient, "المستلم المفوض");
 
   const invoiceId = securedMerchantUpdate.body.database.collections[0].id;
+  const readyCollectionsForCourier = await call(worker, database, "database", { cookie: employeeCookie });
+  const readyCollectionForCourier = readyCollectionsForCourier.body.database.collections.find((invoice) => invoice.id === invoiceId);
+  assert.equal(readyCollectionsForCourier.status, 200);
+  assert.ok(readyCollectionForCourier);
+  assert.equal(readyCollectionForCourier.id, invoiceId);
+  assert.equal(readyCollectionForCourier.invoiceNumber, securedMerchantUpdate.body.database.collections[0].invoiceNumber);
+  assert.equal(readyCollectionForCourier.merchantName, securedMerchantUpdate.body.database.collections[0].merchantName);
+  assert.equal(readyCollectionForCourier.status, "ready");
+  assert.equal(readyCollectionForCourier.merchantId, "");
+  assert.deepEqual(readyCollectionForCourier.orderIds, []);
+  assert.equal(readyCollectionForCourier.grossAmount, 0);
+  assert.equal(readyCollectionForCourier.deliveryFees, 0);
+  assert.equal(readyCollectionForCourier.returnFees, 0);
+  assert.equal(readyCollectionForCourier.netAmount, 0);
+  assert.equal(readyCollectionForCourier.deliveredCount, 0);
+  assert.equal(readyCollectionForCourier.returnedCount, 0);
+  assert.equal(readyCollectionForCourier.verificationCode, "");
+  assert.equal(readyCollectionForCourier.authorizedRecipient, "");
+
   const merchantVerification = await call(worker, database, "collections/verify", {
     method: "POST",
     cookie: secondCookie,
@@ -1075,12 +1104,20 @@ test("shares accounts and orders across devices while isolating customers and pr
   });
   assert.equal(merchantVerification.status, 403);
 
+  const unknownInvoiceVerification = await call(worker, database, "collections/verify", {
+    method: "POST",
+    cookie: employeeCookie,
+    payload: { invoiceId: "collection-does-not-exist", verificationCode: "9999" },
+  });
+  assert.equal(unknownInvoiceVerification.status, 422);
+
   const incorrectVerification = await call(worker, database, "collections/verify", {
     method: "POST",
-    cookie: adminCookie,
+    cookie: employeeCookie,
     payload: { invoiceId, verificationCode: "9999" },
   });
   assert.equal(incorrectVerification.status, 422);
+  assert.equal(unknownInvoiceVerification.body.error, incorrectVerification.body.error);
 
   const unchangedAfterIncorrectCode = await call(worker, database, "database", { cookie: adminCookie });
   const stillReady = unchangedAfterIncorrectCode.body.database.collections.find((invoice) => invoice.id === invoiceId);
@@ -1093,19 +1130,19 @@ test("shares accounts and orders across devices while isolating customers and pr
 
   const verifiedCollection = await call(worker, database, "collections/verify", {
     method: "POST",
-    cookie: adminCookie,
+    cookie: employeeCookie,
     payload: { invoiceId, verificationCode: "4321" },
   });
   assert.equal(verifiedCollection.status, 200);
-  const shippedInvoice = verifiedCollection.body.database.collections.find((invoice) => invoice.id === invoiceId);
-  const verifyingAdmin = administrator.body.database.users.find((account) => account.id === administrator.body.userId);
+  const afterCourierVerification = await call(worker, database, "database", { cookie: adminCookie });
+  const shippedInvoice = afterCourierVerification.body.database.collections.find((invoice) => invoice.id === invoiceId);
   assert.equal(shippedInvoice.status, "shipped");
-  assert.equal(shippedInvoice.verifiedById, administrator.body.userId);
-  assert.equal(shippedInvoice.verifiedByName, verifyingAdmin.name);
+  assert.equal(shippedInvoice.verifiedById, employeeAccount.id);
+  assert.equal(shippedInvoice.verifiedByName, employeeAccount.name);
   assert.match(shippedInvoice.verifiedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.match(shippedInvoice.shippedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.equal(verifiedCollection.body.database.notices.length, noticeCountBeforeVerification + 1);
-  assert.ok(verifiedCollection.body.database.notices.some((notice) => notice.userId === firstDevice.body.userId));
+  assert.equal(afterCourierVerification.body.database.notices.length, noticeCountBeforeVerification + 1);
+  assert.ok(afterCourierVerification.body.database.notices.some((notice) => notice.userId === firstDevice.body.userId));
 
   const shippedForMerchant = await call(worker, database, "database", { cookie: secondCookie });
   assert.equal(shippedForMerchant.body.database.collections[0].status, "shipped");
@@ -1217,6 +1254,207 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(revoked.status, 401);
   const stillSignedIn = await call(worker, database, "database", { cookie: firstCookie });
   assert.equal(stillSignedIn.status, 200);
+});
+
+test("rate limits repeated courier collection-code attempts without changing the invoice", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+
+  const merchant = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("تاجر محدد المحاولات", "collection-limit-merchant@example.test", "0594444444"),
+  });
+  assert.equal(merchant.status, 201);
+
+  const administrator = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+  });
+  assert.equal(administrator.status, 200);
+  const adminCookie = sessionFrom(administrator);
+
+  const courierAccount = {
+    id: "courier-collection-rate-limit",
+    name: "موظف محدد المحاولات",
+    email: "collection-limit-courier@example.test",
+    phone: "0564444444",
+    store: "قسم التحصيلات",
+    password: "Courier@123",
+    role: "courier",
+    joinedAt: new Date().toISOString(),
+    avatarColor: "#6655a6",
+  };
+  const courierCreated = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: administrator.body.revision,
+      database: {
+        ...administrator.body.database,
+        users: [...administrator.body.database.users, courierAccount],
+      },
+    },
+  });
+  assert.equal(courierCreated.status, 200);
+
+  const courier = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: courierAccount.email, password: courierAccount.password },
+  });
+  assert.equal(courier.status, 200);
+  const courierCookie = sessionFrom(courier);
+
+  const invoice = {
+    id: "collection-rate-limited",
+    merchantId: merchant.body.userId,
+    merchantName: "تاجر محدد المحاولات",
+    invoiceNumber: "#619999",
+    orderIds: [],
+    grossAmount: 100,
+    deliveryFees: 25,
+    returnFees: 0,
+    netAmount: 75,
+    deliveredCount: 1,
+    returnedCount: 0,
+    status: "ready",
+    verificationCode: "2468",
+    authorizedRecipient: "المستلم المفوض",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    scheduledAt: new Date().toISOString(),
+  };
+  const seededState = JSON.parse(database.state.payload);
+  database.state.payload = JSON.stringify({ ...seededState, collections: [...seededState.collections, invoice] });
+  const stateBeforeAttempts = database.state.payload;
+  const revisionBeforeAttempts = database.state.revision;
+
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const rejected = await call(worker, database, "collections/verify", {
+      method: "POST",
+      cookie: courierCookie,
+      payload: { invoiceId: invoice.id, verificationCode: "9999" },
+    });
+    assert.equal(rejected.status, 422, `expected wrong-code attempt ${attempt} to reach validation`);
+  }
+
+  const rateLimited = await call(worker, database, "collections/verify", {
+    method: "POST",
+    cookie: courierCookie,
+    payload: { invoiceId: invoice.id, verificationCode: invoice.verificationCode },
+  });
+  assert.equal(rateLimited.status, 429);
+  assert.match(rateLimited.body.error, /محاولات كثيرة/);
+  assert.equal(database.state.revision, revisionBeforeAttempts);
+  assert.equal(database.state.payload, stateBeforeAttempts);
+
+  const unchanged = await call(worker, database, "database", { cookie: adminCookie });
+  const unchangedInvoice = unchanged.body.database.collections.find((entry) => entry.id === invoice.id);
+  assert.equal(unchanged.status, 200);
+  assert.ok(unchangedInvoice);
+  assert.equal(unchangedInvoice.status, "ready");
+  assert.equal(unchangedInvoice.verifiedAt, undefined);
+  assert.equal(unchangedInvoice.verifiedById, undefined);
+  assert.equal(unchangedInvoice.verifiedByName, undefined);
+  assert.equal(unchangedInvoice.shippedAt, undefined);
+});
+
+test("rate limits a courier after twenty collection-code attempts across different invoices", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+
+  const merchant = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("تاجر الحد العام", "collection-global-merchant@example.test", "0595555555"),
+  });
+  assert.equal(merchant.status, 201);
+
+  const administrator = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+  });
+  assert.equal(administrator.status, 200);
+  const adminCookie = sessionFrom(administrator);
+
+  const courierAccount = {
+    id: "courier-collection-global-rate-limit",
+    name: "موظف الحد العام",
+    email: "collection-global-courier@example.test",
+    phone: "0565555555",
+    store: "قسم التحصيلات",
+    password: "Courier@123",
+    role: "courier",
+    joinedAt: new Date().toISOString(),
+    avatarColor: "#6655a6",
+  };
+  const courierCreated = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: administrator.body.revision,
+      database: {
+        ...administrator.body.database,
+        users: [...administrator.body.database.users, courierAccount],
+      },
+    },
+  });
+  assert.equal(courierCreated.status, 200);
+
+  const courier = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: courierAccount.email, password: courierAccount.password },
+  });
+  assert.equal(courier.status, 200);
+  const courierCookie = sessionFrom(courier);
+
+  const now = new Date().toISOString();
+  const invoices = Array.from({ length: 21 }, (_, index) => ({
+    id: `collection-global-rate-${index + 1}`,
+    merchantId: merchant.body.userId,
+    merchantName: "تاجر الحد العام",
+    invoiceNumber: `#62${String(index + 1).padStart(4, "0")}`,
+    orderIds: [],
+    grossAmount: 100,
+    deliveryFees: 25,
+    returnFees: 0,
+    netAmount: 75,
+    deliveredCount: 1,
+    returnedCount: 0,
+    status: "ready",
+    verificationCode: "2468",
+    authorizedRecipient: "المستلم المفوض",
+    createdAt: now,
+    updatedAt: now,
+    scheduledAt: now,
+  }));
+  const seededState = JSON.parse(database.state.payload);
+  database.state.payload = JSON.stringify({ ...seededState, collections: [...seededState.collections, ...invoices] });
+  const stateBeforeAttempts = database.state.payload;
+  const revisionBeforeAttempts = database.state.revision;
+
+  for (let index = 0; index < 20; index += 1) {
+    const rejected = await call(worker, database, "collections/verify", {
+      method: "POST",
+      cookie: courierCookie,
+      payload: { invoiceId: invoices[index].id, verificationCode: "9999" },
+    });
+    assert.equal(rejected.status, 422, `expected global attempt ${index + 1} to reach code validation`);
+  }
+
+  const rateLimited = await call(worker, database, "collections/verify", {
+    method: "POST",
+    cookie: courierCookie,
+    payload: { invoiceId: invoices[20].id, verificationCode: invoices[20].verificationCode },
+  });
+  assert.equal(rateLimited.status, 429);
+  assert.match(rateLimited.body.error, /محاولات كثيرة/);
+  assert.equal(database.state.revision, revisionBeforeAttempts);
+  assert.equal(database.state.payload, stateBeforeAttempts);
+
+  const unchanged = await call(worker, database, "database", { cookie: adminCookie });
+  assert.equal(unchanged.status, 200);
+  assert.equal(unchanged.body.database.collections.length, invoices.length);
+  assert.ok(unchanged.body.database.collections.every((invoice) => invoice.status === "ready"));
+  assert.ok(unchanged.body.database.collections.every((invoice) => invoice.verifiedAt === undefined && invoice.shippedAt === undefined));
 });
 
 test("allows only the administrator to change merchant and courier account fields", async () => {

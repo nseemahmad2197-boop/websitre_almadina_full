@@ -1,25 +1,41 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { getStatus } from "../lib/data";
+import { formatDate, getStatus } from "../lib/data";
 import { Icon } from "./icon";
-import { Button, EmptyState, PageHeader, StatusPill } from "./ui";
+import { Button, EmptyState, Field, Modal, PageHeader, StatusPill } from "./ui";
 
 export function EmployeeDashboard() {
-  const { database, user, openScanner } = useApp();
+  const { database, user, openScanner, verifyCollectionCode } = useApp();
+  const [collectionVerification, setCollectionVerification] = useState<{ invoiceId: string; invoiceNumber: string; code: string } | null>(null);
+  const [verifyingCollection, setVerifyingCollection] = useState(false);
   const assignedOrders = useMemo(
     () => database.orders.filter((order) => !order.deleted && order.courierId === user?.id),
     [database.orders, user?.id],
   );
+  const collectionInvoices = useMemo(
+    () => database.collections.filter((invoice) => invoice.status === "ready" || (invoice.status === "shipped" && invoice.verifiedById === user?.id)),
+    [database.collections, user?.id],
+  );
+  const readyCollections = collectionInvoices.filter((invoice) => invoice.status === "ready");
   const activeOrders = assignedOrders.filter((order) => order.status !== "delivered" && order.status !== "returned");
   const completedOrders = assignedOrders.filter((order) => order.status === "delivered").length;
+
+  async function submitCollectionVerification(event: FormEvent) {
+    event.preventDefault();
+    if (!collectionVerification || collectionVerification.code.length !== 4) return;
+    setVerifyingCollection(true);
+    const verified = await verifyCollectionCode(collectionVerification.invoiceId, collectionVerification.code);
+    setVerifyingCollection(false);
+    if (verified) setCollectionVerification(null);
+  }
 
   return (
     <div className="page-content employee-dashboard animate-page">
       <PageHeader
         title={`مرحبًا، ${user?.name ?? "موظف المدينة"}`}
-        subtitle="حساب موظف بصلاحيات تشغيلية لمسح الطرود ومتابعة ما استلمته"
+        subtitle="حساب موظف بصلاحيات تشغيلية لمسح الطرود والتحقق من فواتير التحصيل"
         action={<span className="employee-role-badge"><Icon name="shield" size={15} />موظف · مندوب</span>}
       />
 
@@ -34,10 +50,23 @@ export function EmployeeDashboard() {
         <div className="employee-scan-card__rule"><Icon name="shield" size={16} /><span>لا يستطيع حساب المستخدم العادي تنفيذ هذا التحديث.</span></div>
       </section>
 
+      <section className="employee-collections" aria-label="فواتير التحصيل الجاهزة">
+        <header><div><h2>تحصيل الفواتير</h2><p>أدخل كود المستخدم المكوّن من 4 أرقام لتصبح الفاتورة «مشحون» وتسجّل باسمك.</p></div><span>{readyCollections.length.toLocaleString("ar-EG")}</span></header>
+        {collectionInvoices.length ? <div className="employee-collection-list">{collectionInvoices.map((invoice) => <article className="employee-collection-card" key={invoice.id}>
+          <span className="employee-collection-card__icon"><Icon name={invoice.status === "ready" ? "key" : "check"} size={21} /></span>
+          <div><strong dir="ltr">{invoice.invoiceNumber}</strong><span>{invoice.merchantName}</span><small>تحقق من الكود المعروض في حساب المستخدم.</small></div>
+          <span className={`collection-status collection-status--${invoice.status}`}>{invoice.status === "ready" ? "جاهزة للتحويل" : "مشحون"}</span>
+          <footer>{invoice.status === "ready"
+            ? <Button icon="key" onClick={() => setCollectionVerification({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, code: "" })}>قراءة كود التحقق</Button>
+            : <span><Icon name="check" size={15} />تم التحقق في {formatDate(invoice.verifiedAt ?? invoice.shippedAt ?? invoice.updatedAt)}</span>}
+          </footer>
+        </article>)}</div> : <EmptyState icon="receipt" title="لا توجد فواتير جاهزة" description="ستظهر هنا فواتير المستخدمين بعد أن تجهزها الإدارة للتحويل." />}
+      </section>
+
       <section className="employee-permissions" aria-label="صلاحيات حساب الموظف">
         <article><span><Icon name="camera" size={20} /></span><div><strong>مسح الطرود</strong><small>تحديث آمن من جاهز للإرسال إلى مشحون</small></div></article>
         <article><span><Icon name="user" size={20} /></span><div><strong>إسناد تلقائي</strong><small>يُربط الطرد بحساب الموظف الذي مسحه</small></div></article>
-        <article><span><Icon name="clipboard" size={20} /></span><div><strong>سجل موثّق</strong><small>يحفظ اسم الموظف ووقت استلام الطرد</small></div></article>
+        <article><span><Icon name="clipboard" size={20} /></span><div><strong>تحقق موثّق</strong><small>يحفظ اسم الموظف ووقت شحن الطرد أو التحصيل</small></div></article>
       </section>
 
       <section className="employee-stats">
@@ -62,6 +91,8 @@ export function EmployeeDashboard() {
           </div>
         ) : <EmptyState icon="scan" title="لا توجد طرود مسندة بعد" description="امسح كود أول طرد جاهز للإرسال ليظهر هنا تلقائيًا." action="مسح كود الطرد" onAction={() => openScanner()} />}
       </section>
+
+      {collectionVerification && <Modal title="قراءة كود التحقق" onClose={() => !verifyingCollection && setCollectionVerification(null)} className="employee-verification-modal" sheet><form className="modal-form employee-verification-form" onSubmit={submitCollectionVerification}><div className="employee-verification-form__intro"><span><Icon name="key" size={24} /></span><div><strong dir="ltr">{collectionVerification.invoiceNumber}</strong><p>أدخل الكود المكوّن من 4 أرقام الذي يعرضه المستخدم. عند صحته تصبح حالة الفاتورة «مشحون» مباشرة.</p></div></div><Field icon="key" label="كود التحقق" aria-label="كود تحقق فاتورة التحصيل للموظف" placeholder="0000" value={collectionVerification.code} onChange={(event) => setCollectionVerification({ ...collectionVerification, code: event.target.value.replace(/[^\d]/g, "").slice(0, 4) })} inputMode="numeric" autoComplete="one-time-code" maxLength={4} dir="ltr" autoFocus /><p className="employee-verification-form__note"><Icon name="shield" size={16} />لن تتغير الفاتورة إذا كان الكود غير صحيح، والمحاولات المتكررة محدودة للحماية.</p><Button type="submit" icon="check" full loading={verifyingCollection} disabled={collectionVerification.code.length !== 4}>تحقق وشحن التحصيل</Button></form></Modal>}
     </div>
   );
 }
