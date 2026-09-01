@@ -12,7 +12,7 @@ function SettingsRow({ icon, title, subtitle, onClick, action, danger = false }:
 export function SettingsPage() {
   const { user, setView, preferences, updatePreferences, showToast, logout, confirm } = useApp();
   const route = (view: View) => () => setView(view);
-  return <div className="page-content settings-page animate-page"><PageHeader title="الإعدادات" subtitle={user?.email} onBack={() => setView("home")} /><div className="settings-group"><SettingsRow icon="user" title="الملف الشخصي" subtitle={user?.role === "admin" ? "إدارة بيانات حساب المسؤول" : "بيانات حسابك للعرض فقط"} onClick={route("profile")} /><SettingsRow icon="shield" title="الأمان والخصوصية" subtitle="قفل التطبيق وحذف الحساب" onClick={route("security")} /><SettingsRow icon="bell" title="الإشعارات" subtitle="تنبيهات الطرود والعروض" onClick={route("notification-settings")} /><SettingsRow icon="sliders" title="التفضيلات" subtitle="المظهر والعرض" onClick={route("preferences")} /></div><div className="settings-group"><SettingsRow icon="help" title="مركز المساعدة" subtitle="الأسئلة الشائعة" onClick={route("help")} /><SettingsRow icon="file" title="سياسة الخصوصية وشروط الاستخدام" onClick={route("privacy")} /></div><SectionCard className="rating-card"><div><Icon name="star" size={20} /><strong>قيّم التطبيق</strong></div><div className="rating-stars">{[1, 2, 3, 4, 5].map((star) => <button key={star} aria-label={`${star} من 5`} className={star <= preferences.rating ? "is-rated" : ""} onClick={() => { updatePreferences({ rating: star }); showToast("شكرًا لك! تم حفظ تقييمك."); }}><Icon name="star" size={28} /></button>)}</div></SectionCard><div className="settings-group"><SettingsRow icon="logout" title="تسجيل الخروج" danger onClick={() => confirm({ title: "تسجيل الخروج؟", message: "يمكنك تسجيل الدخول مرة أخرى في أي وقت.", confirmLabel: "تسجيل الخروج", onConfirm: logout })} /></div><p className="version-label">Almadina Express v1.0.0</p></div>;
+  return <div className="page-content settings-page animate-page"><PageHeader title="الإعدادات" subtitle={user?.email} onBack={() => setView("home")} /><div className="settings-group"><SettingsRow icon="user" title="الملف الشخصي" subtitle={user?.role === "admin" ? "إدارة بيانات حساب المسؤول" : "بيانات حسابك للعرض فقط"} onClick={route("profile")} /><SettingsRow icon="shield" title="الأمان والخصوصية" subtitle="كلمة المرور وقفل التطبيق وحماية الجهاز" onClick={route("security")} /><SettingsRow icon="bell" title="الإشعارات" subtitle="تنبيهات الطرود والعروض" onClick={route("notification-settings")} /><SettingsRow icon="sliders" title="التفضيلات" subtitle="المظهر والعرض" onClick={route("preferences")} /></div><div className="settings-group"><SettingsRow icon="help" title="مركز المساعدة" subtitle="الأسئلة الشائعة" onClick={route("help")} /><SettingsRow icon="file" title="سياسة الخصوصية وشروط الاستخدام" onClick={route("privacy")} /></div><SectionCard className="rating-card"><div><Icon name="star" size={20} /><strong>قيّم التطبيق</strong></div><div className="rating-stars">{[1, 2, 3, 4, 5].map((star) => <button key={star} aria-label={`${star} من 5`} className={star <= preferences.rating ? "is-rated" : ""} onClick={() => { updatePreferences({ rating: star }); showToast("شكرًا لك! تم حفظ تقييمك."); }}><Icon name="star" size={28} /></button>)}</div></SectionCard><div className="settings-group"><SettingsRow icon="logout" title="تسجيل الخروج" danger onClick={() => confirm({ title: "تسجيل الخروج؟", message: "يمكنك تسجيل الدخول مرة أخرى في أي وقت.", confirmLabel: "تسجيل الخروج", onConfirm: logout })} /></div><p className="version-label">Almadina Express v1.0.0</p></div>;
 }
 
 export function SecurityPage() {
@@ -64,12 +64,77 @@ export function SecurityPage() {
 
   return <div className="page-content animate-page"><PageHeader title="الأمان والخصوصية" onBack={() => setView("settings")} />
     <div className="settings-group">
+      <SettingsRow icon="key" title="تغيير كلمة المرور" subtitle="أنشئ كلمة مرور قوية لحسابك" onClick={() => setView("change-password")} />
       <SettingsRow icon="lock" title="قفل التطبيق" subtitle={appLock.enabled ? "رمز القفل مفعّل ومشفّر" : "احمِ حسابك برمز دخول"} action={<Toggle checked={appLock.enabled} disabled={!appLock.ready || submitting} onChange={(value) => { setPin(""); setPinMode(value ? "setup" : "disable-lock"); showToast(value ? "أدخل رمزًا جديدًا من 4 أرقام." : "أدخل رمز القفل الحالي للتأكيد.", "info"); }} label="قفل التطبيق" />} />
       <SettingsRow icon="fingerprint" title="الدخول بالبصمة" subtitle={biometricSubtitle} action={<Toggle checked={appLock.biometricEnabled} disabled={!appLock.ready || !appLock.enabled || submitting || (!appLock.biometricAvailable && !appLock.biometricEnabled)} onChange={(value) => { setPin(""); setPinMode(value ? "enable-biometric" : "disable-biometric"); if (value) showToast("أدخل رمز قفل التطبيق لتأكيد ربط حماية الجهاز.", "info"); }} label="الدخول بالبصمة" />} />
     </div>
     {pinMode && <SectionCard title={pinTitle} className="pin-card" action={<Button type="button" variant="ghost" disabled={submitting} onClick={() => { setPinMode(null); setPin(""); }}>إلغاء</Button>}><div className="pin-dots">{[0, 1, 2, 3].map((index) => <span key={index} className={index < pin.length ? "is-filled" : ""} />)}</div><div className="pin-keypad">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "delete"].map((value) => <button type="button" disabled={submitting} key={value} onClick={() => press(value)}>{value === "clear" ? "C" : value === "delete" ? <Icon name="arrowLeft" size={20} /> : value}</button>)}</div>{submitting && <p className="pin-card__status"><span className="spinner" /> جارٍ حفظ إعدادات الأمان...</p>}</SectionCard>}
     <SectionCard className="security-note"><p><Icon name="shield" size={18} /> عند تفعيل البصمة وربطها بهذا الجهاز، يمكنك تسجيل الدخول بها بعد الخروج للحسابات العادية والبريميوم والماسية والموظف والمسؤول. تبقى كلمة المرور متاحة دائمًا.</p></SectionCard>
     {user?.role !== "admin" && <div className="settings-group"><SettingsRow icon="trash" title="حذف الحساب" subtitle="راجع الشروط قبل الحذف النهائي" danger onClick={() => setView("delete-account")} /></div>}
+  </div>;
+}
+
+function isStrongPassword(password: string): boolean {
+  return password.length >= 8 && password.length <= 128
+    && /\p{L}/u.test(password)
+    && /[0-9٠-٩]/.test(password)
+    && /[^\p{L}\p{N}\s]/u.test(password);
+}
+
+export function ChangePasswordPage() {
+  const { setView, changePassword, showToast } = useApp();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [signOutAllDevices, setSignOutAllDevices] = useState(true);
+  const [visible, setVisible] = useState({ current: false, next: false, confirm: false });
+  const [submitting, setSubmitting] = useState(false);
+  const strong = isStrongPassword(newPassword);
+  const matching = newPassword === confirmPassword;
+
+  function visibilityButton(field: keyof typeof visible, label: string) {
+    const shown = visible[field];
+    return <button type="button" className="password-visibility-button" aria-label={`${shown ? "إخفاء" : "إظهار"} ${label}`} aria-pressed={shown} disabled={submitting} onClick={() => setVisible((current) => ({ ...current, [field]: !current[field] }))}><Icon name={shown ? "eyeOff" : "eye"} size={21} /></button>;
+  }
+
+  async function submitPasswordChange(event: FormEvent) {
+    event.preventDefault();
+    if (submitting) return;
+    if (!isStrongPassword(newPassword)) {
+      showToast("يجب أن تحتوي كلمة المرور الجديدة على 8 أحرف على الأقل وحرف ورقم ورمز.", "error");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast("تأكيد كلمة المرور الجديدة غير مطابق.", "error");
+      return;
+    }
+    if (currentPassword === newPassword) {
+      showToast("اختر كلمة مرور جديدة مختلفة عن الحالية.", "error");
+      return;
+    }
+
+    setSubmitting(true);
+    const changed = await changePassword(currentPassword, newPassword, confirmPassword, signOutAllDevices);
+    setSubmitting(false);
+    if (!changed) return;
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    if (!signOutAllDevices) setView("security");
+  }
+
+  return <div className="page-content change-password-page animate-page">
+    <PageHeader title="تغيير كلمة المرور" onBack={() => setView("security")} />
+    <section className="change-password-panel">
+      <header className="change-password-intro"><span><Icon name="key" size={27} /></span><div><h2>كلمة مرور جديدة وآمنة</h2><p>أنشئ كلمة مرور قوية مكوّنة من 8 أحرف فأكثر وتحتوي على حروف وأرقام ورمز.</p></div></header>
+      <form className="change-password-form" onSubmit={submitPasswordChange}>
+        <Field label="كلمة المرور الحالية" icon="lock" type={visible.current ? "text" : "password"} autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} maxLength={256} placeholder="كلمة المرور الحالية" suffix={visibilityButton("current", "كلمة المرور الحالية")} disabled={submitting} />
+        <Field label="كلمة المرور الجديدة" icon="key" type={visible.next ? "text" : "password"} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} maxLength={128} placeholder="كلمة المرور الجديدة" suffix={visibilityButton("next", "كلمة المرور الجديدة")} hint={newPassword && !strong ? "أضف حرفًا ورقمًا ورمزًا، وبحد أدنى 8 أحرف." : undefined} disabled={submitting} />
+        <Field label="تأكيد كلمة المرور" icon="check" type={visible.confirm ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} maxLength={128} placeholder="تأكيد كلمة المرور" suffix={visibilityButton("confirm", "تأكيد كلمة المرور")} hint={confirmPassword && !matching ? "كلمتا المرور غير متطابقتين." : undefined} disabled={submitting} />
+        <label className="password-session-option"><span className="password-session-option__checkbox"><input type="checkbox" checked={signOutAllDevices} disabled={submitting} onChange={(event) => setSignOutAllDevices(event.target.checked)} /><span><Icon name="check" size={17} /></span></span><span><strong>طلب تسجيل الدخول بكلمة المرور الجديدة لجميع الأجهزة</strong><small>سيتم تسجيل الخروج وإيقاف الدخول بالبصمة القديمة حتى تعيد ربطها.</small></span></label>
+        <Button type="submit" icon="check" full loading={submitting} disabled={!currentPassword || !strong || !matching || currentPassword === newPassword}>تأكيد</Button>
+      </form>
+    </section>
   </div>;
 }
 

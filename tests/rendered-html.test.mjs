@@ -1106,7 +1106,8 @@ test("shows a reference-style account deletion page and performs deletion only t
   assert.match(context, /\| "delete-account"/);
   assert.match(context, /deleteAccount:\s*\(password: string, confirmation: string\) => Promise<boolean>/);
   assert.match(shell, /case "delete-account": return <DeleteAccountPage \/>/);
-  assert.match(shell, /view !== "delete-account" && <BottomNavigation \/>/);
+  assert.match(shell, /const securityFlow = view === "delete-account" \|\| view === "change-password"/);
+  assert.match(shell, /!securityFlow && <BottomNavigation \/>/);
   assert.match(settings, /export function DeleteAccountPage\(\)/);
   assert.match(settings, /قبل حذف حسابك/);
   assert.match(settings, /إكمال جميع معاملات التحصيل/);
@@ -1137,4 +1138,51 @@ test("shows a reference-style account deletion page and performs deletion only t
   assert.match(styles, /\.delete-account-requirements\s*\{/);
   assert.match(styles, /\.delete-account-actions\s*\{/);
   assert.match(styles, /\.delete-account-confirmation-modal\s*\{/);
+});
+
+test("shows a responsive reference-style password change flow backed only by the protected server route", async () => {
+  const [application, context, server, shell, settings, styles] = await Promise.all([
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(context, /\| "change-password"/);
+  assert.match(context, /changePassword:\s*\(currentPassword: string, newPassword: string, confirmPassword: string, signOutAllDevices: boolean\) => Promise<boolean>/);
+  assert.match(shell, /case "change-password": return <ChangePasswordPage \/>/);
+  assert.match(shell, /securityFlow \? "application--security-flow"/);
+  assert.match(settings, /title="تغيير كلمة المرور"[\s\S]*setView\("change-password"\)/);
+  assert.match(settings, /export function ChangePasswordPage\(\)/);
+  assert.match(settings, /autoComplete="current-password"/);
+  assert.match(settings, /autoComplete="new-password"/);
+  assert.match(settings, /aria-label=\{`\$\{shown \? "إخفاء" : "إظهار"\} \$\{label\}`\}/);
+  assert.match(settings, /const \[signOutAllDevices, setSignOutAllDevices\] = useState\(true\)/);
+  assert.match(settings, /طلب تسجيل الدخول بكلمة المرور الجديدة لجميع الأجهزة/);
+  assert.match(settings, /إيقاف الدخول بالبصمة القديمة حتى تعيد ربطها/);
+  assert.match(settings, /password\.length >= 8[\s\S]*\\p\{L\}[\s\S]*0-9٠-٩[\s\S]*\\p\{N\}/);
+  assert.doesNotMatch(settings, /users:\s*current\.users\.map/);
+
+  assert.match(application, /fetch\("\/api\/almadina\/account\/password"/);
+  assert.match(application, /JSON\.stringify\(\{ currentPassword, newPassword, confirmPassword, signOutAllDevices \}\)/);
+  assert.match(application, /if \(payload\.signedOut\)[\s\S]*clearLocalSession\(\)/);
+  assert.match(application, /<AppContext\.Provider value=\{\{[\s\S]*changePassword/);
+
+  assert.match(server, /async function changeOwnPassword\(database: D1Database, request: Request, session: AuthenticatedSession\)/);
+  assert.match(server, /state\.database\.users\.find\(\(entry\) => entry\.id === session\.account\.id\)/);
+  assert.match(server, /verifyPassword\(currentPassword, account\.password\)/);
+  assert.match(server, /const password = await hashPassword\(newPassword\)/);
+  assert.match(server, /PASSWORD_CHANGE_RATE_LIMIT = 5/);
+  assert.match(server, /DELETE FROM almadina_sessions WHERE user_id = \?/);
+  assert.match(server, /DELETE FROM almadina_passkey_login_credentials WHERE user_id = \?/);
+  assert.match(server, /UPDATE almadina_app_locks SET biometric_enabled = 0/);
+  assert.match(server, /url\.pathname === "\/api\/almadina\/account\/password"/);
+
+  assert.match(styles, /\.change-password-page\s*\{/);
+  assert.match(styles, /\.change-password-form \.field__control input\s*\{[^}]*font-size:\s*16px/);
+  assert.match(styles, /\.password-visibility-button\s*\{/);
+  assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.change-password-form/);
+  assert.match(styles, /env\(safe-area-inset-bottom\)/);
 });

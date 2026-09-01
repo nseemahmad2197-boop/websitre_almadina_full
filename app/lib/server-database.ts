@@ -23,6 +23,8 @@ const PASSKEY_VERIFY_RATE_LIMIT = 60;
 const COLLECTION_VERIFY_RATE_LIMIT_WINDOW = 10 * 60;
 const COLLECTION_VERIFY_RATE_LIMIT = 6;
 const COLLECTION_VERIFY_GLOBAL_RATE_LIMIT = 20;
+const PASSWORD_CHANGE_RATE_LIMIT_WINDOW = 10 * 60;
+const PASSWORD_CHANGE_RATE_LIMIT = 5;
 const initializedDatabases = new WeakMap<D1Database, Promise<void>>();
 
 type StateRow = { payload: string; revision: number };
@@ -225,6 +227,48 @@ async function saveState(database: D1Database, state: Database, revision: number
   return (result.meta?.changes ?? 0) === 1;
 }
 
+async function savePasswordChange(
+  database: D1Database,
+  state: Database,
+  revision: number,
+  userId: string,
+  currentSessionToken: string,
+  signOutAllDevices: boolean,
+): Promise<{ saved: boolean; replacementSessionToken?: string }> {
+  const payload = JSON.stringify(removeLegacyDemoData(state));
+  const nextRevision = revision + 1;
+  const updatedAt = new Date().toISOString();
+  const stateMatches = "EXISTS (SELECT 1 FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?)";
+  const updateState = database.prepare("UPDATE almadina_state SET payload = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?")
+    .bind(payload, updatedAt, "main", revision);
+
+  if (signOutAllDevices) {
+    const results = await database.batch<D1Result>([
+      updateState,
+      database.prepare(`DELETE FROM almadina_sessions WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+      database.prepare(`DELETE FROM almadina_webauthn_credentials WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+      database.prepare(`DELETE FROM almadina_passkey_login_credentials WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+      database.prepare(`DELETE FROM almadina_webauthn_challenges WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
+      database.prepare(`UPDATE almadina_app_locks SET biometric_enabled = 0, updated_at = ? WHERE user_id = ? AND ${stateMatches}`).bind(updatedAt, userId, "main", nextRevision, payload),
+    ]);
+    return { saved: (results[0]?.meta?.changes ?? 0) === 1 };
+  }
+
+  const replacementSessionToken = toHex(crypto.getRandomValues(new Uint8Array(32)));
+  const replacementTokenHash = await sha256(replacementSessionToken);
+  const currentTokenHash = await sha256(currentSessionToken);
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_DURATION;
+  const results = await database.batch<D1Result>([
+    updateState,
+    database.prepare(`DELETE FROM almadina_sessions WHERE token_hash = ? AND ${stateMatches}`).bind(currentTokenHash, "main", nextRevision, payload),
+    database.prepare(`INSERT INTO almadina_sessions (token_hash, user_id, expires_at, created_at)
+      SELECT ?, ?, ?, ? FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?`)
+      .bind(replacementTokenHash, userId, expiresAt, updatedAt, "main", nextRevision, payload),
+  ]);
+  const saved = (results[0]?.meta?.changes ?? 0) === 1;
+  return { saved, ...(saved ? { replacementSessionToken } : {}) };
+}
+
 function getCookie(request: Request, cookieName: string): string | null {
   const cookie = request.headers.get("cookie") ?? "";
   for (const item of cookie.split(";")) {
@@ -302,6 +346,25 @@ async function enforceCollectionVerificationRateLimit(database: D1Database, user
       RETURNING request_count, reset_at`)
       .bind(entry.keyHash, entry.action, resetAt, now, now).first<RateLimitRow>();
     if (!rate || rate.request_count > entry.limit) throw new ApiRequestError(entry.message, 429);
+  }
+}
+
+async function enforcePasswordChangeRateLimit(database: D1Database, userId: string): Promise<void> {
+  const keyHash = await sha256(`password-change:${userId}`);
+  const now = Math.floor(Date.now() / 1000);
+  const resetAt = now + PASSWORD_CHANGE_RATE_LIMIT_WINDOW;
+
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
+  const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT (key_hash) DO UPDATE SET
+      action = excluded.action,
+      request_count = CASE WHEN almadina_rate_limits.reset_at <= ? THEN 1 ELSE almadina_rate_limits.request_count + 1 END,
+      reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
+    RETURNING request_count, reset_at`)
+    .bind(keyHash, "password-change", resetAt, now, now).first<RateLimitRow>();
+  if (!rate || rate.request_count > PASSWORD_CHANGE_RATE_LIMIT) {
+    throw new ApiRequestError("محاولات كثيرة لتغيير كلمة المرور. انتظر عشر دقائق ثم حاول مجددًا.", 429);
   }
 }
 
@@ -771,6 +834,13 @@ function isValidDatabase(value: unknown): value is Database {
 
 function validEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function validNewPassword(value: string): boolean {
+  return value.length >= 8 && value.length <= 128
+    && /\p{L}/u.test(value)
+    && /[0-9٠-٩]/.test(value)
+    && /[^\p{L}\p{N}\s]/u.test(value);
 }
 
 async function mergeAdminDatabase(current: Database, submitted: Database, account: User): Promise<Database> {
@@ -1247,6 +1317,66 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
   return json({ error: "تم تحديث بيانات الحساب من جهاز آخر. راجع الشروط ثم حاول مجددًا." }, 409);
 }
 
+async function changeOwnPassword(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  let submitted: unknown;
+  try {
+    submitted = await request.json();
+  } catch {
+    return json({ error: "بيانات تغيير كلمة المرور غير صالحة." }, 400);
+  }
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) {
+    return json({ error: "بيانات تغيير كلمة المرور غير صالحة." }, 400);
+  }
+
+  const payload = submitted as Record<string, unknown>;
+  const currentPassword = typeof payload.currentPassword === "string" ? payload.currentPassword : "";
+  const newPassword = typeof payload.newPassword === "string" ? payload.newPassword : "";
+  const confirmPassword = typeof payload.confirmPassword === "string" ? payload.confirmPassword : "";
+  const signOutAllDevices = payload.signOutAllDevices !== false;
+
+  if (!currentPassword || currentPassword.length > 256) return json({ error: "أدخل كلمة المرور الحالية." }, 400);
+  if (newPassword !== confirmPassword) return json({ error: "تأكيد كلمة المرور الجديدة غير مطابق." }, 400);
+  if (!validNewPassword(newPassword)) {
+    return json({ error: "يجب أن تتكون كلمة المرور الجديدة من 8 أحرف على الأقل وتحتوي على حرف ورقم ورمز." }, 400);
+  }
+
+  await enforcePasswordChangeRateLimit(database, session.account.id);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const account = state.database.users.find((entry) => entry.id === session.account.id);
+    if (!account) {
+      return json({ error: "لم يعد الحساب متاحًا." }, 401, { "Set-Cookie": sessionCookie(request, "", 0) });
+    }
+    if (!await verifyPassword(currentPassword, account.password)) return json({ error: "كلمة المرور الحالية غير صحيحة." }, 403);
+    if (currentPassword === newPassword || await verifyPassword(newPassword, account.password)) {
+      return json({ error: "اختر كلمة مرور جديدة مختلفة عن الحالية." }, 400);
+    }
+
+    const password = await hashPassword(newPassword);
+    const next: Database = {
+      ...state.database,
+      users: state.database.users.map((entry) => entry.id === account.id ? { ...entry, password } : entry),
+    };
+    const saved = await savePasswordChange(database, next, state.revision, account.id, session.token, signOutAllDevices);
+    if (!saved.saved) continue;
+
+    const nextState = { database: next, revision: state.revision + 1 };
+    if (signOutAllDevices) {
+      return json({ success: true, signedOut: true }, 200, cookieHeaders(
+        sessionCookie(request, "", 0),
+        passkeyLoginCookie(request, "", 0),
+      ));
+    }
+
+    return json({ success: true, signedOut: false, ...snapshot(nextState, { ...account, password }) }, 200, {
+      "Set-Cookie": sessionCookie(request, saved.replacementSessionToken!),
+    });
+  }
+
+  return json({ error: "تم تحديث الحساب من جهاز آخر. حاول تغيير كلمة المرور مجددًا." }, 409);
+}
+
 async function login(database: D1Database, request: Request): Promise<Response> {
   const payload = await request.json() as { email?: string; password?: string };
   const email = payload.email?.trim().toLowerCase() ?? "";
@@ -1504,6 +1634,10 @@ export async function handleAlmadinaApi(request: Request, database: D1Database):
 
     if (url.pathname === "/api/almadina/account/delete" && request.method === "POST") {
       return await deleteOwnAccount(database, request, session);
+    }
+
+    if (url.pathname === "/api/almadina/account/password" && request.method === "POST") {
+      return await changeOwnPassword(database, request, session);
     }
 
     if (url.pathname === "/api/almadina/collections/verify" && request.method === "POST") {

@@ -854,6 +854,57 @@ export default function AlmadinaApplication() {
     if (loggedOut) setAccountSwitcher(false);
   }
 
+  async function changePassword(currentPassword: string, newPassword: string, confirmPassword: string, signOutAllDevices: boolean): Promise<boolean> {
+    if (!user) {
+      showToast("يجب تسجيل الدخول أولًا.", "error");
+      return false;
+    }
+    if (!await waitForPendingUpdates()) {
+      showToast("انتظر اكتمال حفظ التغييرات ثم حاول تغيير كلمة المرور.", "error");
+      return false;
+    }
+
+    remoteMutationInFlight.current = true;
+    try {
+      const response = await fetch("/api/almadina/account/password", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword, signOutAllDevices }),
+      });
+      const payload = await response.json() as Partial<SharedSnapshot> & { success?: boolean; signedOut?: boolean; error?: string };
+      if (!response.ok || !payload.success) {
+        throw new SharedApiError(payload.error ?? "تعذّر تغيير كلمة المرور.", response.status);
+      }
+
+      if (payload.signedOut) {
+        clearLocalSession();
+        showToast("تم تغيير كلمة المرور. سجّل الدخول الآن بكلمة المرور الجديدة.");
+      } else {
+        if (!payload.database || !Number.isSafeInteger(payload.revision) || payload.userId !== user.id) {
+          throw new SharedApiError("تم تغيير كلمة المرور، لكن تعذّر تحديث الجلسة. سجّل الدخول مجددًا.", 401);
+        }
+        authoritativeDatabase.current = payload.database;
+        visibleDatabase.current = payload.database;
+        serverRevision.current = payload.revision!;
+        setDatabase(payload.database);
+        showToast("تم تغيير كلمة المرور بنجاح.");
+      }
+      return true;
+    } catch (error) {
+      if (error instanceof SharedApiError) {
+        if (error.status === 401) clearLocalSession();
+        showToast(error.message, "error");
+        return false;
+      }
+      showToast("تعذّر تغيير كلمة المرور. تحقق من الاتصال وحاول مجددًا.", "error");
+      return false;
+    } finally {
+      remoteMutationInFlight.current = false;
+    }
+  }
+
   async function deleteAccount(password: string, confirmation: string): Promise<boolean> {
     if (!user || user.role === "admin") {
       showToast("لا يمكن حذف حساب المسؤول من داخل التطبيق.", "error");
@@ -939,7 +990,7 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, register, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, register, changePassword, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

@@ -14,6 +14,7 @@ export type View =
   | "recipients"
   | "settings"
   | "security"
+  | "change-password"
   | "delete-account"
   | "notification-settings"
   | "preferences"
@@ -57,6 +58,7 @@ export type AppContextValue = {
   loginWithBiometric: () => Promise<boolean>;
   logout: () => Promise<boolean>;
   register: (values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">) => Promise<boolean>;
+  changePassword: (currentPassword: string, newPassword: string, confirmPassword: string, signOutAllDevices: boolean) => Promise<boolean>;
   deleteAccount: (password: string, confirmation: string) => Promise<boolean>;
   verifyCollectionCode: (invoiceId: string, verificationCode: string) => Promise<boolean>;
   shipScannedOrder: (trackingNumber: string) => Promise<boolean>;

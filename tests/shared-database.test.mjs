@@ -2287,3 +2287,247 @@ test("deletes only the authenticated eligible account and preserves every other 
   assert.equal(preservedOrder.courierName, "مندوب سابق");
   assert.equal(preservedOrder.trackingEvents[0].actor, "مندوب سابق");
 });
+
+test("changes only the authenticated account password and optionally revokes every session and biometric credential", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+
+  const target = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("صاحب كلمة المرور", "password-owner@example.test", "0595555555"),
+  });
+  assert.equal(target.status, 201);
+  const firstCookie = sessionFrom(target);
+
+  const secondDevice = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "password-owner@example.test", password: "Customer@123" },
+  });
+  assert.equal(secondDevice.status, 200);
+  const secondCookie = sessionFrom(secondDevice);
+
+  const unrelated = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("حساب غير مستهدف", "password-keep@example.test", "0596666666"),
+  });
+  assert.equal(unrelated.status, 201);
+  const unrelatedCookie = sessionFrom(unrelated);
+  const targetId = target.body.userId;
+  const unrelatedId = unrelated.body.userId;
+
+  database.appLocks.set(targetId, {
+    user_id: targetId,
+    pin_hash: "pbkdf2:test",
+    enabled: 1,
+    biometric_enabled: 1,
+    failed_attempts: 0,
+    locked_until: 0,
+  });
+  database.credentials.set("credential-target", { credential_id: "credential-target", user_id: targetId });
+  database.passkeyLoginCredentials.set("credential-target", { credential_id: "credential-target", user_id: targetId });
+  database.challenges.set("target:registration", { user_id: targetId });
+  database.credentials.set("credential-unrelated", { credential_id: "credential-unrelated", user_id: unrelatedId });
+  database.passkeyLoginCredentials.set("credential-unrelated", { credential_id: "credential-unrelated", user_id: unrelatedId });
+  database.challenges.set("unrelated:registration", { user_id: unrelatedId });
+
+  const anonymous = await call(worker, database, "account/password", {
+    method: "POST",
+    payload: {
+      currentPassword: "Customer@123",
+      newPassword: "كلمةNew!123",
+      confirmPassword: "كلمةNew!123",
+      signOutAllDevices: false,
+    },
+  });
+  assert.equal(anonymous.status, 401);
+
+  const forgedOrigin = await call(worker, database, "account/password", {
+    method: "POST",
+    cookie: firstCookie,
+    origin: "https://attacker.example",
+    payload: {
+      currentPassword: "Customer@123",
+      newPassword: "كلمةNew!123",
+      confirmPassword: "كلمةNew!123",
+      signOutAllDevices: false,
+    },
+  });
+  assert.equal(forgedOrigin.status, 403);
+
+  const initialRevision = database.state.revision;
+  const initialState = JSON.parse(database.state.payload);
+  const initialTarget = structuredClone(initialState.users.find((account) => account.id === targetId));
+  const initialUnrelated = structuredClone(initialState.users.find((account) => account.id === unrelatedId));
+
+  const mismatch = await call(worker, database, "account/password", {
+    method: "POST",
+    cookie: firstCookie,
+    payload: {
+      currentPassword: "Customer@123",
+      newPassword: "كلمةNew!123",
+      confirmPassword: "مختلفةNew!123",
+      signOutAllDevices: false,
+    },
+  });
+  assert.equal(mismatch.status, 400);
+
+  const weak = await call(worker, database, "account/password", {
+    method: "POST",
+    cookie: firstCookie,
+    payload: {
+      currentPassword: "Customer@123",
+      newPassword: "abcdefgh",
+      confirmPassword: "abcdefgh",
+      signOutAllDevices: false,
+    },
+  });
+  assert.equal(weak.status, 400);
+
+  const wrongCurrent = await call(worker, database, "account/password", {
+    method: "POST",
+    cookie: firstCookie,
+    payload: {
+      currentPassword: "Wrong@123",
+      newPassword: "كلمةNew!123",
+      confirmPassword: "كلمةNew!123",
+      signOutAllDevices: false,
+    },
+  });
+  assert.equal(wrongCurrent.status, 403);
+  assert.equal(database.state.revision, initialRevision);
+  assert.equal(JSON.parse(database.state.payload).users.find((account) => account.id === targetId).password, initialTarget.password);
+
+  const changedWithoutRevocation = await call(worker, database, "account/password", {
+    method: "POST",
+    cookie: firstCookie,
+    payload: {
+      currentPassword: "Customer@123",
+      newPassword: "كلمةNew!123",
+      confirmPassword: "كلمةNew!123",
+      signOutAllDevices: false,
+      userId: unrelatedId,
+    },
+  });
+  assert.equal(changedWithoutRevocation.status, 200);
+  assert.equal(changedWithoutRevocation.body.success, true);
+  assert.equal(changedWithoutRevocation.body.signedOut, false);
+  assert.equal(changedWithoutRevocation.body.userId, targetId);
+  assert.equal(changedWithoutRevocation.body.database.users[0].password, "");
+  const rotatedCookie = sessionFrom(changedWithoutRevocation);
+  assert.notEqual(rotatedCookie, firstCookie);
+  assert.equal(database.state.revision, initialRevision + 1);
+
+  const stateAfterFirstChange = JSON.parse(database.state.payload);
+  const savedTarget = stateAfterFirstChange.users.find((account) => account.id === targetId);
+  const savedUnrelated = stateAfterFirstChange.users.find((account) => account.id === unrelatedId);
+  assert.match(savedTarget.password, /^pbkdf2:100000:/);
+  assert.ok(!savedTarget.password.includes("كلمةNew!123"));
+  assert.deepEqual({ ...savedTarget, password: initialTarget.password }, initialTarget);
+  assert.deepEqual(savedUnrelated, initialUnrelated);
+  assert.equal((await call(worker, database, "database", { cookie: firstCookie })).status, 401);
+  assert.equal((await call(worker, database, "database", { cookie: rotatedCookie })).status, 200);
+  assert.equal((await call(worker, database, "database", { cookie: secondCookie })).status, 200);
+  assert.equal(database.credentials.has("credential-target"), true);
+  assert.equal(database.passkeyLoginCredentials.has("credential-target"), true);
+  assert.equal(database.challenges.has("target:registration"), true);
+  assert.equal(database.appLocks.get(targetId).biometric_enabled, 1);
+
+  const oldPasswordLogin = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "password-owner@example.test", password: "Customer@123" },
+  });
+  assert.equal(oldPasswordLogin.status, 401);
+  const newPasswordLogin = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "password-owner@example.test", password: "كلمةNew!123" },
+  });
+  assert.equal(newPasswordLogin.status, 200);
+  assert.equal(newPasswordLogin.body.database.users[0].password, "");
+  const newPasswordCookie = sessionFrom(newPasswordLogin);
+
+  const changedEverywhere = await call(worker, database, "account/password", {
+    method: "POST",
+    cookie: newPasswordCookie,
+    payload: {
+      currentPassword: "كلمةNew!123",
+      newPassword: "أمانFinal!456",
+      confirmPassword: "أمانFinal!456",
+      signOutAllDevices: true,
+    },
+  });
+  assert.equal(changedEverywhere.status, 200);
+  assert.deepEqual(changedEverywhere.body, { success: true, signedOut: true });
+  const clearedCookies = changedEverywhere.headers.get("set-cookie") ?? "";
+  assert.match(clearedCookies, /almadina_session=/);
+  assert.match(clearedCookies, /almadina_passkey_login=/);
+  assert.match(clearedCookies, /Max-Age=0/);
+  assert.equal(database.state.revision, initialRevision + 2);
+  assert.equal([...database.sessions.values()].some((session) => session.user_id === targetId), false);
+  assert.equal(database.credentials.has("credential-target"), false);
+  assert.equal(database.passkeyLoginCredentials.has("credential-target"), false);
+  assert.equal(database.challenges.has("target:registration"), false);
+  assert.equal(database.appLocks.get(targetId).enabled, 1);
+  assert.equal(database.appLocks.get(targetId).biometric_enabled, 0);
+
+  assert.equal(database.credentials.has("credential-unrelated"), true);
+  assert.equal(database.passkeyLoginCredentials.has("credential-unrelated"), true);
+  assert.equal(database.challenges.has("unrelated:registration"), true);
+  assert.equal((await call(worker, database, "database", { cookie: unrelatedCookie })).status, 200);
+  assert.equal((await call(worker, database, "database", { cookie: firstCookie })).status, 401);
+  assert.equal((await call(worker, database, "database", { cookie: rotatedCookie })).status, 401);
+  assert.equal((await call(worker, database, "database", { cookie: secondCookie })).status, 401);
+  assert.equal((await call(worker, database, "database", { cookie: newPasswordCookie })).status, 401);
+
+  assert.equal((await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "password-owner@example.test", password: "كلمةNew!123" },
+  })).status, 401);
+  const finalLogin = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "password-owner@example.test", password: "أمانFinal!456" },
+  });
+  assert.equal(finalLogin.status, 200);
+  assert.equal(finalLogin.body.userId, targetId);
+});
+
+test("rate limits repeated wrong current-password attempts without changing hosted data", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const registration = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("حساب تحديد المحاولات", "password-rate@example.test", "0597777777"),
+  });
+  assert.equal(registration.status, 201);
+  const cookie = sessionFrom(registration);
+  const revision = database.state.revision;
+  const passwordHash = JSON.parse(database.state.payload).users.find((account) => account.id === registration.body.userId).password;
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const rejected = await call(worker, database, "account/password", {
+      method: "POST",
+      cookie,
+      payload: {
+        currentPassword: `Wrong@12${attempt}`,
+        newPassword: "قويةNew!123",
+        confirmPassword: "قويةNew!123",
+        signOutAllDevices: true,
+      },
+    });
+    assert.equal(rejected.status, 403);
+  }
+
+  const limited = await call(worker, database, "account/password", {
+    method: "POST",
+    cookie,
+    payload: {
+      currentPassword: "Customer@123",
+      newPassword: "قويةNew!123",
+      confirmPassword: "قويةNew!123",
+      signOutAllDevices: true,
+    },
+  });
+  assert.equal(limited.status, 429);
+  assert.equal(database.state.revision, revision);
+  assert.equal(JSON.parse(database.state.payload).users.find((account) => account.id === registration.body.userId).password, passwordHash);
+  assert.equal((await call(worker, database, "database", { cookie })).status, 200);
+});
