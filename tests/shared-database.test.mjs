@@ -1,5 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createSeedDatabase, removeLegacyDemoData } from "../app/lib/data.ts";
+
+test("normalizes legacy shipped collection invoices as delivered and paid", () => {
+  const database = createSeedDatabase();
+  const now = new Date().toISOString();
+  const merchant = {
+    id: "merchant-legacy-collection",
+    name: "تاجر فاتورة قديمة",
+    email: "legacy-collection@example.test",
+    password: "Customer@123",
+    phone: "0591111111",
+    store: "متجر الفاتورة القديمة",
+    role: "merchant",
+    joinedAt: now,
+  };
+  database.users.push(merchant);
+  database.collections.push({
+    id: "legacy-shipped-collection",
+    merchantId: merchant.id,
+    merchantName: merchant.name,
+    invoiceNumber: "#LEGACY-1",
+    orderIds: [],
+    grossAmount: 100,
+    deliveryFees: 20,
+    returnFees: 0,
+    netAmount: 80,
+    deliveredCount: 1,
+    returnedCount: 0,
+    status: "shipped",
+    verificationCode: "1234",
+    authorizedRecipient: "المستلم المفوض",
+    createdAt: now,
+    updatedAt: now,
+    scheduledAt: now,
+    shippedAt: now,
+    verifiedAt: now,
+  });
+
+  const normalized = removeLegacyDemoData(database);
+  assert.equal(normalized.collections[0].status, "paid");
+  assert.equal(normalized.collections[0].paidAt, now);
+});
 
 class FakeD1Statement {
   constructor(database, sql, values = []) {
@@ -1362,7 +1404,7 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(stillReady.verifiedAt, undefined);
   assert.equal(stillReady.verifiedById, undefined);
   assert.equal(stillReady.verifiedByName, undefined);
-  assert.equal(stillReady.shippedAt, undefined);
+  assert.equal(stillReady.paidAt, undefined);
 
   const verifiedCollection = await call(worker, database, "collections/verify", {
     method: "POST",
@@ -1371,29 +1413,29 @@ test("shares accounts and orders across devices while isolating customers and pr
   });
   assert.equal(verifiedCollection.status, 200);
   const afterCourierVerification = await call(worker, database, "database", { cookie: adminCookie });
-  const shippedInvoice = afterCourierVerification.body.database.collections.find((invoice) => invoice.id === invoiceId);
-  assert.equal(shippedInvoice.status, "shipped");
-  assert.equal(shippedInvoice.verifiedById, employeeAccount.id);
-  assert.equal(shippedInvoice.verifiedByName, employeeAccount.name);
-  assert.match(shippedInvoice.verifiedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.match(shippedInvoice.shippedAt, /^\d{4}-\d{2}-\d{2}T/);
+  const deliveredInvoice = afterCourierVerification.body.database.collections.find((invoice) => invoice.id === invoiceId);
+  assert.equal(deliveredInvoice.status, "paid");
+  assert.equal(deliveredInvoice.verifiedById, employeeAccount.id);
+  assert.equal(deliveredInvoice.verifiedByName, employeeAccount.name);
+  assert.match(deliveredInvoice.verifiedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(deliveredInvoice.paidAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(afterCourierVerification.body.database.notices.length, noticeCountBeforeVerification + 1);
   assert.ok(afterCourierVerification.body.database.notices.some((notice) => notice.userId === firstDevice.body.userId));
 
-  const shippedForMerchant = await call(worker, database, "database", { cookie: secondCookie });
-  assert.equal(shippedForMerchant.body.database.collections[0].status, "shipped");
-  assert.equal(shippedForMerchant.body.database.collections[0].netAmount, 58);
-  assert.ok(shippedForMerchant.body.database.notices.some((notice) => notice.userId === firstDevice.body.userId));
+  const deliveredForMerchant = await call(worker, database, "database", { cookie: secondCookie });
+  assert.equal(deliveredForMerchant.body.database.collections[0].status, "paid");
+  assert.equal(deliveredForMerchant.body.database.collections[0].netAmount, 58);
+  assert.ok(deliveredForMerchant.body.database.notices.some((notice) => notice.userId === firstDevice.body.userId));
 
   const merchantNoteText = "يرجى الاتصال بالمستلم قبل التوصيل.";
   const merchantNote = await call(worker, database, "database", {
     method: "PUT",
     cookie: secondCookie,
     payload: {
-      revision: shippedForMerchant.body.revision,
+      revision: deliveredForMerchant.body.revision,
       database: {
-        ...shippedForMerchant.body.database,
-        orders: shippedForMerchant.body.database.orders.map((item) => item.id === order.id ? {
+        ...deliveredForMerchant.body.database,
+        orders: deliveredForMerchant.body.database.orders.map((item) => item.id === order.id ? {
           ...item,
           status: "returned",
           trackingEvents: [...(item.trackingEvents ?? []), {
@@ -1591,7 +1633,7 @@ test("rate limits repeated courier collection-code attempts without changing the
   assert.equal(unchangedInvoice.verifiedAt, undefined);
   assert.equal(unchangedInvoice.verifiedById, undefined);
   assert.equal(unchangedInvoice.verifiedByName, undefined);
-  assert.equal(unchangedInvoice.shippedAt, undefined);
+  assert.equal(unchangedInvoice.paidAt, undefined);
 });
 
 test("rate limits a courier after twenty collection-code attempts across different invoices", async () => {
@@ -1690,7 +1732,7 @@ test("rate limits a courier after twenty collection-code attempts across differe
   assert.equal(unchanged.status, 200);
   assert.equal(unchanged.body.database.collections.length, invoices.length);
   assert.ok(unchanged.body.database.collections.every((invoice) => invoice.status === "ready"));
-  assert.ok(unchanged.body.database.collections.every((invoice) => invoice.verifiedAt === undefined && invoice.shippedAt === undefined));
+  assert.ok(unchanged.body.database.collections.every((invoice) => invoice.verifiedAt === undefined && invoice.paidAt === undefined));
 });
 
 test("allows only the administrator to change merchant and courier account fields", async () => {
@@ -2389,7 +2431,7 @@ test("deletes only the authenticated eligible account and preserves every other 
   assert.equal(blockedByOperations.body.activeOrderCount, 1);
   assert.equal(blockedByOperations.body.unsettledCollectionCount, 1);
 
-  const settled = await call(worker, database, "database", {
+  const readyForDelivery = await call(worker, database, "database", {
     method: "PUT",
     cookie: adminCookie,
     payload: {
@@ -2397,11 +2439,21 @@ test("deletes only the authenticated eligible account and preserves every other 
       database: {
         ...prepared.body.database,
         orders: prepared.body.database.orders.map((order) => order.id === ownedOrder.id ? { ...order, status: "delivered", updatedAt: now } : order),
-        collections: prepared.body.database.collections.map((invoice) => invoice.id === ownedCollection.id ? { ...invoice, status: "paid", paidAt: now, updatedAt: now } : invoice),
+        collections: prepared.body.database.collections.map((invoice) => invoice.id === ownedCollection.id ? { ...invoice, status: "ready", updatedAt: now } : invoice),
       },
     },
   });
+  assert.equal(readyForDelivery.status, 200);
+
+  const settled = await call(worker, database, "collections/verify", {
+    method: "POST",
+    cookie: adminCookie,
+    payload: { invoiceId: ownedCollection.id, verificationCode: ownedCollection.verificationCode },
+  });
   assert.equal(settled.status, 200);
+  const settledInvoice = settled.body.database.collections.find((invoice) => invoice.id === ownedCollection.id);
+  assert.equal(settledInvoice.status, "paid");
+  assert.match(settledInvoice.paidAt, /^\d{4}-\d{2}-\d{2}T/);
 
   const wrongConfirmation = await call(worker, database, "account/delete", {
     method: "POST",

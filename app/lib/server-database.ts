@@ -1139,10 +1139,10 @@ function collectionForCourier(invoice: CollectionInvoice): CollectionInvoice {
     createdAt: "",
     updatedAt: "",
     scheduledAt: "",
-    shippedAt: invoice.status === "shipped" ? invoice.shippedAt : undefined,
-    verifiedAt: invoice.status === "shipped" ? invoice.verifiedAt : undefined,
-    verifiedById: invoice.status === "shipped" ? invoice.verifiedById : undefined,
-    verifiedByName: invoice.status === "shipped" ? invoice.verifiedByName : undefined,
+    verifiedAt: invoice.status === "paid" ? invoice.verifiedAt : undefined,
+    verifiedById: invoice.status === "paid" ? invoice.verifiedById : undefined,
+    verifiedByName: invoice.status === "paid" ? invoice.verifiedByName : undefined,
+    paidAt: invoice.status === "paid" ? invoice.paidAt : undefined,
   };
 }
 
@@ -1163,7 +1163,7 @@ function scopeDatabase(database: Database, account: User): Database {
         .map(orderForCourier),
       recipients: [],
       collections: database.collections
-        .filter((invoice) => invoice.status === "ready" || (invoice.status === "shipped" && invoice.verifiedById === account.id))
+        .filter((invoice) => invoice.status === "ready" || (invoice.status === "paid" && invoice.verifiedById === account.id))
         .map(collectionForCourier),
       notices: database.notices.filter((notice) => notice.userId === account.id),
       preferences: database.preferences[account.id] ? { [account.id]: database.preferences[account.id] } : {},
@@ -2122,8 +2122,7 @@ async function verifyCollection(database: D1Database, request: Request, session:
     if (employee.role === "courier" && invoice.verificationCode !== verificationCode) {
       return json({ error: courierInvalidMessage }, 422);
     }
-    if (invoice.status === "shipped") return json({ error: "تم اعتماد هذا الكود وشحن التحصيل مسبقًا." }, 409);
-    if (invoice.status === "paid") return json({ error: "تم إكمال هذه الفاتورة مسبقًا." }, 409);
+    if (invoice.status === "paid") return json({ error: "تم تسليم هذه الفاتورة مسبقًا." }, 409);
     if (invoice.status !== "ready") return json({ error: "يجب تجهيز الفاتورة قبل قراءة كود التحقق." }, 409);
     if (employee.role === "admin" && invoice.verificationCode !== verificationCode) {
       return json({ error: "كود التحقق غير صحيح." }, 422);
@@ -2134,8 +2133,8 @@ async function verifyCollection(database: D1Database, request: Request, session:
       ...state.database,
       collections: state.database.collections.map((entry) => entry.id === invoice.id ? {
         ...entry,
-        status: "shipped",
-        shippedAt: now,
+        status: "paid",
+        paidAt: now,
         verifiedAt: now,
         verifiedById: employee.id,
         verifiedByName: employee.name,
@@ -2144,8 +2143,8 @@ async function verifyCollection(database: D1Database, request: Request, session:
       notices: [{
         id: uid("notice"),
         userId: invoice.merchantId,
-        title: "تم شحن التحصيل",
-        message: `تحقق الموظف من كود الفاتورة ${invoice.invoiceNumber} وأصبحت حالة التحصيل «مشحون».`,
+        title: "تم تسليم التحصيل",
+        message: `تحقق الموظف من كود الفاتورة ${invoice.invoiceNumber} وأصبحت حالة الفاتورة «تم التسليم».`,
         icon: "check",
         read: false,
         createdAt: now,

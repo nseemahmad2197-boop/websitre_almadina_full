@@ -261,7 +261,7 @@ export function DeleteAccountPage() {
       <ol className="delete-account-requirements">
         <li className={unsettledCollectionCount === 0 ? "is-complete" : "is-blocked"}><span><Icon name={unsettledCollectionCount === 0 ? "check" : "alert"} size={18} /></span><p>إكمال جميع معاملات التحصيل والحسابات المالية المعلّقة.</p></li>
         <li className={activeOrderCount === 0 ? "is-complete" : "is-blocked"}><span><Icon name={activeOrderCount === 0 ? "check" : "alert"} size={18} /></span><p>ألا توجد طرود نشطة؛ يجب أن تكون جميع الطرود واصلة أو راجعة.</p></li>
-        {user.role === "merchant" && <li className={unsettledOrderCount === 0 ? "is-complete" : "is-blocked"}><span><Icon name={unsettledOrderCount === 0 ? "check" : "alert"} size={18} /></span><p>إدراج كل طرد مكتمل في فاتورة تحصيل مدفوعة واستلام مستحقاته.</p></li>}
+        {user.role === "merchant" && <li className={unsettledOrderCount === 0 ? "is-complete" : "is-blocked"}><span><Icon name={unsettledOrderCount === 0 ? "check" : "alert"} size={18} /></span><p>إدراج كل طرد مكتمل في فاتورة تحصيل تم تسليمها واستلام مستحقاته.</p></li>}
         <li><span><Icon name="download" size={18} /></span><p>تنزيل أي فواتير أو سجلات تحتاج إليها؛ لن تتمكن من استعادتها بعد الحذف.</p></li>
         <li><span><Icon name="shield" size={18} /></span><p>الحذف نهائي وفوري بعد التأكيد، ويزيل الحساب وبياناته المرتبطة ولا يمكن التراجع عنه.</p></li>
       </ol>
@@ -303,7 +303,7 @@ const faqs = [
   { question: "كيف أضيف طردًا جديدًا؟", answer: "اضغط على زر + أسفل الشاشة، أدخل بيانات المستلم والعنوان وقيمة الطرد، ثم اضغط إنشاء الطرد." },
   { question: "متى يصل الطرد للعميل؟", answer: "عادة تصل الطرود داخل المحافظة في اليوم نفسه، وبين المحافظات خلال يوم إلى يومي عمل حسب المنطقة." },
   { question: "كيف أستلم المبالغ المحصلة؟", answer: "تُجمع مبالغ الدفع عند الاستلام وتُضاف إلى رصيد متجرك، ثم تُحوّل بحسب جدول التحويل المتفق عليه." },
-  { question: "كيف أستلم مبالغ التحصيل؟", answer: "أنشئ فاتورة من تبويب التحصيلات بعد وصول الطرود. عندما تصبح جاهزة، اعرض رمز التحقق للموظف؛ وبعد قراءة الرمز الصحيح تتغير حالة التحصيل مباشرة إلى «مشحون»." },
+  { question: "كيف أستلم مبالغ التحصيل؟", answer: "أنشئ فاتورة من تبويب التحصيلات بعد وصول الطرود. عندما تصبح جاهزة، اعرض رمز التحقق للموظف؛ وبعد قراءة الرمز الصحيح تتغير حالة الفاتورة مباشرة إلى «تم التسليم»." },
 ];
 
 export function HelpPage() {

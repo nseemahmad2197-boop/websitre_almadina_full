@@ -28,8 +28,7 @@ export function ReturnsPage() {
 const collectionStatus = {
   pending: { label: "قيد التجهيز", icon: "clock" as const },
   ready: { label: "جاهزة للتحويل", icon: "wallet" as const },
-  shipped: { label: "مشحون", icon: "truck" as const },
-  paid: { label: "تم التحويل", icon: "check" as const },
+  paid: { label: "تم التسليم", icon: "check" as const },
 };
 
 function createVerificationCode() {
@@ -50,7 +49,7 @@ export function CollectionsPage() {
   const availableAmount = eligibleOrders.reduce((sum, order) => sum + (order.status === "delivered" ? order.amount - order.deliveryFee : -order.deliveryFee), 0);
   const pendingAmount = invoices.filter((invoice) => invoice.status === "pending").reduce((sum, invoice) => sum + invoice.netAmount, 0);
   const readyAmount = invoices.filter((invoice) => invoice.status === "ready").reduce((sum, invoice) => sum + invoice.netAmount, 0);
-  const shippedAmount = invoices.filter((invoice) => invoice.status === "shipped" || invoice.status === "paid").reduce((sum, invoice) => sum + invoice.netAmount, 0);
+  const deliveredAmount = invoices.filter((invoice) => invoice.status === "paid").reduce((sum, invoice) => sum + invoice.netAmount, 0);
 
   function createInvoice() {
     if (!user || !eligibleOrders.length) return showToast("لا توجد طرود واصلة أو رواجع جديدة لإنشاء فاتورة.", "error");
@@ -147,13 +146,13 @@ export function CollectionsPage() {
       <div className="collection-metrics">
         <article><span><Icon name="clock" size={18} /></span><strong>{money(pendingAmount)} ₪</strong><small>قيد التجهيز</small></article>
         <article><span><Icon name="wallet" size={18} /></span><strong>{money(readyAmount)} ₪</strong><small>جاهز للتحويل</small></article>
-        <article><span><Icon name="truck" size={18} /></span><strong>{money(shippedAmount)} ₪</strong><small>مشحون</small></article>
+        <article><span><Icon name="check" size={18} /></span><strong>{money(deliveredAmount)} ₪</strong><small>تم التسليم</small></article>
       </div>
 
       {invoices.length ? <div className="collection-list">{invoices.map((invoice) => {
         const status = collectionStatus[invoice.status];
         return <button type="button" className="collection-card" key={invoice.id} onClick={() => setSelectedId(invoice.id)}>
-          <div className="collection-card__main"><strong dir="ltr">{invoice.invoiceNumber}</strong><span className={`collection-status collection-status--${invoice.status}`}><Icon name={status.icon} size={13} />{status.label}</span><dl><div><dt><Icon name="calendar" size={13} />تاريخ الإنشاء</dt><dd>{formatDate(invoice.createdAt)}</dd></div><div><dt><Icon name="calendar" size={13} />موعد التحويل</dt><dd>{formatDate(invoice.paidAt ?? invoice.scheduledAt)}</dd></div></dl></div>
+          <div className="collection-card__main"><strong dir="ltr">{invoice.invoiceNumber}</strong><span className={`collection-status collection-status--${invoice.status}`}><Icon name={status.icon} size={13} />{status.label}</span><dl><div><dt><Icon name="calendar" size={13} />تاريخ الإنشاء</dt><dd>{formatDate(invoice.createdAt)}</dd></div><div><dt><Icon name="calendar" size={13} />موعد التسليم</dt><dd>{formatDate(invoice.paidAt ?? invoice.scheduledAt)}</dd></div></dl></div>
           <div className="collection-card__numbers"><strong>{money(invoice.netAmount)} <small>₪</small></strong><span><Icon name="check" size={13} />{invoice.deliveredCount} واصل</span><span><Icon name="return" size={13} />{invoice.returnedCount} راجع</span></div>
         </button>;
       })}</div> : <EmptyState icon="receipt" title="لا توجد فواتير تحصيل" description="بعد وصول الطرود ستتمكن من جمعها في فاتورة ومتابعة تحويل المبلغ." action={eligibleOrders.length ? "إنشاء فاتورة" : undefined} onAction={createInvoice} />}

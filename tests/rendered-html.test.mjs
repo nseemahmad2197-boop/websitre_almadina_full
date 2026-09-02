@@ -463,27 +463,28 @@ test("replaces compensation requests with responsive collection invoices and ver
   assert.match(management, /<strong>مستلم مفوض<\/strong>/);
   assert.match(management, /placeholder="الاسم"/);
   assert.doesNotMatch(management, /selectedInvoice\.status === "ready" && <div className="collection-detail__action"/);
-  assert.match(data, /status:\s*[^;]*"shipped"/);
+  assert.match(data, /status:\s*[^;]*"paid"/);
+  assert.match(data, /legacyStatus !== "shipped"/);
   assert.match(data, /verifiedAt\?: string/);
   assert.match(data, /verifiedById\?: string/);
   assert.match(data, /verifiedByName\?: string/);
-  assert.match(data, /shippedAt\?: string/);
+  assert.match(data, /paidAt\?: string/);
   assert.match(context, /verifyCollectionCode:\s*\(invoiceId: string, verificationCode: string\) => Promise<boolean>/);
   assert.match(application, /sharedRequest\("collections\/verify"/);
   assert.match(application, /body:\s*JSON\.stringify\(\{ invoiceId, verificationCode \}\)/);
   assert.match(server, /url\.pathname === ["']\/api\/almadina\/collections\/verify["']/);
   assert.match(server, /verificationCode/);
-  assert.match(server, /status:\s*"shipped"/);
+  assert.match(server, /status:\s*"paid"/);
   assert.match(server, /verifiedById:/);
   assert.match(server, /verifiedByName:/);
-  assert.match(server, /shippedAt:/);
+  assert.match(server, /paidAt:/);
   assert.match(admin, /verifyCollectionCode/);
   assert.match(admin, />(?:قراءة|إدخال) كود التحقق<\/Button>/);
   assert.match(admin, /<Modal title="[^"]*كود التحقق[^"]*"/);
   assert.match(admin, /inputMode="numeric"/);
   assert.match(admin, /maxLength=\{4\}/);
-  assert.match(admin, /(?:تحقق وشحن التحصيل|تأكيد وجعلها مشحون)/);
-  assert.match(admin, /"مشحون"/);
+  assert.match(admin, /تحقق وتسليم التحصيل/);
+  assert.match(admin, /"تم التسليم"/);
   assert.doesNotMatch(admin, /updateCollection\(invoice\.id, "paid"\)/);
   assert.match(styles, /\.collection-card\s*\{[^}]*grid-template-columns:/);
   assert.match(styles, /\.collection-detail-modal\s*\{[^}]*max-height:/);
@@ -494,7 +495,7 @@ test("replaces compensation requests with responsive collection invoices and ver
   assert.doesNotMatch(`${shell}\n${management}\n${settings}`, /التعويضات|طلب تعويض/);
 });
 
-test("lets courier employees verify a ready collection invoice with the customer's code", async () => {
+test("lets courier employees deliver a ready collection invoice with the customer's code", async () => {
   const [employee, server, context, application, styles] = await Promise.all([
     readFile(new URL("../app/components/employee.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
@@ -511,15 +512,16 @@ test("lets courier employees verify a ready collection invoice with the customer
   assert.match(employee, /كود تحقق فاتورة التحصيل|label="كود التحقق"/);
   assert.match(employee, /inputMode="numeric"/);
   assert.match(employee, /maxLength=\{4\}/);
-  assert.match(employee, /(?:تحقق وشحن التحصيل|تأكيد وجعلها مشحون)/);
-  assert.match(employee, /مشحون/);
+  assert.match(employee, /تحقق وتسليم التحصيل/);
+  assert.match(employee, /تم التسليم/);
   assert.match(context, /verifyCollectionCode:\s*\(invoiceId: string, verificationCode: string\) => Promise<boolean>/);
   assert.match(application, /sharedRequest\("collections\/verify"/);
   assert.match(verificationHandler, /"admin"/);
   assert.match(verificationHandler, /"courier"/);
   assert.match(verificationHandler, /status !== "ready"/);
   assert.match(verificationHandler, /invoice\.verificationCode !== verificationCode/);
-  assert.match(verificationHandler, /status:\s*"shipped"/);
+  assert.match(verificationHandler, /status:\s*"paid"/);
+  assert.match(verificationHandler, /paidAt:\s*now/);
   assert.match(verificationHandler, /verifiedById:\s*employee\.id/);
   assert.match(verificationHandler, /verifiedByName:\s*employee\.name/);
   assert.match(server, /merchantId:\s*""/);
@@ -568,7 +570,7 @@ test("lets courier employees scan a ready parcel with the camera and mark it shi
   assert.match(server, /session\.account\.role !== "courier"/);
   assert.match(server, /invoice|trackingNumber/);
   assert.match(server, /status !== "ready"/);
-  assert.match(server, /status:\s*"shipped"/);
+  assert.match(server, /appendOrderTrackingEvent\(\s*order,\s*"shipped"/);
   assert.match(server, /courierName:\s*(?:employee|account)\.name/);
   assert.match(server, /appendOrderTrackingEvent|createTrackingEvent/);
   assert.match(server, /notices:/);
@@ -1192,7 +1194,7 @@ test("shows a reference-style account deletion page and performs deletion only t
   assert.match(settings, /قبل حذف حسابك/);
   assert.match(settings, /إكمال جميع معاملات التحصيل/);
   assert.match(settings, /ألا توجد طرود نشطة/);
-  assert.match(settings, /إدراج كل طرد مكتمل في فاتورة تحصيل مدفوعة/);
+  assert.match(settings, /إدراج كل طرد مكتمل في فاتورة تحصيل تم تسليمها/);
   assert.match(settings, /الحذف نهائي وفوري بعد التأكيد/);
   assert.match(settings, /disabled=\{!eligible\}/);
   assert.match(settings, /اكتب «حذف حسابي» للتأكيد/);

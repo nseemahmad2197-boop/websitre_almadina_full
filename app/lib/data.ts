@@ -107,12 +107,13 @@ export type CollectionInvoice = {
   netAmount: number;
   deliveredCount: number;
   returnedCount: number;
-  status: "pending" | "ready" | "shipped" | "paid";
+  status: "pending" | "ready" | "paid";
   verificationCode: string;
   authorizedRecipient: string;
   createdAt: string;
   updatedAt: string;
   scheduledAt: string;
+  /** وقت الإكمال القديم لفواتير كانت تُحفظ بحالة shipped قبل توحيد حالة التسليم. */
   shippedAt?: string;
   verifiedAt?: string;
   verifiedById?: string;
@@ -450,11 +451,25 @@ export function removeLegacyDemoData(database: Database & { compensations?: unkn
       return courierId ? { ...order, courierId } : order;
     });
 
+  const collections = (database.collections ?? [])
+    .filter((invoice) => merchantIds.has(invoice.merchantId))
+    .map((invoice) => {
+      const legacyStatus = String(invoice.status);
+      if (legacyStatus !== "shipped" && legacyStatus !== "delivered") return invoice;
+
+      const legacyDeliveredAt = (invoice as CollectionInvoice & { deliveredAt?: string }).deliveredAt;
+      return {
+        ...invoice,
+        status: "paid" as const,
+        paidAt: invoice.paidAt ?? legacyDeliveredAt ?? invoice.verifiedAt ?? invoice.shippedAt ?? invoice.updatedAt,
+      };
+    });
+
   return {
     users,
     orders,
     recipients: database.recipients.filter((recipient) => merchantIds.has(recipient.merchantId)),
-    collections: (database.collections ?? []).filter((invoice) => merchantIds.has(invoice.merchantId)),
+    collections,
     notices: database.notices.filter((notice) => accountIds.has(notice.userId)),
     preferences: Object.fromEntries(Object.entries(database.preferences ?? {})
       .filter(([accountId]) => accountIds.has(accountId))

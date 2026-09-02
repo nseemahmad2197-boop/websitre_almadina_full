@@ -530,7 +530,7 @@ export default function AlmadinaApplication() {
       serverRevision.current = snapshot.revision;
       pendingUpdates.current = [];
       setDatabase(snapshot.database);
-      showToast("تم التحقق من الكود وتحديث حالة التحصيل إلى «مشحون».");
+      showToast("تم التحقق من الكود وتحديث حالة الفاتورة إلى «تم التسليم».");
       return true;
     } catch (error) {
       if (error instanceof SharedApiError) {
