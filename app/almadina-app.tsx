@@ -232,6 +232,7 @@ export default function AlmadinaApplication() {
   const remoteMutationInFlight = useRef(false);
   const savingUpdates = useRef(false);
   const logoutInFlight = useRef(false);
+  const sessionEpoch = useRef(0);
   const storedThemePreference = useRef<ThemePreference | null>(null);
   const knownNoticeIds = useRef<Set<string>>(new Set());
   const noticeBaselineUserId = useRef<string | null>(null);
@@ -332,6 +333,7 @@ export default function AlmadinaApplication() {
           try { localStorage.setItem(THEME_STORAGE_KEY, accountTheme); } catch { /* Browser storage is optional. */ }
         }
 
+        sessionEpoch.current += 1;
         authoritativeDatabase.current = snapshot.database;
         visibleDatabase.current = snapshot.database;
         serverRevision.current = snapshot.revision;
@@ -447,11 +449,12 @@ export default function AlmadinaApplication() {
   }, [userId]);
 
   async function savePendingUpdates(): Promise<void> {
-    if (savingUpdates.current || remoteMutationInFlight.current || !authoritativeDatabase.current) return;
+    if (savingUpdates.current || remoteMutationInFlight.current || logoutInFlight.current || !authoritativeDatabase.current) return;
+    const operationEpoch = sessionEpoch.current;
     savingUpdates.current = true;
 
     try {
-      while (pendingUpdates.current.length && authoritativeDatabase.current) {
+      while (pendingUpdates.current.length && authoritativeDatabase.current && !logoutInFlight.current) {
         const update = pendingUpdates.current[0];
         const next = update(authoritativeDatabase.current);
 
@@ -460,6 +463,7 @@ export default function AlmadinaApplication() {
             method: "PUT",
             body: JSON.stringify({ database: next, revision: serverRevision.current }),
           });
+          if (operationEpoch !== sessionEpoch.current) return;
 
           rememberSnapshotAccount(snapshot);
           authoritativeDatabase.current = snapshot.database;
@@ -468,6 +472,7 @@ export default function AlmadinaApplication() {
           visibleDatabase.current = pendingUpdates.current.reduce((current, pending) => pending(current), snapshot.database);
           setDatabase(visibleDatabase.current);
         } catch (error) {
+          if (operationEpoch !== sessionEpoch.current || logoutInFlight.current) return;
           if (error instanceof SharedApiError && error.status === 409 && error.snapshot) {
             authoritativeDatabase.current = error.snapshot.database;
             serverRevision.current = error.snapshot.revision;
@@ -482,6 +487,20 @@ export default function AlmadinaApplication() {
             setUserId(null);
             setViewState("home");
             showToast("انتهت الجلسة. سجّل الدخول مرة أخرى.", "error");
+            return;
+          }
+
+          if (
+            error instanceof SharedApiError
+            && error.status >= 400
+            && error.status < 500
+            && error.status !== 408
+            && error.status !== 429
+          ) {
+            pendingUpdates.current = [];
+            visibleDatabase.current = authoritativeDatabase.current;
+            setDatabase(authoritativeDatabase.current);
+            showToast(`${error.message} لم يُطبّق التعديل وأُعيدت آخر بيانات محفوظة.`, "error");
             return;
           }
 
@@ -520,11 +539,13 @@ export default function AlmadinaApplication() {
       return false;
     }
 
+    const operationEpoch = sessionEpoch.current;
     try {
       const snapshot = await sharedRequest("collections/verify", {
         method: "POST",
         body: JSON.stringify({ invoiceId, verificationCode }),
       });
+      if (operationEpoch !== sessionEpoch.current) return false;
       authoritativeDatabase.current = snapshot.database;
       visibleDatabase.current = snapshot.database;
       serverRevision.current = snapshot.revision;
@@ -533,6 +554,7 @@ export default function AlmadinaApplication() {
       showToast("تم التحقق من الكود وتحديث حالة الفاتورة إلى «تم التسليم».");
       return true;
     } catch (error) {
+      if (operationEpoch !== sessionEpoch.current) return false;
       if (error instanceof SharedApiError) {
         if (error.status === 401) clearLocalSession();
         showToast(error.message, "error");
@@ -556,6 +578,7 @@ export default function AlmadinaApplication() {
     const requestKey = JSON.stringify([values.audience, values.recipientUserId ?? "", values.title.trim(), values.message.trim()]);
     const requestId = broadcastRequestIds.current.get(requestKey) ?? uid("broadcast");
     broadcastRequestIds.current.set(requestKey, requestId);
+    const operationEpoch = sessionEpoch.current;
     remoteMutationInFlight.current = true;
 
     try {
@@ -563,6 +586,7 @@ export default function AlmadinaApplication() {
         method: "POST",
         body: JSON.stringify({ requestId, ...values }),
       });
+      if (operationEpoch !== sessionEpoch.current) return null;
       authoritativeDatabase.current = snapshot.database;
       serverRevision.current = snapshot.revision;
       visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), snapshot.database);
@@ -571,6 +595,7 @@ export default function AlmadinaApplication() {
       broadcastRequestIds.current.delete(requestKey);
       return recipientCount;
     } catch (error) {
+      if (operationEpoch !== sessionEpoch.current) return null;
       if (error instanceof SharedApiError) {
         if (error.snapshot) {
           authoritativeDatabase.current = error.snapshot.database;
@@ -597,18 +622,21 @@ export default function AlmadinaApplication() {
       return null;
     }
 
+    const operationEpoch = sessionEpoch.current;
     remoteMutationInFlight.current = true;
     try {
       const snapshot = await sharedRequest("notices/clear", {
         method: "POST",
         body: JSON.stringify({ noticeIds }),
       });
+      if (operationEpoch !== sessionEpoch.current) return null;
       authoritativeDatabase.current = snapshot.database;
       serverRevision.current = snapshot.revision;
       visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), snapshot.database);
       setDatabase(visibleDatabase.current);
       return snapshot.removedCount ?? 0;
     } catch (error) {
+      if (operationEpoch !== sessionEpoch.current) return null;
       if (error instanceof SharedApiError) {
         if (error.snapshot) {
           authoritativeDatabase.current = error.snapshot.database;
@@ -629,11 +657,13 @@ export default function AlmadinaApplication() {
   }
 
   async function shipScannedOrder(trackingNumber: string): Promise<boolean> {
+    const operationEpoch = sessionEpoch.current;
     try {
       const snapshot = await sharedRequest("orders/scan", {
         method: "POST",
         body: JSON.stringify({ trackingNumber }),
       });
+      if (operationEpoch !== sessionEpoch.current) return false;
       authoritativeDatabase.current = snapshot.database;
       visibleDatabase.current = snapshot.database;
       serverRevision.current = snapshot.revision;
@@ -642,6 +672,7 @@ export default function AlmadinaApplication() {
       showToast(`تم تحديث الطرد ${trackingNumber.trim().toUpperCase()} من «جاهز للإرسال» إلى «مشحون».`);
       return true;
     } catch (error) {
+      if (operationEpoch !== sessionEpoch.current) return false;
       if (error instanceof SharedApiError) {
         if (error.status === 401) clearLocalSession();
         showToast(error.message, "error");
@@ -763,6 +794,7 @@ export default function AlmadinaApplication() {
       try { localStorage.setItem(THEME_STORAGE_KEY, accountTheme); } catch { /* Browser storage is optional. */ }
     }
 
+    sessionEpoch.current += 1;
     authoritativeDatabase.current = snapshot.database;
     visibleDatabase.current = snapshot.database;
     serverRevision.current = snapshot.revision;
@@ -806,6 +838,7 @@ export default function AlmadinaApplication() {
   }
 
   function clearLocalSession() {
+    sessionEpoch.current += 1;
     authoritativeDatabase.current = null;
     pendingUpdates.current = [];
     broadcastRequestIds.current.clear();
@@ -824,11 +857,6 @@ export default function AlmadinaApplication() {
 
   async function logout(): Promise<boolean> {
     if (logoutInFlight.current) return false;
-    if (!await waitForPendingUpdates()) {
-      showToast("تعذّر تسجيل الخروج لأن بعض التغييرات لم تُحفظ بعد. انتظر لحظة ثم حاول مجددًا.", "error");
-      return false;
-    }
-
     logoutInFlight.current = true;
     try {
       const response = await fetch("/api/almadina/logout", {
@@ -839,9 +867,6 @@ export default function AlmadinaApplication() {
         body: "{}",
       });
       if (!response.ok) throw new Error("Logout request failed");
-      if (savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) {
-        throw new Error("A data update started while logging out");
-      }
       clearLocalSession();
       return true;
     } catch {
@@ -849,6 +874,7 @@ export default function AlmadinaApplication() {
       return false;
     } finally {
       logoutInFlight.current = false;
+      if (pendingUpdates.current.length) void savePendingUpdates();
     }
   }
 

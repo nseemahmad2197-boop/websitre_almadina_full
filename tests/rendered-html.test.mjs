@@ -483,6 +483,7 @@ test("gates secure mobile biometric unlock behind an encrypted four-digit app lo
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
   const manifest = JSON.parse(packageFile);
+  const logoutImplementation = application.match(/async function logout\(\): Promise<boolean> \{[\s\S]*?\n  async function logoutFromAccountSwitcher/)?.[0] ?? "";
 
   assert.equal(typeof manifest.dependencies["@simplewebauthn/browser"], "string");
   assert.equal(typeof manifest.dependencies["@simplewebauthn/server"], "string");
@@ -519,6 +520,7 @@ test("gates secure mobile biometric unlock behind an encrypted four-digit app lo
   assert.match(application, /BACKGROUND_LOCK_DELAY = 15_000/);
   assert.match(application, /savingUpdates\.current \|\| remoteMutationInFlight\.current \|\| pendingUpdates\.current\.length/);
   assert.match(application, /const logoutInFlight = useRef\(false\)/);
+  assert.match(application, /const sessionEpoch = useRef\(0\)/);
   assert.match(application, /if \(logoutInFlight\.current\) return showToast/);
   assert.match(application, /logoutInFlight\.current = true/);
   assert.match(application, /const completed = await options\.onConfirm\(\)/);
@@ -528,6 +530,10 @@ test("gates secure mobile biometric unlock behind an encrypted four-digit app lo
   assert.match(application, /body: "\{\}"/);
   assert.match(application, /if \(!response\.ok\) throw new Error\("Logout request failed"\)/);
   assert.match(application, /تعذّر تسجيل الخروج بأمان/);
+  assert.doesNotMatch(logoutImplementation, /waitForPendingUpdates/);
+  assert.doesNotMatch(logoutImplementation, /savingUpdates\.current \|\| remoteMutationInFlight\.current/);
+  assert.match(application, /error\.status >= 400[\s\S]*error\.status < 500[\s\S]*pendingUpdates\.current = \[\];[\s\S]*أُعيدت آخر بيانات محفوظة/);
+  assert.match(application, /operationEpoch !== sessionEpoch\.current/);
   assert.match(context, /enableBiometricUnlock/);
   assert.match(context, /loginWithBiometric/);
   assert.match(screen, /بعد الخروج يمكنك استخدام كلمة المرور أو حماية الجهاز/);
@@ -552,7 +558,7 @@ test("keeps merchant and courier account fields read-only while administrators m
   assert.doesNotMatch(management, /لا يمكن تعديل بيانات الحساب/);
   assert.equal((server.match(/const savedAccount = account;/g) ?? []).length, 2);
   assert.match(server, /users: current\.users\.map\(\(entry\) => entry\.id === account\.id \? savedAccount : entry\)/);
-  assert.match(server, /const email = candidate\.email\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(server, /email: candidate\.email\.trim\(\)\.toLowerCase\(\)/);
   assert.match(server, /البريد الإلكتروني مسجل لحساب آخر/);
   assert.match(admin, /type AccountEditor =/);
   assert.match(admin, /function openAccountEditor\(account: User\)/);
@@ -1256,6 +1262,8 @@ test("lets only the administrator broadcast app-update notifications to membersh
   assert.match(application, /remoteMutationInFlight\.current = true/);
   assert.match(application, /pendingUpdates\.current\.reduce\(\(current, update\) => update\(current\), snapshot\.database\)/);
   assert.match(application, /<AppContext\.Provider value=\{\{[\s\S]*broadcastNotice/);
+  assert.match(admin, /savedAccount\?\.phone !== phone[\s\S]*رقم الجوال مسجل لحساب آخر/);
+  assert.match(server, /isUnchangedLegacyDuplicate[\s\S]*normalizeAccountPhone\(existing!\.phone\) === phone/);
   assert.match(application, /knownNoticeIds/);
   assert.match(application, /noticeBaselineUserId/);
   assert.match(application, /playNotificationChime/);

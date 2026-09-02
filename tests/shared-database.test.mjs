@@ -891,6 +891,55 @@ test("synchronizes the bootstrap administrator when Render environment credentia
   assert.equal(oldCredentials.status, 401);
 });
 
+test("recovers updated Render administrator credentials even after this database was already initialized", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const originalEnvironment = {
+    ALMADINA_ADMIN_EMAIL: "initialized-admin@example.test",
+    ALMADINA_ADMIN_PASSWORD: "InitializedAdmin@Test-2026!",
+    ALMADINA_ADMIN_PHONE: "0596000000",
+  };
+  const originalLogin = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: {
+      email: originalEnvironment.ALMADINA_ADMIN_EMAIL,
+      password: originalEnvironment.ALMADINA_ADMIN_PASSWORD,
+    },
+    environment: originalEnvironment,
+  });
+  assert.equal(originalLogin.status, 200);
+  assert.equal(database.sessions.size, 1);
+
+  const updatedEnvironment = {
+    ALMADINA_ADMIN_EMAIL: "live-admin@example.test",
+    ALMADINA_ADMIN_PASSWORD: "LiveAdmin@Test-2026!",
+    ALMADINA_ADMIN_PHONE: "0597000000",
+  };
+  const recoveredLogin = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: {
+      email: updatedEnvironment.ALMADINA_ADMIN_EMAIL,
+      password: updatedEnvironment.ALMADINA_ADMIN_PASSWORD,
+    },
+    environment: updatedEnvironment,
+  });
+  assert.equal(recoveredLogin.status, 200);
+  assert.equal(recoveredLogin.body.userId, "admin-almadina");
+  assert.equal(recoveredLogin.body.database.users[0].email, updatedEnvironment.ALMADINA_ADMIN_EMAIL);
+  assert.equal(recoveredLogin.body.database.users[0].phone, updatedEnvironment.ALMADINA_ADMIN_PHONE);
+  assert.equal(database.sessions.size, 1);
+
+  const retiredCredentials = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: {
+      email: originalEnvironment.ALMADINA_ADMIN_EMAIL,
+      password: originalEnvironment.ALMADINA_ADMIN_PASSWORD,
+    },
+    environment: updatedEnvironment,
+  });
+  assert.equal(retiredCredentials.status, 401);
+});
+
 test("repairs an administrator stored by a legacy plaintext release", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
@@ -961,6 +1010,77 @@ test("adds an independent secondary administrator without replacing the primary 
   const storedUsers = JSON.parse(database.state.payload).users;
   assert.match(storedUsers.find((account) => account.id === "admin-owner").password, /^pbkdf2:600000:/);
   assert.equal(storedUsers.find((account) => account.id === "admin-almadina").email, "admin@almadinaexpress.com");
+});
+
+test("does not let an unchanged legacy administrator phone collision block unrelated admin changes", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const environment = {
+    ALMADINA_SECOND_ADMIN_EMAIL: "owner-same-phone@example.test",
+    ALMADINA_SECOND_ADMIN_PASSWORD: "OwnerSamePhone@Test-2026!",
+    ALMADINA_SECOND_ADMIN_PHONE: "0599000000",
+    ALMADINA_SECOND_ADMIN_NAME: "مدير برقم قديم مشترك",
+  };
+
+  const administrator = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
+    environment,
+  });
+  assert.equal(administrator.status, 200);
+  assert.equal(administrator.body.database.users.filter((account) => account.phone === "0599000000").length, 2);
+  const adminCookie = sessionFrom(administrator);
+
+  const preferencesUpdated = await rawCall(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    environment,
+    payload: {
+      revision: administrator.body.revision,
+      database: {
+        ...administrator.body.database,
+        preferences: {
+          ...administrator.body.database.preferences,
+          [administrator.body.userId]: {
+            ...administrator.body.database.preferences[administrator.body.userId],
+            sounds: false,
+          },
+        },
+      },
+    },
+  });
+  assert.equal(preferencesUpdated.status, 200);
+  assert.equal(preferencesUpdated.body.database.preferences[administrator.body.userId].sounds, false);
+
+  const duplicateNewAccount = await rawCall(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    environment,
+    payload: {
+      revision: preferencesUpdated.body.revision,
+      database: {
+        ...preferencesUpdated.body.database,
+        users: [...preferencesUpdated.body.database.users, {
+          id: "merchant-new-duplicate-phone",
+          name: "حساب برقم مكرر جديد",
+          email: "new-duplicate-phone@example.test",
+          phone: "0599000000",
+          store: "متجر الاختبار",
+          password: "Merchant@Test-2026!",
+          role: "merchant",
+          membership: "standard",
+          joinedAt: new Date().toISOString(),
+          avatarColor: "#187a50",
+        }],
+      },
+    },
+  });
+  assert.equal(duplicateNewAccount.status, 409);
+  assert.match(duplicateNewAccount.body.error, /رقم الجوال مسجل لحساب آخر/);
+
+  const unchanged = await rawCall(worker, database, "database", { cookie: adminCookie, environment });
+  assert.equal(unchanged.body.revision, preferencesUpdated.body.revision);
+  assert.equal(unchanged.body.database.users.some((account) => account.id === "merchant-new-duplicate-phone"), false);
 });
 
 test("reverse-geocodes a registration pin with a safe manual fallback", async () => {

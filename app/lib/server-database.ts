@@ -1168,6 +1168,42 @@ function equalIdentifier(first: string, second: string): boolean {
   return difference === 0;
 }
 
+type ConfiguredAdministratorKind = "bootstrap" | "secondary";
+
+function configuredAdministratorForLogin(
+  config: AlmadinaApiConfig,
+  email: string,
+  password: string,
+): ConfiguredAdministratorKind | null {
+  const credentialsMatch = (configuredEmail?: string, configuredPassword?: string): boolean => {
+    if (!configuredEmail || !configuredPassword) return false;
+    return equalIdentifier(configuredEmail.trim().toLowerCase(), email)
+      && equalIdentifier(configuredPassword, password);
+  };
+
+  if (credentialsMatch(config.bootstrapAdminEmail, config.bootstrapAdminPassword)) return "bootstrap";
+  if (credentialsMatch(config.secondaryAdminEmail, config.secondaryAdminPassword)) return "secondary";
+  return null;
+}
+
+async function recoverConfiguredAdministratorForLogin(
+  database: D1Database,
+  config: AlmadinaApiConfig,
+  email: string,
+  password: string,
+): Promise<boolean> {
+  const administrator = configuredAdministratorForLogin(config, email, password);
+  if (!administrator) return false;
+
+  // Only someone who already supplied the complete configured secret can
+  // trigger this recovery. This avoids turning the public login route into an
+  // expensive password-rehash endpoint while still repairing a stale database
+  // when Render values changed after this process initialized it.
+  if (administrator === "bootstrap") await secureBootstrapAdministrator(database, config);
+  else await synchronizeSecondaryAdministrator(database, config);
+  return true;
+}
+
 async function readLinkedDevices(database: D1Database, userId: string, currentTokenHash: string): Promise<LinkedDevice[]> {
   const now = Math.floor(Date.now() / 1000);
   const result = await database.prepare(`SELECT sessions.token_hash, sessions.created_at,
@@ -1719,20 +1755,37 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
   const previous = new Map(current.users.map((entry) => [entry.id, entry]));
   const users: User[] = [];
   const emails = new Set<string>();
-  const phones = new Set<string>();
+  const normalizedCandidates = submitted.users.map((candidate) => ({
+    candidate,
+    existing: previous.get(candidate.id),
+    email: candidate.email.trim().toLowerCase(),
+    name: candidate.name.trim(),
+    phone: normalizeAccountPhone(candidate.phone) ?? "",
+    store: candidate.store.trim(),
+  }));
+  const phoneOwners = new Map<string, typeof normalizedCandidates>();
 
-  for (const candidate of submitted.users) {
-    const existing = previous.get(candidate.id);
-    const email = candidate.email.trim().toLowerCase();
-    const name = candidate.name.trim();
-    const phone = normalizeAccountPhone(candidate.phone) ?? "";
-    const store = candidate.store.trim();
+  for (const normalized of normalizedCandidates) {
+    const owners = phoneOwners.get(normalized.phone) ?? [];
+    owners.push(normalized);
+    phoneOwners.set(normalized.phone, owners);
+  }
+
+  for (const [phone, owners] of phoneOwners) {
+    if (!phone || owners.length < 2) continue;
+    const isUnchangedLegacyDuplicate = owners.every(({ existing }) => (
+      Boolean(existing) && normalizeAccountPhone(existing!.phone) === phone
+    ));
+    if (!isUnchangedLegacyDuplicate) {
+      throw new ApiRequestError("رقم الجوال مسجل لحساب آخر.", 409);
+    }
+  }
+
+  for (const { candidate, existing, email, name, phone, store } of normalizedCandidates) {
     if (!validEmail(email)) throw new ApiRequestError("البريد الإلكتروني غير صحيح.", 400);
     if (emails.has(email)) throw new ApiRequestError("البريد الإلكتروني مسجل لحساب آخر.", 409);
-    if (phone && phones.has(phone)) throw new ApiRequestError("رقم الجوال مسجل لحساب آخر.", 409);
     if (!name || !store || !/^05\d{8}$/.test(phone)) throw new ApiRequestError("تحقق من الاسم والمتجر ورقم الجوال.", 400);
     emails.add(email);
-    phones.add(phone);
 
     if (existing) {
       users.push({
@@ -2535,7 +2588,7 @@ async function completePasswordReset(database: D1Database, request: Request): Pr
   return json({ error: "تم تحديث الحساب من جهاز آخر. حاول إكمال إعادة التعيين مجددًا." }, 409);
 }
 
-async function login(database: D1Database, request: Request): Promise<Response> {
+async function login(database: D1Database, request: Request, config: AlmadinaApiConfig): Promise<Response> {
   let submitted: unknown;
   try {
     submitted = await request.json();
@@ -2557,8 +2610,15 @@ async function login(database: D1Database, request: Request): Promise<Response> 
   }
   let state = await readState(database);
   let account = state.database.users.find((entry) => entry.email.toLowerCase() === email);
+  let passwordVerified = Boolean(account) && await verifyPassword(password, account!.password);
 
-  if (!account || !await verifyPassword(password, account.password)) {
+  if (!passwordVerified && await recoverConfiguredAdministratorForLogin(database, config, email, password)) {
+    state = await readState(database);
+    account = state.database.users.find((entry) => entry.email.toLowerCase() === email);
+    passwordVerified = Boolean(account) && await verifyPassword(password, account!.password);
+  }
+
+  if (!account || !passwordVerified) {
     let limitError: ApiRequestError | null = null;
     for (const limit of loginLimits) {
       try {
@@ -3006,7 +3066,7 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
 
     await ensureDatabase(database, config);
 
-    if (url.pathname === "/api/almadina/login" && request.method === "POST") return await login(database, request);
+    if (url.pathname === "/api/almadina/login" && request.method === "POST") return await login(database, request, config);
     if (url.pathname === "/api/almadina/geocode/reverse" && request.method === "POST") return await reverseGeocodeRegistrationAddress(database, request, config);
     if (url.pathname === "/api/almadina/register/request" && request.method === "POST") return await requestRegistration(database, request, config);
     if (url.pathname === "/api/almadina/register/verify" && request.method === "POST") return await verifyRegistration(database, request);

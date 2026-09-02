@@ -84,6 +84,7 @@ export function AdminDashboard() {
     if (!/^05\d{8}$/.test(form.phone)) return showToast("أدخل رقم جوال صحيحًا من 10 أرقام.", "error");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return showToast("أدخل بريدًا إلكترونيًا صحيحًا.", "error");
     if (database.users.some((user) => user.email.toLowerCase() === form.email.toLowerCase())) return showToast("هذا البريد الإلكتروني مسجل مسبقًا.", "error");
+    if (database.users.some((user) => user.phone === form.phone)) return showToast("رقم الجوال مسجل لحساب آخر.", "error");
     const user: User = { id: uid(form.role), name: form.name.trim(), email: form.email.trim().toLowerCase(), phone: form.phone, store: form.store.trim(), password: form.password || "User@123", role: form.role, ...(form.role === "merchant" ? { membership: form.membership } : {}), joinedAt: new Date().toISOString(), avatarColor: form.role === "courier" ? "#6655a6" : "#187a50" };
     updateDatabase((current) => ({ ...current, users: [...current.users, user] })); setAddUserOpen(false); setForm({ name: "", email: "", phone: "", store: "", password: "", role: "merchant", membership: "standard" }); showToast(`تمت إضافة ${user.role === "courier" ? "المندوب" : "المستخدم"} بنجاح.`);
   }
@@ -104,6 +105,8 @@ export function AdminDashboard() {
     if (!/^05\d{8}$/.test(phone)) return showToast("أدخل رقم جوال صحيحًا من 10 أرقام.", "error");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showToast("أدخل بريدًا إلكترونيًا صحيحًا.", "error");
     if (database.users.some((account) => account.id !== editingAccount.id && account.email.toLowerCase() === email)) return showToast("هذا البريد الإلكتروني مسجل لحساب آخر.", "error");
+    const savedAccount = database.users.find((account) => account.id === editingAccount.id);
+    if (savedAccount?.phone !== phone && database.users.some((account) => account.id !== editingAccount.id && account.phone === phone)) return showToast("رقم الجوال مسجل لحساب آخر.", "error");
 
     updateDatabase((current) => ({
       ...current,
