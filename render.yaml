@@ -35,6 +35,14 @@ services:
         sync: false
       - key: ALMADINA_ADMIN_NAME
         value: إدارة المدينة إكسبرس
+      - key: ALMADINA_SECOND_ADMIN_EMAIL
+        sync: false
+      - key: ALMADINA_SECOND_ADMIN_PASSWORD
+        sync: false
+      - key: ALMADINA_SECOND_ADMIN_PHONE
+        sync: false
+      - key: ALMADINA_SECOND_ADMIN_NAME
+        sync: false
 
 databases:
   - name: almadina-express-db

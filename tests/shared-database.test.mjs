@@ -721,6 +721,10 @@ async function loadWorker() {
         bootstrapAdminPassword: environment.ALMADINA_ADMIN_PASSWORD,
         bootstrapAdminPhone: environment.ALMADINA_ADMIN_PHONE,
         bootstrapAdminName: environment.ALMADINA_ADMIN_NAME,
+        secondaryAdminEmail: environment.ALMADINA_SECOND_ADMIN_EMAIL,
+        secondaryAdminPassword: environment.ALMADINA_SECOND_ADMIN_PASSWORD,
+        secondaryAdminPhone: environment.ALMADINA_SECOND_ADMIN_PHONE,
+        secondaryAdminName: environment.ALMADINA_SECOND_ADMIN_NAME,
         defer: (promise) => context.waitUntil(promise),
       }),
     };
@@ -921,6 +925,42 @@ test("repairs an administrator stored by a legacy plaintext release", async () =
   });
   assert.equal(recovered.status, 200);
   assert.equal(recovered.body.database.users[0].email, environment.ALMADINA_ADMIN_EMAIL);
+});
+
+test("adds an independent secondary administrator without replacing the primary administrator", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const environment = {
+    ALMADINA_SECOND_ADMIN_EMAIL: "owner-admin@example.test",
+    ALMADINA_SECOND_ADMIN_PASSWORD: "OwnerAdmin@Test-2026!",
+    ALMADINA_SECOND_ADMIN_PHONE: "0595000000",
+    ALMADINA_SECOND_ADMIN_NAME: "مدير النظام",
+  };
+
+  const secondaryLogin = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: {
+      email: environment.ALMADINA_SECOND_ADMIN_EMAIL,
+      password: environment.ALMADINA_SECOND_ADMIN_PASSWORD,
+    },
+    environment,
+  });
+  assert.equal(secondaryLogin.status, 200);
+  assert.equal(secondaryLogin.body.userId, "admin-owner");
+  assert.equal(secondaryLogin.body.database.users.length, 2);
+  assert.equal(secondaryLogin.body.database.users.find((account) => account.id === "admin-owner").role, "admin");
+
+  const primaryLogin = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
+    environment,
+  });
+  assert.equal(primaryLogin.status, 200);
+  assert.equal(primaryLogin.body.userId, "admin-almadina");
+
+  const storedUsers = JSON.parse(database.state.payload).users;
+  assert.match(storedUsers.find((account) => account.id === "admin-owner").password, /^pbkdf2:600000:/);
+  assert.equal(storedUsers.find((account) => account.id === "admin-almadina").email, "admin@almadinaexpress.com");
 });
 
 test("reverse-geocodes a registration pin with a safe manual fallback", async () => {

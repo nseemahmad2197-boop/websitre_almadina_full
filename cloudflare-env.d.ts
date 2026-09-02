@@ -31,6 +31,10 @@ interface PasswordResetDeliveryBindings {
   ALMADINA_ADMIN_PASSWORD?: string;
   ALMADINA_ADMIN_PHONE?: string;
   ALMADINA_ADMIN_NAME?: string;
+  ALMADINA_SECOND_ADMIN_EMAIL?: string;
+  ALMADINA_SECOND_ADMIN_PASSWORD?: string;
+  ALMADINA_SECOND_ADMIN_PHONE?: string;
+  ALMADINA_SECOND_ADMIN_NAME?: string;
 }
 
 declare namespace NodeJS {
@@ -43,6 +47,10 @@ declare namespace NodeJS {
     ALMADINA_ADMIN_PASSWORD?: string;
     ALMADINA_ADMIN_PHONE?: string;
     ALMADINA_ADMIN_NAME?: string;
+    ALMADINA_SECOND_ADMIN_EMAIL?: string;
+    ALMADINA_SECOND_ADMIN_PASSWORD?: string;
+    ALMADINA_SECOND_ADMIN_PHONE?: string;
+    ALMADINA_SECOND_ADMIN_NAME?: string;
   }
 }
 

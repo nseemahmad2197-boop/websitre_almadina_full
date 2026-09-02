@@ -296,6 +296,8 @@ test("starts without hard-coded accounts and securely bootstraps the administrat
   assert.match(server, /removeLegacyDemoData\(JSON\.parse\(row\.payload\) as Database\)/);
   assert.match(server, /configuredBootstrapAdministrator/);
   assert.match(server, /bootstrapAdminPassword/);
+  assert.match(server, /configuredSecondaryAdministrator/);
+  assert.match(server, /secondaryAdminPassword/);
   assert.match(server, /BOOTSTRAP_LOCKED_PASSWORD/);
   assert.doesNotMatch(data, /Admin@123/);
   assert.doesNotMatch(data, /amir@example\.com|naseem@example\.com|courier@example\.com/);
@@ -380,6 +382,12 @@ test("includes a GitHub-to-Render deployment with PostgreSQL and a health check"
   assert.match(blueprint, /key:\s*DEPLOY_TARGET\s*\n\s*value:\s*render/);
   assert.match(blueprint, /key:\s*VINEXT_TRUST_PROXY\s*\n\s*value:\s*["']?1["']?/);
   assert.match(blueprint, /key:\s*DATABASE_URL\s*\n\s*fromDatabase:/);
+  for (const key of ["ALMADINA_SECOND_ADMIN_EMAIL", "ALMADINA_SECOND_ADMIN_PASSWORD", "ALMADINA_SECOND_ADMIN_PHONE", "ALMADINA_SECOND_ADMIN_NAME"]) {
+    assert.match(blueprint, new RegExp(`key:\\s*${key}\\s*\\n\\s*sync:\\s*false`));
+    assert.match(readme, new RegExp(`\\b${key}\\b`));
+  }
+  assert.match(renderWorker, /process\.env\.ALMADINA_SECOND_ADMIN_EMAIL/);
+  assert.match(renderWorker, /process\.env\.ALMADINA_SECOND_ADMIN_PASSWORD/);
   assert.match(blueprint, /postgresMajorVersion:\s*["']18["']/);
   assert.match(blueprint, /ipAllowList:\s*\[\]/);
   assert.doesNotMatch(blueprint, /postgres(?:ql)?:\/\//i);

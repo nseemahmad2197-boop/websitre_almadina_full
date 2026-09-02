@@ -59,6 +59,7 @@ const COURIER_SCAN_RATE_LIMIT_WINDOW = 10 * 60;
 const COURIER_SCAN_ATTEMPT_LIMIT = 120;
 const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
 const BOOTSTRAP_ADMIN_ID = "admin-almadina";
+const SECONDARY_ADMIN_ID = "admin-owner";
 const LEGACY_DEFAULT_ADMIN_PASSWORD = "Admin@123";
 const BOOTSTRAP_LOCKED_PASSWORD = "disabled:bootstrap-password-required";
 const DEVICE_ACTIVITY_UPDATE_INTERVAL = 5 * 60 * 1000;
@@ -146,6 +147,10 @@ type BootstrapAdministratorConfig = {
   bootstrapAdminPassword?: string;
   bootstrapAdminPhone?: string;
   bootstrapAdminName?: string;
+  secondaryAdminEmail?: string;
+  secondaryAdminPassword?: string;
+  secondaryAdminPhone?: string;
+  secondaryAdminName?: string;
 };
 
 export type AlmadinaApiConfig = PasswordResetDeliveryConfig & ReverseGeocodingConfig & BootstrapAdministratorConfig;
@@ -348,6 +353,41 @@ async function configuredBootstrapAdministrator(config: AlmadinaApiConfig, exist
   };
 }
 
+async function configuredSecondaryAdministrator(config: AlmadinaApiConfig, existing?: User): Promise<User | null> {
+  const supplied = [
+    config.secondaryAdminEmail,
+    config.secondaryAdminPassword,
+    config.secondaryAdminPhone,
+    config.secondaryAdminName,
+  ].some((value) => Boolean(value?.trim()));
+  if (!supplied) return null;
+
+  const password = config.secondaryAdminPassword ?? "";
+  const email = config.secondaryAdminEmail?.trim().toLowerCase() ?? "";
+  const phone = normalizeAccountPhone(config.secondaryAdminPhone || "") ?? "";
+  if (!email || !password || !phone) {
+    throw new Error("ALMADINA_SECOND_ADMIN_EMAIL, ALMADINA_SECOND_ADMIN_PASSWORD, and ALMADINA_SECOND_ADMIN_PHONE must be set together.");
+  }
+  if (!validNewPassword(password) || password === LEGACY_DEFAULT_ADMIN_PASSWORD || password.length < 12) {
+    throw new Error("ALMADINA_SECOND_ADMIN_PASSWORD must contain at least 12 characters, a letter, a number, and a symbol, and must not use the retired default password.");
+  }
+  if (!validEmail(email) || email.length > 254) {
+    throw new Error("ALMADINA_SECOND_ADMIN_EMAIL is invalid.");
+  }
+
+  return {
+    id: existing?.id || SECONDARY_ADMIN_ID,
+    name: config.secondaryAdminName?.trim().slice(0, 120) || existing?.name || "مسؤول المدينة إكسبرس",
+    email,
+    password: await hashPassword(password),
+    phone,
+    store: existing?.store || "المدينة إكسبرس",
+    role: "admin",
+    joinedAt: existing?.joinedAt || new Date().toISOString(),
+    avatarColor: existing?.avatarColor || "#0b8f55",
+  };
+}
+
 async function secureBootstrapAdministrator(database: D1Database, config: AlmadinaApiConfig): Promise<void> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const state = await readState(database);
@@ -416,6 +456,48 @@ async function secureBootstrapAdministrator(database: D1Database, config: Almadi
   }
 
   throw new Error("Could not synchronize the bootstrap administrator because the database changed concurrently.");
+}
+
+async function synchronizeSecondaryAdministrator(database: D1Database, config: AlmadinaApiConfig): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const existing = state.database.users.find((account) => account.id === SECONDARY_ADMIN_ID);
+    const configured = await configuredSecondaryAdministrator(config, existing);
+    if (!configured) return;
+
+    if (state.database.users.some((account) => account.id !== configured.id && account.email.trim().toLowerCase() === configured.email)) {
+      throw new Error("ALMADINA_SECOND_ADMIN_EMAIL is already assigned to another account.");
+    }
+
+    const passwordMatches = Boolean(existing && config.secondaryAdminPassword)
+      && await verifyPassword(config.secondaryAdminPassword!, existing!.password);
+    const replacement: User = {
+      ...existing,
+      ...configured,
+      password: passwordMatches ? existing!.password : configured.password,
+    };
+    const credentialsChanged = !existing
+      || existing.email.trim().toLowerCase() !== replacement.email
+      || existing.password !== replacement.password;
+    if (existing && JSON.stringify(existing) === JSON.stringify(replacement)) return;
+
+    const next = {
+      ...state.database,
+      users: existing
+        ? state.database.users.map((account) => account.id === existing.id ? replacement : account)
+        : [...state.database.users, replacement],
+    };
+    if (!await saveState(database, next, state.revision)) continue;
+    if (credentialsChanged) {
+      await database.batch([
+        database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(replacement.id),
+        database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(replacement.id),
+      ]);
+    }
+    return;
+  }
+
+  throw new Error("Could not synchronize the secondary administrator because the database changed concurrently.");
 }
 
 async function initializeDatabase(database: D1Database, config: AlmadinaApiConfig): Promise<void> {
@@ -532,12 +614,20 @@ async function initializeDatabase(database: D1Database, config: AlmadinaApiConfi
   const existing = await database.prepare("SELECT revision FROM almadina_state WHERE id = ?").bind("main").first<{ revision: number }>();
   if (existing) {
     await secureBootstrapAdministrator(database, config);
+    await synchronizeSecondaryAdministrator(database, config);
     return;
   }
 
   const initial = createSeedDatabase();
   const administrator = await configuredBootstrapAdministrator(config);
   if (administrator) initial.users.push(administrator);
+  const secondaryAdministrator = await configuredSecondaryAdministrator(config);
+  if (secondaryAdministrator) {
+    if (initial.users.some((account) => account.email.trim().toLowerCase() === secondaryAdministrator.email)) {
+      throw new Error("ALMADINA_SECOND_ADMIN_EMAIL must be different from ALMADINA_ADMIN_EMAIL.");
+    }
+    initial.users.push(secondaryAdministrator);
+  }
   await database.prepare("INSERT INTO almadina_state (id, payload, revision, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
     .bind("main", JSON.stringify(initial), 0, new Date().toISOString()).run();
 }
