@@ -831,7 +831,13 @@ export default function AlmadinaApplication() {
 
     logoutInFlight.current = true;
     try {
-      const response = await fetch("/api/almadina/logout", { method: "POST", credentials: "same-origin", cache: "no-store" });
+      const response = await fetch("/api/almadina/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: "{}",
+      });
       if (!response.ok) throw new Error("Logout request failed");
       if (savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) {
         throw new Error("A data update started while logging out");

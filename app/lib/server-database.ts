@@ -185,11 +185,12 @@ async function validateApiRequestEnvelope(request: Request): Promise<Request | R
 
   if (request.body === null) return request;
 
-  {
-    const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() ?? "";
-    if (contentType !== "application/json" && !contentType.endsWith("+json")) {
-      return json({ error: "نوع محتوى الطلب غير مدعوم." }, 415);
-    }
+  const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() ?? "";
+  const jsonContentType = contentType === "application/json" || contentType.endsWith("+json");
+  // بعض بيئات Node/Render تمثل POST الفارغ كمسار Body بطول صفر بدل null.
+  // نؤجل رفض نوع المحتوى حتى نعرف أن الطلب يحتوي بيانات فعلية.
+  if (!jsonContentType && lengthHeader !== null && contentLength > 0) {
+    return json({ error: "نوع محتوى الطلب غير مدعوم." }, 415);
   }
 
   const reader = request.body.getReader();
@@ -210,6 +211,8 @@ async function validateApiRequestEnvelope(request: Request): Promise<Request | R
   } catch {
     return json({ error: "تعذّرت قراءة بيانات الطلب." }, 400);
   }
+
+  if (totalLength > 0 && !jsonContentType) return json({ error: "نوع محتوى الطلب غير مدعوم." }, 415);
 
   const body = new Uint8Array(totalLength);
   let offset = 0;

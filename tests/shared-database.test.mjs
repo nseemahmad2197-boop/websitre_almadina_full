@@ -863,6 +863,13 @@ test("reverse-geocodes a registration pin with a safe manual fallback", async ()
 test("rejects forged, unsupported, and oversized API request envelopes", async () => {
   const worker = await loadWorker();
 
+  const emptyLogout = await rawCall(worker, new FakeD1Database(), "logout", {
+    method: "POST",
+    rawBody: "",
+  });
+  assert.equal(emptyLogout.status, 200);
+  assert.equal(emptyLogout.body.success, true);
+
   const unsupported = await rawCall(worker, new FakeD1Database(), "login", {
     method: "POST",
     rawBody: "{}",

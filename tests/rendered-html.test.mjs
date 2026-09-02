@@ -516,6 +516,8 @@ test("gates secure mobile biometric unlock behind an encrypted four-digit app lo
   assert.match(application, /const completed = await options\.onConfirm\(\)/);
   assert.match(application, /if \(completed === false\) return setSubmitting\(false\)/);
   assert.match(application, /const response = await fetch\("\/api\/almadina\/logout"/);
+  assert.match(application, /headers: \{ Accept: "application\/json", "Content-Type": "application\/json" \}/);
+  assert.match(application, /body: "\{\}"/);
   assert.match(application, /if \(!response\.ok\) throw new Error\("Logout request failed"\)/);
   assert.match(application, /تعذّر تسجيل الخروج بأمان/);
   assert.match(context, /enableBiometricUnlock/);
