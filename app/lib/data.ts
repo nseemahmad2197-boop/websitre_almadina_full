@@ -41,6 +41,11 @@ export type User = {
   password: string;
   phone: string;
   store: string;
+  governorate?: string;
+  city?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
   role: Role;
   membership?: Membership;
   joinedAt: string;

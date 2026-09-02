@@ -2,11 +2,17 @@
 
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import type { RegistrationChallenge, RegistrationFormValues } from "../lib/app-context";
+import { governorates, normalizeLocation } from "../lib/data";
+import { applicationPermissionDisclosures, LEGAL_DOCUMENT_VERSION, LEGAL_FINAL_NOTICE, privacyPolicySections, termsOfUseSections } from "../lib/legal";
+import { matchRegistrationMapAddress } from "../lib/registration-map-address";
+import type { ReverseGeocodedAddress } from "../lib/reverse-geocoding";
 import { Icon } from "./icon";
-import { Button, Field } from "./ui";
+import { DEFAULT_REGISTRATION_MAP_POINT, REGISTRATION_REGION_CENTERS, RegistrationLocationMap } from "./registration-location-map";
+import { Button, Field, Modal } from "./ui";
 
-type RegistrationStep = "identity" | "business" | "security" | "review" | "verify";
+type RegistrationStep = "identity" | "business" | "location" | "security" | "review" | "verify";
 type PendingOperation = "request" | "verify" | "resend" | null;
+type LocationPicker = "governorate" | "city" | null;
 
 type RegistrationFlowProps = {
   onCancel: () => void;
@@ -14,8 +20,20 @@ type RegistrationFlowProps = {
   onVerify: (code: string) => Promise<boolean>;
 };
 
-const FORM_STEPS: RegistrationStep[] = ["identity", "business", "security", "review"];
-const EMPTY_FORM = { name: "", phone: "", store: "", email: "", password: "", confirm: "" };
+const FORM_STEPS: RegistrationStep[] = ["identity", "business", "location", "security", "review"];
+const EMPTY_FORM = {
+  name: "",
+  phone: "",
+  store: "",
+  email: "",
+  governorate: "",
+  city: "",
+  address: "",
+  latitude: DEFAULT_REGISTRATION_MAP_POINT.latitude,
+  longitude: DEFAULT_REGISTRATION_MAP_POINT.longitude,
+  password: "",
+  confirm: "",
+};
 
 function normalizeDigits(value: string): string {
   return value
@@ -46,10 +64,20 @@ function RegistrationError({ message }: { message: string }) {
   return <p className="form-error" id="registration-error" role="alert"><Icon name="alert" size={15} />{message}</p>;
 }
 
+function LocationPickerButton({ label, value, placeholder, disabled, onClick }: { label: string; value: string; placeholder: string; disabled?: boolean; onClick: () => void }) {
+  return <div className="field registration-location-field"><span className="field__label">{label}</span><button type="button" className="field__control registration-location-field__button" disabled={disabled} onClick={onClick}><Icon name="mapPin" size={19} className="field__icon" /><span className={value ? "" : "is-placeholder"}>{value || placeholder}</span><Icon name="chevronDown" size={18} /></button></div>;
+}
+
 export function RegistrationFlow({ onCancel, onRequest, onVerify }: RegistrationFlowProps) {
   const [step, setStep] = useState<RegistrationStep>("identity");
   const [form, setForm] = useState(EMPTY_FORM);
   const [accepted, setAccepted] = useState(false);
+  const [legalOpen, setLegalOpen] = useState(false);
+  const [legalReviewed, setLegalReviewed] = useState(false);
+  const [legalScrollProgress, setLegalScrollProgress] = useState(0);
+  const [mapConfirmed, setMapConfirmed] = useState(false);
+  const [locationPicker, setLocationPicker] = useState<LocationPicker>(null);
+  const [locationQuery, setLocationQuery] = useState("");
   const [visiblePassword, setVisiblePassword] = useState(false);
   const [code, setCode] = useState<string[]>(Array(6).fill(""));
   const [pending, setPending] = useState<PendingOperation>(null);
@@ -58,17 +86,54 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const codeInputs = useRef<Array<HTMLInputElement | null>>([]);
+  const legalBody = useRef<HTMLDivElement | null>(null);
 
   const busy = pending !== null;
   const currentFormStep = step === "verify" ? FORM_STEPS.length - 1 : FORM_STEPS.indexOf(step);
   const normalizedEmail = form.email.trim().toLowerCase();
   const codeValue = code.join("");
+  const selectedGovernorate = governorates.find((entry) => entry.name === form.governorate);
+  const pickerOptions = locationPicker === "governorate"
+    ? governorates.map((entry) => entry.name)
+    : locationPicker === "city"
+      ? selectedGovernorate?.cities ?? []
+      : [];
+  const normalizedLocationQuery = normalizeLocation(locationQuery);
+  const filteredPickerOptions = normalizedLocationQuery
+    ? pickerOptions.filter((entry) => normalizeLocation(entry).includes(normalizedLocationQuery))
+    : pickerOptions;
 
   useEffect(() => {
     if (cooldown <= 0) return;
     const timer = window.setTimeout(() => setCooldown((current) => Math.max(0, current - 1)), 1_000);
     return () => window.clearTimeout(timer);
   }, [cooldown]);
+
+  useEffect(() => {
+    if (!legalOpen || legalReviewed) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (legalBody.current) updateLegalReadProgress(legalBody.current);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [legalOpen, legalReviewed]);
+
+  function openLegalDetails() {
+    setLegalScrollProgress(legalReviewed ? 100 : 0);
+    setLegalOpen(true);
+  }
+
+  function updateLegalReadProgress(element: HTMLDivElement) {
+    const scrollDistance = Math.max(0, element.scrollHeight - element.clientHeight);
+    const reachedEnd = scrollDistance <= 1 || element.scrollTop >= scrollDistance - 12;
+    const progress = reachedEnd
+      ? 100
+      : Math.min(99, Math.max(0, Math.round((element.scrollTop / Math.max(1, scrollDistance)) * 100)));
+    setLegalScrollProgress(progress);
+    if (reachedEnd) {
+      setLegalReviewed(true);
+      setError("");
+    }
+  }
 
   function updateField<K extends keyof typeof form>(field: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -85,11 +150,19 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
       if (!form.store.trim()) return "أدخل اسم المتجر.";
       if (!validEmail(normalizedEmail)) return "أدخل بريدًا إلكترونيًا صحيحًا؛ سيصل إليه رمز التحقق.";
     }
+    if (target === "location") {
+      if (!form.governorate) return "اختر المدينة أو المحافظة.";
+      if (!form.city) return "اختر المنطقة التابعة للمدينة.";
+      if (form.address.trim().length < 2 || form.address.trim().length > 180) return "أدخل اسم الشارع أو وصف العنوان بصورة صحيحة.";
+      if (!mapConfirmed) return "حرّك الخريطة إلى عنوانك ثم اضغط «تثبيت هذا الموقع».";
+      if (form.latitude < 29.35 || form.latitude > 33.55 || form.longitude < 34.1 || form.longitude > 35.95) return "اختر نقطة داخل نطاق التوصيل على الخريطة.";
+    }
     if (target === "security") {
       if (!strongPassword(form.password)) return "يجب أن تحتوي كلمة المرور على 8 أحرف على الأقل وحرف ورقم ورمز.";
       if (form.password !== form.confirm) return "كلمتا المرور غير متطابقتين.";
     }
-    if (target === "review" && !accepted) return "اقرأ شروط الاستخدام وسياسة الخصوصية ثم وافق للمتابعة.";
+    if (target === "review" && !legalReviewed) return "افتح شروط الاستخدام وسياسة الخصوصية والأذونات واقرأها أولًا.";
+    if (target === "review" && !accepted) return "فعّل الموافقة على الشروط وسياسة الخصوصية للمتابعة.";
     return null;
   }
 
@@ -131,6 +204,11 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
         phone: form.phone,
         store: form.store.trim(),
         email: normalizedEmail,
+        governorate: form.governorate,
+        city: form.city,
+        address: form.address.trim(),
+        latitude: form.latitude,
+        longitude: form.longitude,
         password: form.password,
         acceptedTerms: accepted,
       });
@@ -201,15 +279,78 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
     return <button type="button" className="field__action" disabled={busy} aria-label={visiblePassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"} aria-pressed={visiblePassword} onClick={() => setVisiblePassword((current) => !current)}><Icon name={visiblePassword ? "eyeOff" : "eye"} size={20} /></button>;
   }
 
+  function openLocationPicker(picker: Exclude<LocationPicker, null>) {
+    if (busy || (picker === "city" && !selectedGovernorate)) return;
+    setLocationQuery("");
+    setLocationPicker(picker);
+  }
+
+  function chooseLocation(value: string) {
+    if (locationPicker === "governorate") {
+      const point = REGISTRATION_REGION_CENTERS[value] ?? DEFAULT_REGISTRATION_MAP_POINT;
+      setForm((current) => ({ ...current, governorate: value, city: "", latitude: point.latitude, longitude: point.longitude }));
+      setMapConfirmed(false);
+    } else if (locationPicker === "city") {
+      setForm((current) => ({ ...current, city: value }));
+      setMapConfirmed(false);
+    }
+    setError("");
+    setStatus("");
+    setLocationPicker(null);
+    setLocationQuery("");
+  }
+
+  async function confirmMapLocation(point: { latitude: number; longitude: number }) {
+    setError("");
+    setStatus("");
+    try {
+      const response = await fetch("/api/almadina/geocode/reverse", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(point),
+      });
+      const payload = await response.json().catch(() => ({})) as { success?: boolean; address?: ReverseGeocodedAddress; error?: string };
+      if (!response.ok || !payload.success || !payload.address) {
+        throw new Error(payload.error ?? "تعذّرت قراءة العنوان من الخريطة. يمكنك إكماله يدويًا.");
+      }
+
+      const matched = matchRegistrationMapAddress(payload.address);
+      setForm((current) => {
+        const governorate = matched.governorate ?? current.governorate;
+        const city = matched.city ?? (governorate === current.governorate ? current.city : "");
+        return {
+          ...current,
+          ...point,
+          governorate,
+          city,
+          address: matched.address ?? current.address,
+        };
+      });
+      setMapConfirmed(true);
+
+      const matchedFields = [matched.governorate, matched.city, matched.address].filter(Boolean).length;
+      if (matchedFields === 3) setStatus("تم اختيار المدينة والمنطقة والشارع من الخريطة. يمكنك تعديلها يدويًا.");
+      else if (matchedFields > 0) setStatus("تمت تعبئة بيانات العنوان المتاحة من الخريطة. أكمل أي حقل ناقص أو عدّله يدويًا.");
+      else setError("تم تثبيت النقطة، لكن لم نجد تفاصيل عنوان مطابقة. اختر المدينة والمنطقة والشارع يدويًا.");
+    } catch (lookupError) {
+      setMapConfirmed(true);
+      setError(lookupError instanceof Error ? lookupError.message : "تم تثبيت النقطة، لكن تعذّرت قراءة العنوان. أكمله يدويًا.");
+    }
+  }
+
   const header = step === "identity"
     ? { title: "لنبدأ بمعلوماتك", subtitle: "أدخل بياناتك الأساسية للانتقال إلى الخطوة التالية" }
     : step === "business"
       ? { title: "بيانات متجرك", subtitle: "سيُستخدم بريدك لتسجيل الدخول وتأكيد الحساب" }
-      : step === "security"
-        ? { title: "حماية حسابك", subtitle: "اختر كلمة مرور قوية لا تستخدمها في موقع آخر" }
-        : step === "review"
-          ? { title: "لم يتبقَّ الكثير", subtitle: "راجع بياناتك ووافق على الشروط قبل إرسال الرمز" }
-          : { title: "تأكيد بريدك الإلكتروني", subtitle: `أدخل الرمز المرسل إلى ${maskedEmail(normalizedEmail)}` };
+      : step === "location"
+        ? { title: "العنوان الخاص بك", subtitle: "اختر المدينة والمنطقة وحدد عنوانك بدقة على الخريطة" }
+        : step === "security"
+          ? { title: "حماية حسابك", subtitle: "اختر كلمة مرور قوية لا تستخدمها في موقع آخر" }
+          : step === "review"
+            ? { title: "لم يتبقَّ الكثير", subtitle: "راجع بياناتك ووافق على الشروط قبل إرسال الرمز" }
+            : { title: "تأكيد بريدك الإلكتروني", subtitle: `أدخل الرمز المرسل إلى ${maskedEmail(normalizedEmail)}` };
 
   return (
     <div className="registration-flow">
@@ -232,6 +373,29 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
           <Field icon="mail" label="البريد الإلكتروني" placeholder="name@example.com" type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} autoComplete="email" autoCapitalize="none" spellCheck={false} dir="ltr" disabled={busy} hint="سنرسل رمز تأكيد إلى هذا البريد" />
         </div>}
 
+        {step === "location" && <div className="registration-flow__stage registration-flow__location">
+          <div className="registration-flow__location-fields">
+            <LocationPickerButton label="المدينة" value={form.governorate} placeholder="اختر المدينة أو المحافظة" disabled={busy} onClick={() => openLocationPicker("governorate")} />
+            <LocationPickerButton label="المنطقة" value={form.city} placeholder={form.governorate ? "اختر المنطقة" : "اختر المدينة أولًا"} disabled={busy || !form.governorate} onClick={() => openLocationPicker("city")} />
+          </div>
+          <Field icon="mapPin" label="الشارع / وصف العنوان" placeholder="مثلًا: شارع فيصل، قرب الدوار" value={form.address} onChange={(event) => updateField("address", event.target.value.slice(0, 180))} autoComplete="street-address" disabled={busy} />
+          <RegistrationLocationMap
+            latitude={form.latitude}
+            longitude={form.longitude}
+            confirmed={mapConfirmed}
+            confirmDisabled={busy}
+            onChange={(point) => {
+              setForm((current) => ({ ...current, ...point }));
+              setMapConfirmed(false);
+              setError("");
+              setStatus("");
+            }}
+            onConfirm={confirmMapLocation}
+            onError={setError}
+          />
+          {status && <p className="registration-flow__location-status" role="status"><Icon name="check" size={15} />{status}</p>}
+        </div>}
+
         {step === "security" && <div className="registration-flow__stage">
           <Field icon="lock" label="كلمة المرور" placeholder="8 أحرف على الأقل" type={visiblePassword ? "text" : "password"} value={form.password} onChange={(event) => updateField("password", event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} suffix={passwordToggle()} autoFocus disabled={busy} hint={form.password && !strongPassword(form.password) ? "أضف حرفًا ورقمًا ورمزًا." : undefined} />
           <Field icon="shield" label="تأكيد كلمة المرور" placeholder="أعد كتابة كلمة المرور" type={visiblePassword ? "text" : "password"} value={form.confirm} onChange={(event) => updateField("confirm", event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} disabled={busy} hint={form.confirm && form.password !== form.confirm ? "كلمتا المرور غير متطابقتين." : undefined} />
@@ -244,10 +408,19 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
             <div><span>المتجر</span><strong>{form.store.trim()}</strong></div>
             <div><span>رقم الجوال</span><strong dir="ltr">{form.phone}</strong></div>
             <div><span>بريد التحقق</span><strong dir="ltr">{normalizedEmail}</strong></div>
+            <div className="registration-flow__summary-address"><span>عنوان الحساب</span><strong>{form.governorate} · {form.city} · {form.address.trim()}</strong></div>
           </div>
+          <button type="button" className={`registration-flow__legal-open ${legalReviewed ? "is-reviewed" : ""}`} disabled={busy} onClick={openLegalDetails}>
+            <span className="registration-flow__legal-open-icon"><Icon name={legalReviewed ? "check" : "file"} size={21} /></span>
+            <span className="registration-flow__legal-open-copy">
+              <strong>الشروط وسياسة الخصوصية والأذونات</strong>
+              <small>{legalReviewed ? "اكتملت قراءتها — يمكنك عرضها مرة أخرى" : "مرّر التفاصيل من البداية إلى النهاية لتفعيل الموافقة"}</small>
+            </span>
+            <Icon name="chevronLeft" size={18} />
+          </button>
           <label className="registration-flow__consent">
-            <input type="checkbox" checked={accepted} onChange={(event) => { setAccepted(event.target.checked); setError(""); }} disabled={busy} />
-            <span><b>أوافق على شروط الاستخدام وسياسة الخصوصية.</b> لن يُنشأ الحساب قبل تأكيد البريد الإلكتروني.</span>
+            <input type="checkbox" checked={accepted} onChange={(event) => { setAccepted(event.target.checked); setError(""); }} disabled={busy || !legalReviewed} />
+            <span><b>لقد قرأت وأوافق على شروط الاستخدام وسياسة الخصوصية.</b> الأذونات الاختيارية لا تمنع إنشاء الحساب، ولن يُنشأ الحساب قبل تأكيد البريد الإلكتروني.</span>
           </label>
         </div>}
 
@@ -282,13 +455,56 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
         {step === "verify" ? (
           <Button type="submit" icon="check" full loading={pending === "verify"} disabled={codeValue.length !== 6 || busy}>تأكيد البريد وإنشاء الحساب</Button>
         ) : step === "review" ? (
-          <Button type="submit" icon="send" full loading={pending === "request"} disabled={!accepted || busy}>إرسال رمز التحقق</Button>
+          <Button type="submit" icon="send" full loading={pending === "request"} disabled={!legalReviewed || !accepted || busy}>إرسال رمز التحقق</Button>
         ) : (
           <Button type="submit" icon="chevronLeft" full disabled={busy}>التالي</Button>
         )}
 
         <button type="button" className="registration-flow__back" disabled={busy} onClick={goBack}><Icon name="chevronLeft" size={17} />{step === "identity" || step === "verify" ? "العودة إلى تسجيل الدخول" : "الخطوة السابقة"}</button>
       </form>
+
+      {locationPicker && <Modal title={locationPicker === "governorate" ? "اختر المدينة" : "اختر المنطقة"} onClose={() => setLocationPicker(null)} className="registration-location-modal" sheet>
+        <Field icon="search" placeholder={locationPicker === "governorate" ? "ابحث عن المدينة أو المحافظة" : "ابحث عن المنطقة"} value={locationQuery} onChange={(event) => setLocationQuery(event.target.value)} autoFocus autoComplete="off" />
+        <div className="registration-location-modal__list" role="listbox" aria-label={locationPicker === "governorate" ? "المدن والمحافظات" : "المناطق"}>
+          {filteredPickerOptions.map((entry) => <button type="button" role="option" aria-selected={entry === (locationPicker === "governorate" ? form.governorate : form.city)} className={entry === (locationPicker === "governorate" ? form.governorate : form.city) ? "is-selected" : ""} key={entry} onClick={() => chooseLocation(entry)}><Icon name="mapPin" size={17} /><span>{entry}</span>{entry === (locationPicker === "governorate" ? form.governorate : form.city) && <Icon name="check" size={17} />}</button>)}
+          {!filteredPickerOptions.length && <p className="registration-location-modal__empty"><Icon name="search" size={24} />لا توجد نتيجة مطابقة.</p>}
+        </div>
+      </Modal>}
+
+      {legalOpen && <Modal title="الشروط والخصوصية والأذونات" ariaLabel="تفاصيل شروط الاستخدام وسياسة الخصوصية والأذونات المستخدمة" onClose={() => setLegalOpen(false)} className="registration-legal-modal" sheet>
+        <p className="registration-legal-modal__intro">مرّر القائمة من أعلاها إلى نهايتها لتفعيل مربع الموافقة. يطلب التطبيق الأذونات الاختيارية فقط عند استخدام الميزة المرتبطة بها.</p>
+        <div ref={legalBody} className="registration-legal-modal__body" tabIndex={0} aria-label="محتوى الشروط وسياسة الخصوصية والأذونات" onScroll={(event) => updateLegalReadProgress(event.currentTarget)}>
+          <section className="registration-legal-modal__section" aria-labelledby="registration-terms-title">
+            <header><span><Icon name="file" size={20} /></span><div><h3 id="registration-terms-title">شروط الاستخدام</h3><p>القواعد الأساسية لاستخدام حساب المدينة إكسبرس.</p></div></header>
+            <div className="registration-legal-modal__entries">
+              {termsOfUseSections.map((entry, index) => <article key={entry.title}><h4>{(index + 1).toLocaleString("ar-EG")}. {entry.title}</h4><p>{entry.body}</p></article>)}
+            </div>
+          </section>
+
+          <section className="registration-legal-modal__section" aria-labelledby="registration-privacy-title">
+            <header><span><Icon name="shield" size={20} /></span><div><h3 id="registration-privacy-title">سياسة الخصوصية</h3><p>ما نجمعه، ولماذا نستخدمه، وكيف تتحكم في بياناتك.</p></div></header>
+            <div className="registration-legal-modal__entries">
+              {privacyPolicySections.map((entry, index) => <article key={entry.title}><h4>{(index + 1).toLocaleString("ar-EG")}. {entry.title}</h4><p>{entry.body}</p></article>)}
+            </div>
+          </section>
+
+          <section className="registration-legal-modal__section" aria-labelledby="registration-permissions-title">
+            <header><span><Icon name="sliders" size={20} /></span><div><h3 id="registration-permissions-title">الأذونات وخصائص الجهاز</h3><p>كل إذن اختياري وله بديل يدوي متى كان ذلك ممكنًا.</p></div></header>
+            <div className="registration-legal-modal__permissions">
+              {applicationPermissionDisclosures.map((permission) => <article key={permission.id}><span><Icon name={permission.icon} size={19} /></span><div><h4>{permission.title}</h4><p>{permission.body}</p></div></article>)}
+            </div>
+          </section>
+          <aside className="legal-final-notice"><Icon name="package" size={21} /><strong>{LEGAL_FINAL_NOTICE}</strong></aside>
+        </div>
+        <footer className="registration-legal-modal__footer">
+          <small>نسخة الوثائق: <bdi dir="ltr">{LEGAL_DOCUMENT_VERSION}</bdi></small>
+          <div className={`registration-legal-modal__scroll-status ${legalReviewed ? "is-complete" : ""}`} role="progressbar" aria-label="تقدم قراءة الشروط والخصوصية والأذونات" aria-valuemin={0} aria-valuemax={100} aria-valuenow={legalScrollProgress}>
+            <div><Icon name={legalReviewed ? "check" : "download"} size={16} /><span>{legalReviewed ? "وصلت إلى نهاية المحتوى؛ يمكنك تفعيل الموافقة." : "مرّر حتى نهاية المحتوى لتفعيل الموافقة."}</span><b>{legalScrollProgress.toLocaleString("ar-EG")}٪</b></div>
+            <span><i style={{ width: `${legalScrollProgress}%` }} /></span>
+          </div>
+          <Button type="button" icon="check" full disabled={!legalReviewed} onClick={() => { setLegalOpen(false); setError(""); }}>{legalReviewed ? "تمت القراءة — متابعة للموافقة" : "أكمل التمرير أولًا"}</Button>
+        </footer>
+      </Modal>}
     </div>
   );
 }

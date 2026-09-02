@@ -25,6 +25,8 @@ services:
         sync: false
       - key: BREVO_FROM_NAME
         value: Almadina Express
+      - key: GEOAPIFY_API_KEY
+        sync: false
 
 databases:
   - name: almadina-express-db

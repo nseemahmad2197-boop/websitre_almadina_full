@@ -1,13 +1,15 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { handleAlmadinaApi } from "../app/lib/server-database";
-import type { PasswordResetDeliveryConfig, PasswordResetSender } from "../app/lib/password-reset-delivery";
+import { handleAlmadinaApi, type AlmadinaApiConfig } from "../app/lib/server-database";
+import type { PasswordResetSender } from "../app/lib/password-reset-delivery";
+import type { ReverseGeocoder } from "../app/lib/reverse-geocoding";
 
 interface Env extends PasswordResetDeliveryBindings {
   ASSETS: Fetcher;
   DB: D1Database;
   PASSWORD_RESET_SENDER?: PasswordResetSender;
+  REVERSE_GEOCODER?: ReverseGeocoder;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -17,11 +19,13 @@ interface Env extends PasswordResetDeliveryBindings {
   };
 }
 
-function passwordResetDeliveryConfig(env: Env, ctx: ExecutionContext): PasswordResetDeliveryConfig {
+function passwordResetDeliveryConfig(env: Env, ctx: ExecutionContext): AlmadinaApiConfig {
   return {
     brevoApiKey: env.BREVO_API_KEY,
     brevoFromEmail: env.BREVO_FROM_EMAIL,
     brevoFromName: env.BREVO_FROM_NAME,
+    geoapifyApiKey: env.GEOAPIFY_API_KEY,
+    reverseGeocoder: env.REVERSE_GEOCODER,
     sender: env.PASSWORD_RESET_SENDER,
     defer: (promise) => ctx.waitUntil(promise),
   };

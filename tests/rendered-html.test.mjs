@@ -137,17 +137,26 @@ test("offers a responsive Brevo email-only password recovery flow backed by publ
   assert.match(styles, /\.password-recovery__steps\s*\{[^}]*repeat\(3,/);
 });
 
-test("uses a four-step reference-style registration and creates the account only after Brevo email verification", async () => {
-  const [auth, registration, application, context, server, delivery, schema, migration, styles, readme] = await Promise.all([
+test("uses a five-step reference-style registration with map, legal disclosures, and Brevo email verification", async () => {
+  const [auth, registration, locationMap, mapMatcher, reverseGeocoder, legal, application, context, server, delivery, cloudflareWorker, renderWorker, schema, registrationMigration, locationMigration, styles, settings, blueprint, readme] = await Promise.all([
     readFile(new URL("../app/components/auth.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/registration-flow.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/registration-location-map.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/registration-map-address.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/reverse-geocoding.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/legal.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/password-reset-delivery.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/render.ts", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0006_thankful_jazinda.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0007_elite_kitty_pryde.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../render.yaml", import.meta.url), "utf8"),
     readFile(new URL("../README.md", import.meta.url), "utf8"),
   ]);
 
@@ -158,10 +167,57 @@ test("uses a four-step reference-style registration and creates the account only
   assert.match(application, /fetch\("\/api\/almadina\/register\/request"/);
   assert.match(application, /sharedRequest\("register\/verify"/);
 
-  assert.match(registration, /FORM_STEPS: RegistrationStep\[\] = \["identity", "business", "security", "review"\]/);
-  for (const title of ["لنبدأ بمعلوماتك", "بيانات متجرك", "حماية حسابك", "لم يتبقَّ الكثير", "تأكيد بريدك الإلكتروني"]) {
+  assert.match(registration, /FORM_STEPS: RegistrationStep\[\] = \["identity", "business", "location", "security", "review"\]/);
+  for (const title of ["لنبدأ بمعلوماتك", "بيانات متجرك", "العنوان الخاص بك", "حماية حسابك", "لم يتبقَّ الكثير", "تأكيد بريدك الإلكتروني"]) {
     assert.match(registration, new RegExp(title));
   }
+  assert.match(registration, /LocationPickerButton label="المدينة"/);
+  assert.match(registration, /LocationPickerButton label="المنطقة"/);
+  assert.match(registration, /label="الشارع \/ وصف العنوان"/);
+  assert.match(registration, /<RegistrationLocationMap/);
+  assert.match(registration, /fetch\("\/api\/almadina\/geocode\/reverse"/);
+  assert.match(registration, /method: "POST"/);
+  assert.match(registration, /matchRegistrationMapAddress\(payload\.address\)/);
+  assert.match(registration, /يمكنك تعديلها يدويًا/);
+  assert.match(registration, /confirmDisabled=\{busy\}/);
+  assert.match(registration, /governorate: form\.governorate,[\s\S]*city: form\.city,[\s\S]*address: form\.address\.trim\(\),[\s\S]*latitude: form\.latitude,[\s\S]*longitude: form\.longitude/);
+  assert.match(registration, /الشروط وسياسة الخصوصية والأذونات/);
+  assert.match(registration, /setLegalOpen\(true\)/);
+  assert.match(registration, /disabled=\{busy \|\| !legalReviewed\}/);
+  assert.match(registration, /scrollHeight - element\.clientHeight/);
+  assert.match(registration, /element\.scrollTop >= scrollDistance - 12/);
+  assert.match(registration, /setLegalReviewed\(true\)/);
+  assert.match(registration, /aria-valuenow=\{legalScrollProgress\}/);
+  assert.match(registration, /disabled=\{!legalReviewed\}/);
+  assert.match(registration, /أكمل التمرير أولًا/);
+  assert.match(registration, /termsOfUseSections\.map/);
+  assert.match(registration, /privacyPolicySections\.map/);
+  assert.match(registration, /applicationPermissionDisclosures\.map/);
+  assert.match(registration, /target === "review" && !legalReviewed/);
+  assert.match(legal, /export const termsOfUseSections/);
+  assert.match(legal, /export const privacyPolicySections/);
+  assert.match(legal, /export const applicationPermissionDisclosures/);
+  assert.match(legal, /export const LEGAL_FINAL_NOTICE = "يجب أن يكون الطرد مطابقًا للوصف المكتوب\."/);
+  for (const permission of ["الكاميرا — اختياري", "الموقع — اختياري", "الرسائل القصيرة — للمندوب فقط", "حماية الجهاز — اختياري", "التخزين والصوت داخل التطبيق"]) assert.match(legal, new RegExp(permission));
+  assert.match(legal, /يمكنك رفضها وإدخال الكود أو رقم التتبع يدويًا/);
+  assert.match(legal, /يمكنك رفضه وتحريك الدبوس/);
+  assert.match(legal, /لا يقرأ الموقع الرسائل الواردة ولا يرسل أي رسالة تلقائيًا/);
+  assert.match(legal, /لا يستلم الموقع بياناتك الحيوية/);
+  assert.match(settings, /LEGAL_FINAL_NOTICE/);
+  assert.match(readme, /تمرير المحتوى كاملًا من أعلاه إلى نهايته/);
+  assert.match(locationMap, /tile\.openstreetmap\.org/);
+  assert.match(locationMap, /navigator\.geolocation\.getCurrentPosition/);
+  assert.match(locationMap, /await onConfirm\(\{ latitude, longitude \}\)/);
+  assert.match(locationMap, /تثبيت وقراءة العنوان/);
+  assert.match(locationMap, /جارٍ قراءة العنوان/);
+  assert.match(locationMap, /يمكنك تعديل المدينة والمنطقة والشارع يدويًا/);
+  assert.match(locationMap, /© OpenStreetMap/);
+  assert.match(mapMatcher, /export function matchRegistrationMapAddress/);
+  assert.match(mapMatcher, /governorates\.filter/);
+  assert.match(reverseGeocoder, /https:\/\/api\.geoapify\.com\/v1\/geocode\/reverse/);
+  assert.match(reverseGeocoder, /searchParams\.set\("lang", "ar"\)/);
+  assert.match(reverseGeocoder, /searchParams\.set\("apiKey", apiKey\)/);
+  assert.doesNotMatch(reverseGeocoder, /nominatim\.openstreetmap\.org/);
   assert.match(registration, /Array\(6\)\.fill\(""\)/);
   assert.match(registration, /autoComplete=\{index === 0 \? "one-time-code" : "off"\}/);
   assert.match(registration, /لن يُنشأ الحساب قبل تأكيد البريد الإلكتروني/);
@@ -170,6 +226,7 @@ test("uses a four-step reference-style registration and creates the account only
   assert.doesNotMatch(registration, /رسالة نصية|SMS|تأكيد رقم الجوال/);
 
   const publicRoutes = server.split("const session = await authenticate")[0];
+  assert.match(publicRoutes, /url\.pathname === "\/api\/almadina\/geocode\/reverse" && request\.method === "POST"/);
   assert.match(publicRoutes, /url\.pathname === "\/api\/almadina\/register\/request"/);
   assert.match(publicRoutes, /url\.pathname === "\/api\/almadina\/register\/verify"/);
   assert.match(server, /REGISTRATION_CODE_DURATION = 10 \* 60/);
@@ -179,20 +236,46 @@ test("uses a four-step reference-style registration and creates the account only
   assert.match(server, /saveVerifiedRegistration/);
   assert.match(server, /أكمل خطوات إنشاء الحساب ثم أكّد بريدك الإلكتروني/);
   assert.match(server, /HttpOnly; SameSite=Strict/);
+  assert.match(server, /REVERSE_GEOCODE_REQUEST_IP_LIMIT = 20/);
+  assert.match(cloudflareWorker, /geoapifyApiKey: env\.GEOAPIFY_API_KEY/);
+  assert.match(renderWorker, /geoapifyApiKey: process\.env\.GEOAPIFY_API_KEY/);
+  assert.match(blueprint, /key:\s*GEOAPIFY_API_KEY\s*\n\s*sync:\s*false/);
 
   assert.match(delivery, /deliverRegistrationVerificationCode/);
   assert.match(delivery, /رمز تأكيد البريد الإلكتروني \| المدينة إكسبرس/);
   assert.match(delivery, /purpose: "registration"/);
   assert.match(schema, /sqliteTable\("almadina_registration_requests"/);
-  assert.match(migration, /CREATE TABLE `almadina_registration_requests`/);
-  assert.match(migration, /`password_hash` text NOT NULL/);
-  assert.match(migration, /`code_hash` text NOT NULL/);
-  assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM|ALTER TABLE/);
+  assert.match(schema, /sqliteTable\("almadina_registration_locations"/);
+  assert.match(registrationMigration, /CREATE TABLE `almadina_registration_requests`/);
+  assert.match(registrationMigration, /`password_hash` text NOT NULL/);
+  assert.match(registrationMigration, /`code_hash` text NOT NULL/);
+  assert.doesNotMatch(registrationMigration, /DROP TABLE|DELETE FROM|ALTER TABLE/);
+  assert.match(locationMigration, /CREATE TABLE `almadina_registration_locations`/);
+  assert.match(locationMigration, /`latitude` real NOT NULL/);
+  assert.match(locationMigration, /`longitude` real NOT NULL/);
+  assert.doesNotMatch(locationMigration, /DROP TABLE|DELETE FROM|ALTER TABLE/);
+  assert.match(server, /INSERT INTO almadina_registration_locations/);
+  assert.match(server, /location\.governorate,[\s\S]*location\.city,[\s\S]*location\.address,[\s\S]*location\.latitude,[\s\S]*location\.longitude/);
   assert.match(styles, /\.registration-flow__dots\s*\{/);
   assert.match(styles, /\.registration-flow__code\s*\{[^}]*repeat\(6,/);
+  assert.match(styles, /\.registration-map__surface\s*\{/);
+  assert.match(styles, /\.registration-flow__location-status\s*\{/);
+  assert.match(styles, /\.registration-flow__legal-open\s*\{/);
+  assert.match(styles, /\.registration-legal-modal\s*\{/);
+  assert.match(styles, /\.registration-legal-modal__permissions\s*\{[^}]*repeat\(2,/);
+  assert.match(styles, /\.registration-location-modal__list\s*\{/);
   assert.match(styles, /\.auth-shell--register/);
-  assert.match(readme, /أربع خطوات واضحة/);
+  assert.match(settings, /الشروط والخصوصية والأذونات/);
+  assert.match(settings, /termsOfUseSections\.map/);
+  assert.match(settings, /privacyPolicySections\.map/);
+  assert.match(settings, /applicationPermissionDisclosures\.map/);
+  assert.match(readme, /خمس خطوات واضحة/);
+  assert.match(readme, /تعرض خطوة المراجعة زرًا واضحًا لفتح شروط الاستخدام وسياسة الخصوصية والأذونات/);
+  assert.match(readme, /خريطة تفاعلية من OpenStreetMap/);
+  assert.match(readme, /GEOAPIFY_API_KEY/);
+  assert.match(readme, /إكمال العنوان يدويًا/);
   assert.match(readme, /لا يُنشأ الحساب ولا تبدأ الجلسة قبل نجاح التحقق/);
+  assert.doesNotMatch(`${cloudflareWorker}\n${renderWorker}\n${blueprint}\n${readme}`, /GEOAPIFY_API_KEY\s*[:=]\s*[A-Za-z0-9_-]{20,}/);
 });
 
 test("starts with only the administrator and removes all persisted demonstration accounts and records", async () => {
@@ -439,11 +522,12 @@ test("gates secure mobile biometric unlock behind an encrypted four-digit app lo
 });
 
 test("keeps merchant and courier account fields read-only while administrators manage them", async () => {
-  const [management, admin, server, settings, styles, application] = await Promise.all([
+  const [management, admin, server, settings, legal, styles, application] = await Promise.all([
     readFile(new URL("../app/components/management-pages.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/admin.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/components/settings-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/legal.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
   ]);
@@ -463,7 +547,7 @@ test("keeps merchant and courier account fields read-only while administrators m
   assert.match(admin, /className="admin-account-edit-modal"/);
   assert.match(admin, /المسؤول فقط يستطيع حفظ التغييرات على بيانات هذا الحساب/);
   assert.match(settings, /بيانات حسابك للعرض فقط/);
-  assert.match(settings, /لا يغيّر بيانات الحساب إلا المسؤول من لوحة الإدارة/);
+  assert.match(legal, /لا يغيّر بيانات الحساب إلا المسؤول من لوحة الإدارة/);
   assert.doesNotMatch(styles, /\.profile-readonly__notice/);
   assert.match(styles, /\.profile-readonly \.field__control input:read-only/);
   assert.match(styles, /\.admin-account-edit-modal/);
@@ -573,6 +657,8 @@ test("lets courier employees deliver a ready collection invoice with the custome
   assert.match(employee, /maxLength=\{4\}/);
   assert.match(employee, /تحقق وتسليم التحصيل/);
   assert.match(employee, /تم التسليم/);
+  assert.match(employee, /href=\{`sms:\$\{order\.recipientPhone\}`\}/);
+  assert.match(employee, /إشعار العميل/);
   assert.match(context, /verifyCollectionCode:\s*\(invoiceId: string, verificationCode: string\) => Promise<boolean>/);
   assert.match(application, /sharedRequest\("collections\/verify"/);
   assert.match(verificationHandler, /"admin"/);

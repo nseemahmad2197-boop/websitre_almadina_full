@@ -10,6 +10,7 @@ import {
 } from "@simplewebauthn/server";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
+import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
 
 const SESSION_COOKIE = "almadina_session";
 const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
@@ -45,6 +46,8 @@ const REGISTRATION_RATE_LIMIT_WINDOW = 15 * 60;
 const REGISTRATION_REQUEST_IP_LIMIT = 10;
 const REGISTRATION_REQUEST_EMAIL_LIMIT = 3;
 const REGISTRATION_VERIFY_IP_LIMIT = 20;
+const REVERSE_GEOCODE_RATE_LIMIT_WINDOW = 10 * 60;
+const REVERSE_GEOCODE_REQUEST_IP_LIMIT = 20;
 const DEVICE_ACTIVITY_UPDATE_INTERVAL = 5 * 60 * 1000;
 const initializedDatabases = new WeakMap<D1Database, Promise<void>>();
 
@@ -115,8 +118,17 @@ type RegistrationRequestRow = {
   expires_at: number;
   created_at: string;
 };
+type RegistrationLocationRow = {
+  request_hash: string;
+  governorate: string;
+  city: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  created_at: string;
+};
 
-export type AlmadinaApiConfig = PasswordResetDeliveryConfig;
+export type AlmadinaApiConfig = PasswordResetDeliveryConfig & ReverseGeocodingConfig;
 
 class ApiRequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -326,6 +338,15 @@ async function initializeDatabase(database: D1Database): Promise<void> {
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_registration_requests_email_idx ON almadina_registration_requests (email)"),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_registration_requests_phone_idx ON almadina_registration_requests (phone)"),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_registration_requests_expires_at_idx ON almadina_registration_requests (expires_at)"),
+    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_registration_locations (
+      request_hash TEXT PRIMARY KEY NOT NULL,
+      governorate TEXT NOT NULL,
+      city TEXT NOT NULL,
+      address TEXT NOT NULL,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      created_at TEXT NOT NULL
+    )`),
   ]);
 
   const existing = await database.prepare("SELECT revision FROM almadina_state WHERE id = ?").bind("main").first<{ revision: number }>();
@@ -469,6 +490,8 @@ async function saveVerifiedRegistration(
           WHERE request_hash = ? AND code_hash = ? AND expires_at > ? AND failed_attempts < ?)`)
       .bind(payload, createdAt, "main", revision, requestHash, codeHash, now, REGISTRATION_MAX_FAILED_ATTEMPTS),
     database.prepare(`DELETE FROM almadina_registration_requests WHERE request_hash = ? AND ${stateMatches}`)
+      .bind(requestHash, "main", nextRevision, payload),
+    database.prepare(`DELETE FROM almadina_registration_locations WHERE request_hash = ? AND ${stateMatches}`)
       .bind(requestHash, "main", nextRevision, payload),
     database.prepare(`INSERT INTO almadina_sessions (token_hash, user_id, expires_at, created_at)
       SELECT ?, ?, ?, ? FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?`)
@@ -669,6 +692,24 @@ async function enforceRegistrationRateLimit(
     .bind(keyHash, `registration-${action}`, resetAt, now, now).first<RateLimitRow>();
   if (!rate || rate.request_count > limit) {
     throw new ApiRequestError("محاولات كثيرة لإنشاء الحساب. انتظر بضع دقائق ثم حاول مجددًا.", 429);
+  }
+}
+
+async function enforceReverseGeocodeRateLimit(database: D1Database, request: Request): Promise<void> {
+  const keyHash = await sha256(`reverse-geocode:${requestClientAddress(request)}`);
+  const now = Math.floor(Date.now() / 1000);
+  const resetAt = now + REVERSE_GEOCODE_RATE_LIMIT_WINDOW;
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
+  const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT (key_hash) DO UPDATE SET
+      action = excluded.action,
+      request_count = CASE WHEN almadina_rate_limits.reset_at <= ? THEN 1 ELSE almadina_rate_limits.request_count + 1 END,
+      reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
+    RETURNING request_count, reset_at`)
+    .bind(keyHash, "reverse-geocode", resetAt, now, now).first<RateLimitRow>();
+  if (!rate || rate.request_count > REVERSE_GEOCODE_REQUEST_IP_LIMIT) {
+    throw new ApiRequestError("محاولات كثيرة لتحديد العنوان من الخريطة. انتظر عشر دقائق أو أدخل العنوان يدويًا.", 429);
   }
 }
 
@@ -2108,6 +2149,42 @@ async function login(database: D1Database, request: Request): Promise<Response> 
   return json(snapshot(state, account), 200, { "Set-Cookie": sessionCookie(request, token) });
 }
 
+async function reverseGeocodeRegistrationAddress(
+  database: D1Database,
+  request: Request,
+  config: AlmadinaApiConfig,
+): Promise<Response> {
+  let submitted: unknown;
+  try {
+    submitted = await request.json();
+  } catch {
+    return json({ error: "بيانات نقطة الخريطة غير صالحة." }, 400);
+  }
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) {
+    return json({ error: "بيانات نقطة الخريطة غير صالحة." }, 400);
+  }
+
+  const payload = submitted as Record<string, unknown>;
+  const latitude = Math.round(Number(payload.latitude) * 1_000_000) / 1_000_000;
+  const longitude = Math.round(Number(payload.longitude) * 1_000_000) / 1_000_000;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
+    || latitude < 29.35 || latitude > 33.55 || longitude < 34.1 || longitude > 35.95) {
+    return json({ error: "اختر نقطة داخل نطاق التوصيل على الخريطة." }, 400);
+  }
+  if (!isReverseGeocodingConfigured(config)) {
+    return json({ error: "التعبئة التلقائية للعناوين غير مهيأة حاليًا. يمكنك اختيار المدينة والمنطقة والشارع يدويًا." }, 503);
+  }
+
+  await enforceReverseGeocodeRateLimit(database, request);
+  try {
+    const address = await reverseGeocode(config, { latitude, longitude });
+    return json({ success: true, address });
+  } catch (error) {
+    console.error("Reverse geocoding failed.", error instanceof Error ? error.message : "Unknown reverse geocoding error.");
+    return json({ error: "تعذّر قراءة العنوان من الخريطة. ثبّت النقطة وأكمل المدينة والمنطقة والشارع يدويًا." }, 502);
+  }
+}
+
 async function requestRegistration(
   database: D1Database,
   request: Request,
@@ -2128,6 +2205,13 @@ async function requestRegistration(
   const phone = normalizeAccountPhone(typeof payload.phone === "string" ? payload.phone : "") ?? "";
   const store = typeof payload.store === "string" ? payload.store.trim() : "";
   const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  const submittedGovernorate = typeof payload.governorate === "string" ? payload.governorate.trim() : "";
+  const city = typeof payload.city === "string" ? payload.city.trim() : "";
+  const address = typeof payload.address === "string" ? payload.address.trim() : "";
+  const submittedLatitude = typeof payload.latitude === "number" ? payload.latitude : Number.NaN;
+  const submittedLongitude = typeof payload.longitude === "number" ? payload.longitude : Number.NaN;
+  const latitude = Math.round(submittedLatitude * 1_000_000) / 1_000_000;
+  const longitude = Math.round(submittedLongitude * 1_000_000) / 1_000_000;
   const password = typeof payload.password === "string" ? payload.password : "";
   const acceptedTerms = payload.acceptedTerms === true;
 
@@ -2135,6 +2219,16 @@ async function requestRegistration(
   if (!/^05\d{8}$/.test(phone)) return json({ error: "أدخل رقم جوال مكوّنًا من 10 أرقام ويبدأ بـ 05." }, 400);
   if (!store || store.length > 120) return json({ error: "أدخل اسم المتجر بصورة صحيحة." }, 400);
   if (!validEmail(email) || email.length > 254) return json({ error: "أدخل بريدًا إلكترونيًا صحيحًا." }, 400);
+  const deliveryRegion = resolveDeliveryRegion(submittedGovernorate, city);
+  if (!submittedGovernorate || !city || !deliveryRegion || submittedGovernorate.length > 120 || city.length > 120) {
+    return json({ error: "اختر مدينة ومنطقة متطابقتين من قائمة العناوين." }, 400);
+  }
+  const governorate = deliveryRegion.name;
+  if (address.length < 2 || address.length > 180) return json({ error: "أدخل اسم الشارع أو وصف العنوان بصورة صحيحة." }, 400);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
+    || latitude < 29.35 || latitude > 33.55 || longitude < 34.1 || longitude > 35.95) {
+    return json({ error: "حدد موقعًا داخل نطاق التوصيل على الخريطة." }, 400);
+  }
   if (!validNewPassword(password)) {
     return json({ error: "يجب أن تحتوي كلمة المرور على 8 أحرف على الأقل وحرف ورقم ورمز." }, 400);
   }
@@ -2161,12 +2255,20 @@ async function requestRegistration(
   const now = Math.floor(Date.now() / 1000);
   const createdAt = new Date().toISOString();
   await database.batch([
+    database.prepare(`DELETE FROM almadina_registration_locations WHERE request_hash IN
+      (SELECT request_hash FROM almadina_registration_requests WHERE expires_at <= ?)`).bind(now),
+    database.prepare(`DELETE FROM almadina_registration_locations WHERE request_hash IN
+      (SELECT request_hash FROM almadina_registration_requests WHERE email = ? OR phone = ?)`).bind(email, phone),
     database.prepare("DELETE FROM almadina_registration_requests WHERE expires_at <= ?").bind(now),
     database.prepare("DELETE FROM almadina_registration_requests WHERE email = ? OR phone = ?").bind(email, phone),
     database.prepare(`INSERT INTO almadina_registration_requests
       (request_hash, email, name, phone, store, password_hash, code_hash, failed_attempts, expires_at, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`)
       .bind(requestHash, email, name, phone, store, passwordHash, codeHash, now + REGISTRATION_CODE_DURATION, createdAt),
+    database.prepare(`INSERT INTO almadina_registration_locations
+      (request_hash, governorate, city, address, latitude, longitude, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .bind(requestHash, governorate, city, address, latitude, longitude, createdAt),
   ]);
 
   try {
@@ -2177,7 +2279,10 @@ async function requestRegistration(
     });
   } catch (error) {
     console.error("Registration verification delivery failed.", error instanceof Error ? error.message : "Unknown delivery error.");
-    await database.prepare("DELETE FROM almadina_registration_requests WHERE request_hash = ?").bind(requestHash).run();
+    await database.batch([
+      database.prepare("DELETE FROM almadina_registration_locations WHERE request_hash = ?").bind(requestHash),
+      database.prepare("DELETE FROM almadina_registration_requests WHERE request_hash = ?").bind(requestHash),
+    ]);
     return json({ error: "تعذّر إرسال رمز التحقق إلى بريدك. تحقق من إعدادات البريد ثم حاول مجددًا." }, 502);
   }
 
@@ -2224,6 +2329,10 @@ async function verifyRegistration(database: D1Database, request: Request): Promi
   if (!row || row.expires_at <= now || row.failed_attempts >= REGISTRATION_MAX_FAILED_ATTEMPTS) {
     return invalidRegistrationCode();
   }
+  const location = await database.prepare(`SELECT request_hash, governorate, city, address, latitude, longitude, created_at
+    FROM almadina_registration_locations WHERE request_hash = ?`)
+    .bind(requestHash).first<RegistrationLocationRow>();
+  if (!location) return invalidRegistrationCode();
 
   const submittedCodeHash = await hashPasswordResetCode(requestToken, code);
   if (!equalIdentifier(submittedCodeHash, row.code_hash)) {
@@ -2239,6 +2348,11 @@ async function verifyRegistration(database: D1Database, request: Request): Promi
     name: row.name,
     phone: row.phone,
     store: row.store,
+    governorate: location.governorate,
+    city: location.city,
+    address: location.address,
+    latitude: location.latitude,
+    longitude: location.longitude,
     email: row.email,
     password: row.password_hash,
     role: "merchant",
@@ -2253,7 +2367,10 @@ async function verifyRegistration(database: D1Database, request: Request): Promi
       entry.email.trim().toLowerCase() === row.email
       || normalizeAccountPhone(entry.phone) === row.phone
     ))) {
-      await database.prepare("DELETE FROM almadina_registration_requests WHERE request_hash = ?").bind(requestHash).run();
+      await database.batch([
+        database.prepare("DELETE FROM almadina_registration_locations WHERE request_hash = ?").bind(requestHash),
+        database.prepare("DELETE FROM almadina_registration_requests WHERE request_hash = ?").bind(requestHash),
+      ]);
       return json(
         { error: "تم تسجيل حساب بهذه البيانات أثناء التحقق. سجّل الدخول أو استخدم بيانات أخرى." },
         409,
@@ -2423,6 +2540,7 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     await ensureDatabase(database);
 
     if (url.pathname === "/api/almadina/login" && request.method === "POST") return await login(database, request);
+    if (url.pathname === "/api/almadina/geocode/reverse" && request.method === "POST") return await reverseGeocodeRegistrationAddress(database, request, config);
     if (url.pathname === "/api/almadina/register/request" && request.method === "POST") return await requestRegistration(database, request, config);
     if (url.pathname === "/api/almadina/register/verify" && request.method === "POST") return await verifyRegistration(database, request);
     if (url.pathname === "/api/almadina/register" && request.method === "POST") return legacyRegistrationEndpoint(request);

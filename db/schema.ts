@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const almadinaState = sqliteTable("almadina_state", {
   id: text("id").primaryKey(),
@@ -103,3 +103,13 @@ export const almadinaRegistrationRequests = sqliteTable("almadina_registration_r
   index("almadina_registration_requests_phone_idx").on(table.phone),
   index("almadina_registration_requests_expires_at_idx").on(table.expiresAt),
 ]);
+
+export const almadinaRegistrationLocations = sqliteTable("almadina_registration_locations", {
+  requestHash: text("request_hash").primaryKey(),
+  governorate: text("governorate").notNull(),
+  city: text("city").notNull(),
+  address: text("address").notNull(),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  createdAt: text("created_at").notNull(),
+});

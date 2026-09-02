@@ -26,6 +26,7 @@ interface PasswordResetDeliveryBindings {
   BREVO_API_KEY?: string;
   BREVO_FROM_EMAIL?: string;
   BREVO_FROM_NAME?: string;
+  GEOAPIFY_API_KEY?: string;
 }
 
 declare namespace NodeJS {
@@ -33,6 +34,7 @@ declare namespace NodeJS {
     BREVO_API_KEY?: string;
     BREVO_FROM_EMAIL?: string;
     BREVO_FROM_NAME?: string;
+    GEOAPIFY_API_KEY?: string;
   }
 }
 

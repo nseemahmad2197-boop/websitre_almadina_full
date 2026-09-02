@@ -71,7 +71,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .theme-switch .icon-button { width: 36px; height: 36px; color: #fff; }
 .theme-switch .icon-button.is-selected { background: #fff; color: var(--green-dark); }
 .auth-shell { z-index: 1; width: min(100%, 392px); margin: auto; }
-.auth-shell--register { width: min(100%, 430px); }
+.auth-shell--register { width: min(100%, 470px); }
 .auth-shell > .brand { margin-bottom: 27px; animation: float-in .55s ease both; }
 .auth-card { padding: 25px 24px 21px; border-radius: 23px; background: var(--surface); color: var(--text); box-shadow: 0 23px 65px rgb(0 0 0 / 14%); animation: card-arrive .38s ease both; }
 .auth-card__header { margin-bottom: 19px; text-align: center; }
@@ -95,15 +95,95 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .registration-flow__dots > span.is-active { width: 22px; background: var(--green); box-shadow: 0 3px 8px rgb(8 124 69 / 20%); }
 .registration-flow__form { min-height: 295px; align-content: start; }
 .registration-flow__stage { display: grid; gap: 12px; animation: fade-in .2s ease both; }
+.registration-flow__location { gap: 10px; }
+.registration-flow__location-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.registration-location-field__button { width: 100%; justify-content: flex-start; border-color: transparent; color: var(--text); text-align: right; cursor: pointer; }
+.registration-location-field__button > span { min-width: 0; flex: 1; overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.registration-location-field__button > span.is-placeholder { color: var(--muted); font-weight: 600; opacity: .78; }
+.registration-location-field__button > svg:last-child { flex: 0 0 auto; color: var(--muted); }
+.registration-location-field__button:focus-visible { border-color: rgb(8 124 69 / 65%); outline: none; box-shadow: 0 0 0 3px rgb(8 124 69 / 9%); }
+.registration-location-field__button:disabled { cursor: not-allowed; opacity: .55; }
+.registration-map { display: grid; gap: 7px; }
+.registration-map__surface { position: relative; height: clamp(220px, 30svh, 270px); overflow: hidden; border: 1px solid var(--line); border-radius: 16px; outline: none; background: #d8e3df; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 22%); cursor: grab; touch-action: none; user-select: none; }
+.registration-map__surface:focus-visible { border-color: var(--green); box-shadow: 0 0 0 3px rgb(8 124 69 / 12%); }
+.registration-map__surface.is-dragging { cursor: grabbing; }
+.registration-map__tiles { position: absolute; inset: 0; overflow: hidden; background: linear-gradient(135deg, #dce9e5, #c9d9d4); }
+.registration-map__tiles > img { position: absolute; width: 256px; height: 256px; max-width: none; pointer-events: none; user-select: none; }
+.registration-map__pin { position: absolute; z-index: 3; top: 50%; left: 50%; display: grid; width: 42px; height: 42px; place-items: center; border-radius: 50% 50% 50% 8px; background: var(--green); color: #fff; box-shadow: 0 8px 16px rgb(12 70 44 / 35%); transform: translate(-50%, -100%) rotate(-45deg); pointer-events: none; }
+.registration-map__pin > svg { transform: rotate(45deg); }
+.registration-map__pin::after { position: absolute; top: calc(100% + 8px); left: 50%; width: 15px; height: 6px; border-radius: 50%; background: rgb(0 0 0 / 20%); content: ""; filter: blur(2px); transform: translateX(-50%) rotate(45deg); }
+.registration-map__zoom { position: absolute; z-index: 4; top: 10px; inset-inline-start: 10px; display: grid; overflow: hidden; border: 1px solid rgb(35 54 47 / 15%); border-radius: 10px; background: rgb(255 255 255 / 92%); box-shadow: 0 5px 13px rgb(0 0 0 / 12%); }
+.registration-map__zoom > button { width: 35px; height: 33px; border: 0; background: transparent; color: #1d3329; cursor: pointer; font-size: 20px; font-weight: 750; line-height: 1; }
+.registration-map__zoom > button + button { border-top: 1px solid rgb(35 54 47 / 13%); }
+.registration-map__zoom > button:disabled { cursor: not-allowed; opacity: .38; }
+.registration-map__locate, .registration-map__confirm { position: absolute; z-index: 4; bottom: 10px; display: inline-flex; min-height: 34px; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid rgb(35 54 47 / 15%); border-radius: 10px; background: rgb(255 255 255 / 93%); color: #173c2a; box-shadow: 0 5px 13px rgb(0 0 0 / 14%); cursor: pointer; font-size: 9px; font-weight: 800; white-space: nowrap; }
+.registration-map__locate { inset-inline-start: 10px; }
+.registration-map__confirm { inset-inline-end: 10px; border-color: transparent; background: var(--green); color: #fff; }
+.registration-map.is-confirmed .registration-map__confirm { background: #075f37; }
+.registration-map__locate:disabled, .registration-map__confirm:disabled { cursor: not-allowed; opacity: .55; }
+.registration-map__attribution { position: absolute; z-index: 4; right: 6px; bottom: 50px; padding: 2px 4px; border-radius: 4px; background: rgb(255 255 255 / 78%); color: #244137; font-size: 7px; text-decoration: none; }
+.registration-map__help { display: flex; align-items: flex-start; gap: 6px; color: var(--muted); font-size: 8px; line-height: 1.65; }
+.registration-map__help > svg { flex: 0 0 auto; margin-top: 1px; color: var(--green); }
+.registration-flow__location-status { display: flex; align-items: flex-start; gap: 6px; padding: 8px 9px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 72%); border-radius: 10px; background: color-mix(in srgb, var(--green-pale), var(--surface) 65%); color: var(--green-dark); font-size: 9px; font-weight: 700; line-height: 1.7; }
+.registration-flow__location-status > svg { flex: 0 0 auto; margin-top: 1px; }
+.registration-location-modal { width: min(100%, 460px); }
+.registration-location-modal > .field { margin-bottom: 11px; }
+.registration-location-modal__list { display: grid; max-height: min(52svh, 440px); gap: 5px; padding: 1px 2px 2px; overflow-y: auto; overscroll-behavior: contain; }
+.registration-location-modal__list > button { display: grid; min-height: 43px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 0 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--text); text-align: right; cursor: pointer; font-size: 11px; font-weight: 700; }
+.registration-location-modal__list > button:hover, .registration-location-modal__list > button.is-selected { border-color: color-mix(in srgb, var(--green), var(--line) 38%); background: var(--green-pale); color: var(--green-dark); }
+.registration-location-modal__list > button > svg:last-child { color: var(--green); }
+.registration-location-modal__empty { display: grid; min-height: 145px; justify-items: center; place-content: center; gap: 8px; color: var(--muted); font-size: 10px; }
 .registration-flow__secure-note { display: flex; align-items: center; gap: 7px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 76%); border-radius: 12px; background: color-mix(in srgb, var(--green-pale), var(--surface) 62%); color: var(--muted); font-size: 9px; line-height: 1.7; }
 .registration-flow__secure-note > svg { flex: 0 0 auto; color: var(--green); }
 .registration-flow__summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .registration-flow__summary > div { display: grid; min-width: 0; gap: 4px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-muted); }
 .registration-flow__summary span { color: var(--muted); font-size: 8px; font-weight: 700; }
 .registration-flow__summary strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.registration-flow__summary > .registration-flow__summary-address { grid-column: 1 / -1; }
+.registration-flow__legal-open { display: grid; min-height: 64px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--text); text-align: right; cursor: pointer; transition: border-color .18s, background-color .18s, box-shadow .18s; }
+.registration-flow__legal-open:hover:not(:disabled), .registration-flow__legal-open:focus-visible { border-color: color-mix(in srgb, var(--green), var(--line) 45%); outline: none; background: color-mix(in srgb, var(--green-pale), var(--surface) 72%); box-shadow: 0 0 0 3px rgb(8 124 69 / 8%); }
+.registration-flow__legal-open:disabled { cursor: not-allowed; opacity: .55; }
+.registration-flow__legal-open-icon { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 12px; background: var(--green-pale); color: var(--green); }
+.registration-flow__legal-open-copy { display: grid; min-width: 0; gap: 3px; }
+.registration-flow__legal-open-copy strong { font-size: 10px; }
+.registration-flow__legal-open-copy small { color: var(--muted); font-size: 8px; line-height: 1.55; }
+.registration-flow__legal-open > svg { color: var(--muted); transform: rotate(180deg); }
+.registration-flow__legal-open.is-reviewed { border-color: color-mix(in srgb, var(--green), var(--line) 58%); background: color-mix(in srgb, var(--green-pale), var(--surface) 65%); }
 .registration-flow__consent { display: flex; align-items: flex-start; gap: 9px; padding: 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 72%); border-radius: 13px; background: color-mix(in srgb, var(--green-pale), var(--surface) 67%); color: var(--muted); cursor: pointer; font-size: 9px; line-height: 1.8; }
 .registration-flow__consent input { width: 17px; height: 17px; flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--green); }
 .registration-flow__consent b { color: var(--text); }
+.registration-flow__consent:has(input:disabled) { cursor: not-allowed; opacity: .62; }
+.registration-legal-modal { display: grid; width: min(100%, 690px); max-height: min(90svh, 820px); grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; padding: 0; }
+.registration-legal-modal > .modal__header { min-height: 66px; padding: 14px 18px; margin: 0; border-bottom: 1px solid var(--line); }
+.registration-legal-modal__intro { padding: 12px 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--green-pale), var(--surface) 74%); color: var(--muted); font-size: 12px; line-height: 1.8; }
+.registration-legal-modal__body { display: grid; gap: 17px; padding: 17px 18px 22px; overflow-y: auto; overscroll-behavior: contain; }
+.registration-legal-modal__body:focus-visible { outline: 2px solid var(--green); outline-offset: -3px; }
+.registration-legal-modal__section { display: grid; gap: 12px; scroll-margin-top: 12px; }
+.registration-legal-modal__section + .registration-legal-modal__section { padding-top: 17px; border-top: 1px solid var(--line); }
+.registration-legal-modal__section > header { display: flex; align-items: center; gap: 10px; }
+.registration-legal-modal__section > header > span { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 12px; background: var(--green-pale); color: var(--green); }
+.registration-legal-modal__section > header > div { display: grid; gap: 2px; }
+.registration-legal-modal__section h3 { font-size: 16px; }
+.registration-legal-modal__section > header p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.registration-legal-modal__entries { display: grid; gap: 8px; }
+.registration-legal-modal__entries > article { padding: 12px 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-muted); }
+.registration-legal-modal__entries h4, .registration-legal-modal__permissions h4 { margin-bottom: 5px; color: var(--text); font-size: 13px; }
+.registration-legal-modal__entries p, .registration-legal-modal__permissions p { color: var(--muted); font-size: 12px; line-height: 1.9; }
+.registration-legal-modal__permissions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.registration-legal-modal__permissions > article { display: flex; min-width: 0; align-items: flex-start; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-muted); }
+.registration-legal-modal__permissions > article > span { display: grid; width: 35px; height: 35px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: var(--surface); color: var(--green); }
+.registration-legal-modal__footer { display: grid; gap: 8px; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
+.registration-legal-modal__footer > small { color: var(--muted); font-size: 10px; text-align: center; }
+.registration-legal-modal__scroll-status { display: grid; gap: 7px; }
+.registration-legal-modal__scroll-status > div { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
+.registration-legal-modal__scroll-status > div > span { flex: 1; }
+.registration-legal-modal__scroll-status > div > b { color: var(--green-dark); font-size: 11px; }
+.registration-legal-modal__scroll-status > span { display: block; height: 5px; overflow: hidden; border-radius: 999px; background: var(--surface-muted); }
+.registration-legal-modal__scroll-status > span > i { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width 140ms ease; }
+.registration-legal-modal__scroll-status.is-complete > div { color: var(--green); }
+.legal-final-notice { display: flex; align-items: center; gap: 10px; padding: 14px 15px; border: 1px solid color-mix(in srgb, var(--green), transparent 68%); border-radius: 14px; background: var(--green-pale); color: var(--green-dark); line-height: 1.75; }
+.legal-final-notice svg { flex: 0 0 auto; }
+.legal-final-notice strong { font-size: 14px; }
 .registration-flow__verification { justify-items: center; text-align: center; }
 .registration-flow__mail-icon { display: grid; width: 55px; height: 55px; place-items: center; border-radius: 17px; background: var(--green-pale); color: var(--green); }
 .registration-flow__verification > p { max-width: 340px; color: var(--muted); font-size: 10px; line-height: 1.8; }
@@ -874,8 +954,13 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .faq-item.is-open > button > svg:last-child { transform: rotate(180deg); }
 .faq-item > p { padding: 0 38px 15px 13px; color: var(--muted); font-size: 10px; line-height: 1.9; }
 .policy-list { display: grid; gap: 11px; }
-.policy-list h2 { font-size: 14px; }
+.policy-list__heading { display: flex; align-items: center; gap: 8px; padding: 12px 4px 2px; color: var(--green-dark); font-size: 17px; }
+.policy-list__heading > svg { color: var(--green); }
+.policy-list h3 { font-size: 14px; }
 .policy-list p { color: var(--muted); font-size: 11px; line-height: 1.95; }
+.policy-permission { display: flex; align-items: flex-start; gap: 11px; }
+.policy-permission > span { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 12px; background: var(--green-pale); color: var(--green); }
+.policy-permission > div { display: grid; gap: 4px; }
 
 /* Administration */
 .admin-page { gap: 14px; padding-top: 18px; }
@@ -1008,6 +1093,9 @@ html[data-theme="dark"] .membership-switch__option--diamond.is-selected { backgr
 .employee-order-card > div > strong { font-size: 11px; }
 .employee-order-card > div > span, .employee-order-card > div > a { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .employee-order-card > div > a { color: var(--green); }
+.employee-order-card__contacts { display: flex !important; min-width: 0; align-items: center; gap: 9px !important; }
+.employee-order-card__contacts > a { display: inline-flex; min-width: 0; align-items: center; gap: 4px; color: var(--green); font-size: 9px; font-weight: 750; text-decoration: none; }
+.employee-order-card__contacts > a:first-child { direction: ltr; }
 .employee-order-card__instructions { display: flex !important; min-width: 0; grid-column: 1 / -1; align-items: flex-start; gap: 9px !important; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 72%); border-radius: 12px; background: color-mix(in srgb, var(--green-pale), var(--surface) 54%); }
 .employee-order-card__instructions > span { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 9px; background: var(--surface); color: var(--green); }
 .employee-order-card__instructions > div { display: grid; min-width: 0; gap: 3px; }
@@ -1094,9 +1182,32 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .registration-flow__progress { gap: 6px; margin-bottom: 14px; }
   .registration-flow__form { min-height: 280px; }
   .registration-flow__stage { gap: 10px; }
+  .registration-flow__location-fields { gap: 7px; }
+  .registration-location-field__button { padding-right: 9px; padding-left: 9px; }
+  .registration-location-field__button > span { font-size: 9px; }
+  .registration-map__surface { height: min(235px, 31svh); border-radius: 14px; }
+  .registration-map__pin { width: 38px; height: 38px; }
+  .registration-map__locate, .registration-map__confirm { bottom: 8px; min-height: 32px; padding: 0 8px; font-size: 8px; }
+  .registration-map__locate { inset-inline-start: 8px; }
+  .registration-map__confirm { inset-inline-end: 8px; }
+  .registration-map__zoom { top: 8px; inset-inline-start: 8px; }
+  .registration-map__zoom > button { width: 32px; height: 30px; }
+  .registration-map__attribution { bottom: 46px; font-size: 6px; }
+  .registration-location-modal__list { max-height: 56svh; }
   .registration-flow__summary { gap: 6px; }
   .registration-flow__summary > div { padding: 9px; }
+  .registration-flow__legal-open { min-height: 59px; padding: 9px; }
+  .registration-flow__legal-open-icon { width: 36px; height: 36px; }
+  .registration-flow__legal-open-copy strong { font-size: 9px; }
   .registration-flow__secure-note, .registration-flow__consent { padding: 9px 10px; font-size: 8px; }
+  .registration-legal-modal > .modal__header { min-height: 58px; padding: 10px 14px; }
+  .registration-legal-modal__intro { padding: 10px 14px; font-size: 11px; }
+  .registration-legal-modal__body { gap: 14px; padding: 14px; }
+  .registration-legal-modal__section + .registration-legal-modal__section { padding-top: 14px; }
+  .registration-legal-modal__section h3 { font-size: 15px; }
+  .registration-legal-modal__permissions { grid-template-columns: 1fr; }
+  .registration-legal-modal__entries p, .registration-legal-modal__permissions p { font-size: 11px; }
+  .registration-legal-modal__footer { padding-right: 14px; padding-left: 14px; }
   .registration-flow__mail-icon { width: 50px; height: 50px; border-radius: 15px; }
   .registration-flow__code { gap: 5px; }
   .registration-flow__code input { height: 48px; border-radius: 10px; font-size: 20px; }
@@ -1349,6 +1460,8 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 
 @media (max-width: 350px) {
   .auth-card { padding-right: 13px; padding-left: 13px; }
+  .registration-flow__location-fields { grid-template-columns: 1fr; }
+  .registration-map__locate, .registration-map__confirm { padding-right: 6px; padding-left: 6px; }
   .balance-card__stats > div { width: 62px; }
   .topbar__actions .icon-button { width: 33px; }
   .status-card small { font-size: 7px; }

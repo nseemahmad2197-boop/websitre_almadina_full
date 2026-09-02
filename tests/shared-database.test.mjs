@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createSeedDatabase, removeLegacyDemoData } from "../app/lib/data.ts";
+import { matchRegistrationMapAddress } from "../app/lib/registration-map-address.ts";
+
+test("matches a reverse-geocoded pin to the supported registration address", () => {
+  assert.deepEqual(matchRegistrationMapAddress({
+    state: "محافظة نابلس",
+    city: "نابلس",
+    suburb: "رفيديا",
+    street: "شارع الجامعة",
+    houseNumber: "12",
+  }), {
+    governorate: "نابلس",
+    city: "نابلس",
+    address: "شارع الجامعة، مبنى 12",
+  });
+});
 
 test("normalizes legacy shipped collection invoices as delivered and paid", () => {
   const database = createSeedDatabase();
@@ -131,6 +146,10 @@ class FakeD1Statement {
 
     if (this.sql.includes("FROM almadina_registration_requests WHERE request_hash = ?")) {
       return this.database.registrationRequests.get(this.values[0]) ?? null;
+    }
+
+    if (this.sql.includes("FROM almadina_registration_locations WHERE request_hash = ?")) {
+      return this.database.registrationLocations.get(this.values[0]) ?? null;
     }
 
     if (this.sql.startsWith("UPDATE almadina_password_reset_requests SET verified_at") && this.sql.includes("RETURNING user_id")) {
@@ -513,6 +532,54 @@ class FakeD1Statement {
       return { success: true, meta: { changes: 1 } };
     }
 
+    if (this.sql.startsWith("INSERT INTO almadina_registration_locations")) {
+      const [requestHash, governorate, city, address, latitude, longitude, createdAt] = this.values;
+      this.database.registrationLocations.set(requestHash, {
+        request_hash: requestHash,
+        governorate,
+        city,
+        address,
+        latitude,
+        longitude,
+        created_at: createdAt,
+      });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_registration_locations WHERE request_hash IN")) {
+      let changes = 0;
+      if (this.sql.includes("expires_at <=")) {
+        const now = this.values[0];
+        for (const [requestHash] of this.database.registrationLocations) {
+          const registration = this.database.registrationRequests.get(requestHash);
+          if (!registration || registration.expires_at > now) continue;
+          this.database.registrationLocations.delete(requestHash);
+          changes += 1;
+        }
+      } else {
+        const [email, phone] = this.values;
+        for (const [requestHash] of this.database.registrationLocations) {
+          const registration = this.database.registrationRequests.get(requestHash);
+          if (!registration || (registration.email !== email && registration.phone !== phone)) continue;
+          this.database.registrationLocations.delete(requestHash);
+          changes += 1;
+        }
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_registration_locations WHERE request_hash")) {
+      const [requestHash] = this.values;
+      if (this.sql.includes("AND EXISTS")) {
+        const [, stateId, revision, payload] = this.values;
+        if (!this.database.state
+          || this.database.state.id !== stateId
+          || this.database.state.revision !== revision
+          || this.database.state.payload !== payload) return { success: true, meta: { changes: 0 } };
+      }
+      return { success: true, meta: { changes: Number(this.database.registrationLocations.delete(requestHash)) } };
+    }
+
     if (this.sql.startsWith("DELETE FROM almadina_registration_requests WHERE expires_at")) {
       const now = this.values[0];
       let changes = 0;
@@ -582,6 +649,7 @@ class FakeD1Database {
   rateLimits = new Map();
   passwordResets = new Map();
   registrationRequests = new Map();
+  registrationLocations = new Map();
 
   prepare(sql) {
     return new FakeD1Statement(this, sql);
@@ -597,6 +665,8 @@ async function loadWorker() {
     const { handleAlmadinaApi } = await import(process.env.ALMADINA_SERVER_TEST_MODULE);
     return {
       fetch: (request, environment, context) => handleAlmadinaApi(request, environment.DB, {
+        geoapifyApiKey: environment.GEOAPIFY_API_KEY,
+        reverseGeocoder: environment.REVERSE_GEOCODER,
         sender: environment.PASSWORD_RESET_SENDER,
         defer: (promise) => context.waitUntil(promise),
       }),
@@ -664,7 +734,19 @@ async function call(worker, database, path, options = {}) {
 }
 
 function accountPayload(name, email, phone) {
-  return { name, email, phone, store: `متجر ${name}`, password: "Customer@123", acceptedTerms: true };
+  return {
+    name,
+    email,
+    phone,
+    store: `متجر ${name}`,
+    governorate: "نابلس",
+    city: "نابلس",
+    address: "شارع فيصل، قرب الدوار",
+    latitude: 32.2211,
+    longitude: 35.2544,
+    password: "Customer@123",
+    acceptedTerms: true,
+  };
 }
 
 function sessionFrom(result) {
@@ -681,6 +763,49 @@ function namedCookieFrom(result, name) {
   assert.ok(match, `expected ${name} cookie in ${value}`);
   return match[1];
 }
+
+test("reverse-geocodes a registration pin with a safe manual fallback", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  let receivedPoint;
+  const address = {
+    state: "محافظة نابلس",
+    city: "نابلس",
+    suburb: "رفيديا",
+    street: "شارع الجامعة",
+    houseNumber: "12",
+  };
+  const resolved = await rawCall(worker, database, "geocode/reverse", {
+    method: "POST",
+    payload: { latitude: 32.2211, longitude: 35.2544 },
+    environment: {
+      REVERSE_GEOCODER: async (point) => {
+        receivedPoint = point;
+        return address;
+      },
+    },
+  });
+
+  assert.equal(resolved.status, 200);
+  assert.equal(resolved.body.success, true);
+  assert.deepEqual(receivedPoint, { latitude: 32.2211, longitude: 35.2544 });
+  assert.deepEqual(resolved.body.address, address);
+
+  const unavailable = await rawCall(worker, new FakeD1Database(), "geocode/reverse", {
+    method: "POST",
+    payload: { latitude: 32.2211, longitude: 35.2544 },
+  });
+  assert.equal(unavailable.status, 503);
+  assert.match(unavailable.body.error, /يدوي/);
+
+  const outsideServiceArea = await rawCall(worker, new FakeD1Database(), "geocode/reverse", {
+    method: "POST",
+    payload: { latitude: 40, longitude: 20 },
+    environment: { REVERSE_GEOCODER: async () => address },
+  });
+  assert.equal(outsideServiceArea.status, 400);
+  assert.match(outsideServiceArea.body.error, /نطاق التوصيل/);
+});
 
 test("creates an account only after the six-digit email verification code succeeds", async () => {
   const worker = await loadWorker();
@@ -723,11 +848,18 @@ test("creates an account only after the six-digit email verification code succee
 
   const requestCookie = namedCookieFrom(requested, "almadina_registration");
   const pending = [...database.registrationRequests.values()][0];
+  const pendingLocation = [...database.registrationLocations.values()][0];
   assert.ok(pending);
+  assert.ok(pendingLocation);
   assert.match(pending.password_hash, /^pbkdf2:100000:/);
   assert.notEqual(pending.password_hash, payload.password);
   assert.notEqual(pending.code_hash, delivered[0].code);
   assert.ok(!JSON.stringify(pending).includes(delivered[0].code));
+  assert.equal(pendingLocation.governorate, payload.governorate);
+  assert.equal(pendingLocation.city, payload.city);
+  assert.equal(pendingLocation.address, payload.address);
+  assert.equal(pendingLocation.latitude, payload.latitude);
+  assert.equal(pendingLocation.longitude, payload.longitude);
 
   const wrongCode = delivered[0].code === "000000" ? "000001" : "000000";
   const rejected = await rawCall(worker, database, "register/verify", {
@@ -750,7 +882,13 @@ test("creates an account only after the six-digit email verification code succee
   assert.equal(verified.body.database.users.length, 1);
   assert.equal(verified.body.database.users[0].email, "verified-signup@example.test");
   assert.equal(verified.body.database.users[0].password, "");
+  assert.equal(verified.body.database.users[0].governorate, payload.governorate);
+  assert.equal(verified.body.database.users[0].city, payload.city);
+  assert.equal(verified.body.database.users[0].address, payload.address);
+  assert.equal(verified.body.database.users[0].latitude, payload.latitude);
+  assert.equal(verified.body.database.users[0].longitude, payload.longitude);
   assert.equal(database.registrationRequests.size, 0);
+  assert.equal(database.registrationLocations.size, 0);
   const sessionCookieValue = sessionFrom(verified);
   assert.match(sessionCookieValue, /^almadina_session=/);
 
@@ -788,6 +926,24 @@ test("creates an account only after the six-digit email verification code succee
   }
   assert.equal(deliveryFailure.status, 502);
   assert.equal([...database.registrationRequests.values()].some((entry) => entry.email === failurePayload.email), false);
+  assert.equal(database.registrationLocations.size, 0);
+
+  const mismatchedArea = await rawCall(worker, database, "register/request", {
+    method: "POST",
+    payload: { ...accountPayload("عنوان غير مطابق", "bad-area@example.test", "0591112255"), governorate: "نابلس", city: "القدس" },
+    environment,
+  });
+  assert.equal(mismatchedArea.status, 400);
+  assert.match(mismatchedArea.body.error, /مدينة ومنطقة متطابقتين/);
+
+  const outsideMap = await rawCall(worker, database, "register/request", {
+    method: "POST",
+    payload: { ...accountPayload("موقع خارج النطاق", "bad-map@example.test", "0591112266"), latitude: 40, longitude: 20 },
+    environment,
+  });
+  assert.equal(outsideMap.status, 400);
+  assert.match(outsideMap.body.error, /نطاق التوصيل على الخريطة/);
+  assert.equal(delivered.length, 1);
 });
 
 test("shares accounts and orders across devices while isolating customers and protecting sessions", async () => {

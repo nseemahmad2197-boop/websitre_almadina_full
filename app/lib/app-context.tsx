@@ -37,7 +37,9 @@ export type ConfirmOptions = {
 
 export type ToastKind = "success" | "error" | "info";
 
-export type RegistrationFormValues = Pick<User, "name" | "phone" | "store" | "email" | "password"> & { acceptedTerms: boolean };
+export type RegistrationFormValues = Pick<User, "name" | "phone" | "store" | "email" | "password">
+  & Required<Pick<User, "governorate" | "city" | "address" | "latitude" | "longitude">>
+  & { acceptedTerms: boolean };
 export type RegistrationChallenge = { expiresIn: number; resendAfter: number; email: string };
 
 export type AppContextValue = {

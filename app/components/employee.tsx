@@ -83,7 +83,7 @@ export function EmployeeDashboard() {
               const status = getStatus(order.status);
               return <article className="employee-order-card" key={order.id}>
                 <span className="employee-order-card__icon" style={{ color: status.color, background: status.surface }}><Icon name={status.icon} size={21} /></span>
-                <div><strong dir="ltr">{order.trackingNumber}</strong><span>{order.recipientName} · {order.city}</span><a href={`tel:${order.recipientPhone}`} dir="ltr">{order.recipientPhone}</a></div>
+                <div><strong dir="ltr">{order.trackingNumber}</strong><span>{order.recipientName} · {order.city}</span><div className="employee-order-card__contacts"><a href={`tel:${order.recipientPhone}`} dir="ltr">{order.recipientPhone}</a><a href={`sms:${order.recipientPhone}`}><Icon name="message" size={14} />إشعار العميل</a></div></div>
                 <StatusPill status={order.status} />
                 {order.notes && <div className="employee-order-card__instructions"><span><Icon name="message" size={16} /></span><div><strong>تعليمات المندوب</strong><p>{order.notes}</p></div></div>}
               </article>;
