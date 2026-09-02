@@ -137,6 +137,64 @@ test("offers a responsive Brevo email-only password recovery flow backed by publ
   assert.match(styles, /\.password-recovery__steps\s*\{[^}]*repeat\(3,/);
 });
 
+test("uses a four-step reference-style registration and creates the account only after Brevo email verification", async () => {
+  const [auth, registration, application, context, server, delivery, schema, migration, styles, readme] = await Promise.all([
+    readFile(new URL("../app/components/auth.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/registration-flow.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/password-reset-delivery.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0006_thankful_jazinda.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(auth, /import \{ RegistrationFlow \} from "\.\/registration-flow"/);
+  assert.match(auth, /<RegistrationFlow[\s\S]*onRequest=\{requestRegistration\}[\s\S]*onVerify=\{verifyRegistration\}/);
+  assert.match(context, /requestRegistration: \(values: RegistrationFormValues\)/);
+  assert.match(context, /verifyRegistration: \(code: string\)/);
+  assert.match(application, /fetch\("\/api\/almadina\/register\/request"/);
+  assert.match(application, /sharedRequest\("register\/verify"/);
+
+  assert.match(registration, /FORM_STEPS: RegistrationStep\[\] = \["identity", "business", "security", "review"\]/);
+  for (const title of ["لنبدأ بمعلوماتك", "بيانات متجرك", "حماية حسابك", "لم يتبقَّ الكثير", "تأكيد بريدك الإلكتروني"]) {
+    assert.match(registration, new RegExp(title));
+  }
+  assert.match(registration, /Array\(6\)\.fill\(""\)/);
+  assert.match(registration, /autoComplete=\{index === 0 \? "one-time-code" : "off"\}/);
+  assert.match(registration, /لن يُنشأ الحساب قبل تأكيد البريد الإلكتروني/);
+  assert.match(registration, /onRequest\(\{[\s\S]*email: normalizedEmail,[\s\S]*password: form\.password/);
+  assert.match(registration, /await onVerify\(codeValue\)/);
+  assert.doesNotMatch(registration, /رسالة نصية|SMS|تأكيد رقم الجوال/);
+
+  const publicRoutes = server.split("const session = await authenticate")[0];
+  assert.match(publicRoutes, /url\.pathname === "\/api\/almadina\/register\/request"/);
+  assert.match(publicRoutes, /url\.pathname === "\/api\/almadina\/register\/verify"/);
+  assert.match(server, /REGISTRATION_CODE_DURATION = 10 \* 60/);
+  assert.match(server, /REGISTRATION_MAX_FAILED_ATTEMPTS = 5/);
+  assert.match(server, /passwordHash = await hashPassword\(password\)/);
+  assert.match(server, /hashPasswordResetCode\(requestToken, verificationCode\)/);
+  assert.match(server, /saveVerifiedRegistration/);
+  assert.match(server, /أكمل خطوات إنشاء الحساب ثم أكّد بريدك الإلكتروني/);
+  assert.match(server, /HttpOnly; SameSite=Strict/);
+
+  assert.match(delivery, /deliverRegistrationVerificationCode/);
+  assert.match(delivery, /رمز تأكيد البريد الإلكتروني \| المدينة إكسبرس/);
+  assert.match(delivery, /purpose: "registration"/);
+  assert.match(schema, /sqliteTable\("almadina_registration_requests"/);
+  assert.match(migration, /CREATE TABLE `almadina_registration_requests`/);
+  assert.match(migration, /`password_hash` text NOT NULL/);
+  assert.match(migration, /`code_hash` text NOT NULL/);
+  assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM|ALTER TABLE/);
+  assert.match(styles, /\.registration-flow__dots\s*\{/);
+  assert.match(styles, /\.registration-flow__code\s*\{[^}]*repeat\(6,/);
+  assert.match(styles, /\.auth-shell--register/);
+  assert.match(readme, /أربع خطوات واضحة/);
+  assert.match(readme, /لا يُنشأ الحساب ولا تبدأ الجلسة قبل نجاح التحقق/);
+});
+
 test("starts with only the administrator and removes all persisted demonstration accounts and records", async () => {
   const [data, server, auth, readme] = await Promise.all([
     readFile(new URL("../app/lib/data.ts", import.meta.url), "utf8"),
@@ -206,11 +264,12 @@ test("stores accounts centrally in D1 and authenticates devices using encrypted 
   assert.match(server, /HttpOnly; SameSite=Lax/);
   assert.match(server, /orders: database\.orders\.filter\(\(order\) => order\.merchantId === account\.id\)/);
   assert.match(application, /sharedRequest\("session"\)/);
-  assert.match(application, /sharedRequest\("register"/);
+  assert.match(application, /fetch\("\/api\/almadina\/register\/request"/);
+  assert.match(application, /sharedRequest\("register\/verify"/);
   assert.match(application, /sharedRequest\("login"/);
   assert.match(application, /window\.setInterval\(\(\) => \{ void synchronize\(\); \}, 6_000\)/);
   assert.match(auth, /await login\(email, password\)/);
-  assert.match(auth, /await register\(/);
+  assert.match(auth, /<RegistrationFlow[\s\S]*onRequest=\{requestRegistration\}[\s\S]*onVerify=\{verifyRegistration\}/);
   assert.doesNotMatch(application, /readDatabase|writeDatabase|localStorage\.setItem\([^)]*database/);
   assert.doesNotMatch(data, /export function readDatabase|export function writeDatabase/);
 });

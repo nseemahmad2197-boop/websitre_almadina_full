@@ -129,6 +129,10 @@ class FakeD1Statement {
       )) ?? null;
     }
 
+    if (this.sql.includes("FROM almadina_registration_requests WHERE request_hash = ?")) {
+      return this.database.registrationRequests.get(this.values[0]) ?? null;
+    }
+
     if (this.sql.startsWith("UPDATE almadina_password_reset_requests SET verified_at") && this.sql.includes("RETURNING user_id")) {
       const [verifiedAt, resetTokenHash, resetExpiresAt, failedAttempts, requestHash, userId, codeHash, now, maxFailedAttempts] = this.values;
       const reset = this.database.passwordResets.get(requestHash);
@@ -214,6 +218,18 @@ class FakeD1Statement {
           && entry.reset_expires_at > now
         ));
         if (!reset) return { success: true, meta: { changes: 0 } };
+      }
+
+      if (this.sql.includes("EXISTS (SELECT 1 FROM almadina_registration_requests")) {
+        const requestHash = this.values[4];
+        const codeHash = this.values[5];
+        const now = this.values[6];
+        const maxFailedAttempts = this.values[7];
+        const registration = this.database.registrationRequests.get(requestHash);
+        if (!registration
+          || registration.code_hash !== codeHash
+          || registration.expires_at <= now
+          || registration.failed_attempts >= maxFailedAttempts) return { success: true, meta: { changes: 0 } };
       }
 
       this.database.state = {
@@ -480,6 +496,67 @@ class FakeD1Statement {
       return { success: true, meta: { changes: 1 } };
     }
 
+    if (this.sql.startsWith("INSERT INTO almadina_registration_requests")) {
+      const [requestHash, email, name, phone, store, passwordHash, codeHash, expiresAt, createdAt] = this.values;
+      this.database.registrationRequests.set(requestHash, {
+        request_hash: requestHash,
+        email,
+        name,
+        phone,
+        store,
+        password_hash: passwordHash,
+        code_hash: codeHash,
+        failed_attempts: 0,
+        expires_at: expiresAt,
+        created_at: createdAt,
+      });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_registration_requests WHERE expires_at")) {
+      const now = this.values[0];
+      let changes = 0;
+      for (const [requestHash, registration] of this.database.registrationRequests) {
+        if (registration.expires_at > now) continue;
+        this.database.registrationRequests.delete(requestHash);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_registration_requests WHERE email")) {
+      const [email, phone] = this.values;
+      let changes = 0;
+      for (const [requestHash, registration] of this.database.registrationRequests) {
+        if (registration.email !== email && registration.phone !== phone) continue;
+        this.database.registrationRequests.delete(requestHash);
+        changes += 1;
+      }
+      return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("UPDATE almadina_registration_requests SET failed_attempts = failed_attempts + 1")) {
+      const [requestHash, now, maxFailedAttempts] = this.values;
+      const registration = this.database.registrationRequests.get(requestHash);
+      if (!registration || registration.expires_at <= now || registration.failed_attempts >= maxFailedAttempts) {
+        return { success: true, meta: { changes: 0 } };
+      }
+      registration.failed_attempts += 1;
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_registration_requests WHERE request_hash")) {
+      const [requestHash] = this.values;
+      if (this.sql.includes("AND EXISTS")) {
+        const [, stateId, revision, payload] = this.values;
+        if (!this.database.state
+          || this.database.state.id !== stateId
+          || this.database.state.revision !== revision
+          || this.database.state.payload !== payload) return { success: true, meta: { changes: 0 } };
+      }
+      return { success: true, meta: { changes: Number(this.database.registrationRequests.delete(requestHash)) } };
+    }
+
     if (this.sql.startsWith("DELETE FROM almadina_rate_limits WHERE reset_at")) {
       let changes = 0;
       for (const [keyHash, rateLimit] of this.database.rateLimits) {
@@ -504,6 +581,7 @@ class FakeD1Database {
   challenges = new Map();
   rateLimits = new Map();
   passwordResets = new Map();
+  registrationRequests = new Map();
 
   prepare(sql) {
     return new FakeD1Statement(this, sql);
@@ -531,7 +609,7 @@ async function loadWorker() {
   return worker;
 }
 
-async function call(worker, database, path, { method = "GET", payload, cookie, origin, headers: extraHeaders, environment = {} } = {}) {
+async function rawCall(worker, database, path, { method = "GET", payload, cookie, origin, headers: extraHeaders, environment = {} } = {}) {
   const headers = new Headers(extraHeaders);
   if (payload) headers.set("Content-Type", "application/json");
   if (cookie) headers.set("Cookie", cookie);
@@ -560,8 +638,33 @@ async function call(worker, database, path, { method = "GET", payload, cookie, o
   return { status: response.status, headers: response.headers, body: await response.json() };
 }
 
+async function call(worker, database, path, options = {}) {
+  if (path !== "register" || options.method !== "POST") return rawCall(worker, database, path, options);
+
+  const messages = [];
+  const requested = await rawCall(worker, database, "register/request", {
+    ...options,
+    environment: {
+      ...(options.environment ?? {}),
+      PASSWORD_RESET_SENDER: async (message) => { messages.push(structuredClone(message)); },
+    },
+  });
+  if (requested.status !== 202) return requested;
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].purpose, "registration");
+  const registrationCookie = namedCookieFrom(requested, "almadina_registration");
+  return rawCall(worker, database, "register/verify", {
+    method: "POST",
+    cookie: registrationCookie,
+    payload: { code: messages[0].code },
+    origin: options.origin,
+    headers: options.headers,
+    environment: options.environment,
+  });
+}
+
 function accountPayload(name, email, phone) {
-  return { name, email, phone, store: `متجر ${name}`, password: "Customer@123" };
+  return { name, email, phone, store: `متجر ${name}`, password: "Customer@123", acceptedTerms: true };
 }
 
 function sessionFrom(result) {
@@ -578,6 +681,114 @@ function namedCookieFrom(result, name) {
   assert.ok(match, `expected ${name} cookie in ${value}`);
   return match[1];
 }
+
+test("creates an account only after the six-digit email verification code succeeds", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const payload = accountPayload("تاجر التسجيل الموثق", "verified-signup@example.test", "0591112233");
+  const delivered = [];
+  const environment = {
+    PASSWORD_RESET_SENDER: async (message) => { delivered.push(structuredClone(message)); },
+  };
+
+  const legacy = await rawCall(worker, database, "register", { method: "POST", payload, environment });
+  assert.equal(legacy.status, 410);
+  assert.match(legacy.body.error, /أكمل خطوات إنشاء الحساب/);
+  assert.equal(JSON.parse(database.state.payload).users.filter((account) => account.role === "merchant").length, 0);
+
+  const missingConsent = await rawCall(worker, database, "register/request", {
+    method: "POST",
+    payload: { ...payload, acceptedTerms: false },
+    environment,
+  });
+  assert.equal(missingConsent.status, 400);
+  assert.match(missingConsent.body.error, /يجب الموافقة على شروط الاستخدام/);
+  assert.equal(delivered.length, 0);
+  assert.equal(database.registrationRequests.size, 0);
+
+  const missingDelivery = await rawCall(worker, database, "register/request", { method: "POST", payload });
+  assert.equal(missingDelivery.status, 503);
+  assert.equal(JSON.parse(database.state.payload).users.filter((account) => account.role === "merchant").length, 0);
+
+  const requested = await rawCall(worker, database, "register/request", { method: "POST", payload, environment });
+  assert.equal(requested.status, 202);
+  assert.equal(requested.body.success, true);
+  assert.equal(requested.body.email, "verified-signup@example.test");
+  assert.equal(Object.hasOwn(requested.body, "code"), false);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].destination, "verified-signup@example.test");
+  assert.equal(delivered[0].purpose, "registration");
+  assert.match(delivered[0].code, /^\d{6}$/);
+  assert.equal(JSON.parse(database.state.payload).users.filter((account) => account.role === "merchant").length, 0);
+
+  const requestCookie = namedCookieFrom(requested, "almadina_registration");
+  const pending = [...database.registrationRequests.values()][0];
+  assert.ok(pending);
+  assert.match(pending.password_hash, /^pbkdf2:100000:/);
+  assert.notEqual(pending.password_hash, payload.password);
+  assert.notEqual(pending.code_hash, delivered[0].code);
+  assert.ok(!JSON.stringify(pending).includes(delivered[0].code));
+
+  const wrongCode = delivered[0].code === "000000" ? "000001" : "000000";
+  const rejected = await rawCall(worker, database, "register/verify", {
+    method: "POST",
+    cookie: requestCookie,
+    payload: { code: wrongCode },
+    environment,
+  });
+  assert.equal(rejected.status, 422);
+  assert.equal(pending.failed_attempts, 1);
+  assert.equal(JSON.parse(database.state.payload).users.filter((account) => account.role === "merchant").length, 0);
+
+  const verified = await rawCall(worker, database, "register/verify", {
+    method: "POST",
+    cookie: requestCookie,
+    payload: { code: delivered[0].code },
+    environment,
+  });
+  assert.equal(verified.status, 201);
+  assert.equal(verified.body.database.users.length, 1);
+  assert.equal(verified.body.database.users[0].email, "verified-signup@example.test");
+  assert.equal(verified.body.database.users[0].password, "");
+  assert.equal(database.registrationRequests.size, 0);
+  const sessionCookieValue = sessionFrom(verified);
+  assert.match(sessionCookieValue, /^almadina_session=/);
+
+  const replayed = await rawCall(worker, database, "register/verify", {
+    method: "POST",
+    cookie: requestCookie,
+    payload: { code: delivered[0].code },
+    environment,
+  });
+  assert.equal(replayed.status, 422);
+
+  const duplicate = await rawCall(worker, database, "register/request", { method: "POST", payload, environment });
+  assert.equal(duplicate.status, 409);
+  assert.equal(delivered.length, 1);
+
+  const login = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: { email: payload.email, password: payload.password },
+  });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.userId, verified.body.userId);
+
+  const failurePayload = accountPayload("تاجر فشل الإرسال", "signup-delivery-failure@example.test", "0591112244");
+  const previousConsoleError = console.error;
+  let deliveryFailure;
+  try {
+    console.error = () => {};
+    deliveryFailure = await rawCall(worker, database, "register/request", {
+      method: "POST",
+      payload: failurePayload,
+      environment: { PASSWORD_RESET_SENDER: async () => { throw new Error("simulated delivery failure"); } },
+    });
+  } finally {
+    console.error = previousConsoleError;
+  }
+  assert.equal(deliveryFailure.status, 502);
+  assert.equal([...database.registrationRequests.values()].some((entry) => entry.email === failurePayload.email), false);
+});
 
 test("shares accounts and orders across devices while isolating customers and protecting sessions", async () => {
   const worker = await loadWorker();

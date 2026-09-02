@@ -7,11 +7,12 @@ import { AVAILABLE_ACCOUNTS_EVENT, AVAILABLE_ACCOUNTS_STORAGE_KEY, readAvailable
 import type { Order } from "../lib/data";
 import { Icon } from "./icon";
 import { PasswordRecovery } from "./password-recovery";
+import { RegistrationFlow } from "./registration-flow";
 import { TrackingHistory } from "./tracking-history";
 import { Avatar, Brand, Button, Field, IconButton, Modal, StatusPill } from "./ui";
 
 export function Authentication() {
-  const { login, loginWithBiometric, register, preferences, updatePreferences, showToast, openScanner } = useApp();
+  const { login, loginWithBiometric, requestRegistration, verifyRegistration, preferences, updatePreferences, showToast, openScanner } = useApp();
   const [mode, setMode] = useState<"login" | "register" | "recover">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -24,7 +25,6 @@ export function Authentication() {
   const [busy, setBusy] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricBusy, setBiometricBusy] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", store: "", email: "", password: "", confirm: "" });
 
   useEffect(() => {
     const hydrateAccounts = () => setAvailableAccounts(readAvailableAccounts());
@@ -60,26 +60,6 @@ export function Authentication() {
       if (!await login(email, password)) setError("البريد الإلكتروني أو كلمة المرور غير صحيحة.");
     } catch (error) {
       setError(error instanceof Error ? error.message : "تعذّر الاتصال بالخادم. حاول مرة أخرى.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onRegister(event: FormEvent) {
-    event.preventDefault();
-    if (busy) return;
-    setError("");
-    if (!form.name.trim() || !form.store.trim()) return setError("أدخل الاسم الكامل واسم المتجر.");
-    if (!/^05\d{8}$/.test(form.phone)) return setError("أدخل رقم جوال مكوّن من 10 أرقام ويبدأ بـ 05.");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return setError("أدخل بريدًا إلكترونيًا صحيحًا.");
-    if (form.password.length < 8) return setError("يجب أن تتكوّن كلمة المرور من 8 أحرف على الأقل.");
-    if (form.password !== form.confirm) return setError("كلمتا المرور غير متطابقتين.");
-    setBusy(true);
-    try {
-      const created = await register({ name: form.name.trim(), phone: form.phone, store: form.store.trim(), email: form.email.trim().toLowerCase(), password: form.password });
-      if (!created) setError("يوجد حساب مسجل بهذا البريد الإلكتروني أو رقم الجوال.");
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "تعذّر إنشاء الحساب. حاول مرة أخرى.");
     } finally {
       setBusy(false);
     }
@@ -157,7 +137,7 @@ export function Authentication() {
             <PasswordRecovery initialIdentifier={email} onCancel={closePasswordRecovery} onComplete={completePasswordRecovery} />
           ) : (
             <>
-              <header className="auth-card__header"><h1>{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h1><p>{mode === "login" ? "أهلًا بعودتك — أدخل بيانات حسابك للمتابعة" : "سجّل متجرك وابدأ التوصيل مع المدينة إكسبرس"}</p></header>
+              {mode === "login" && <header className="auth-card__header"><h1>تسجيل الدخول</h1><p>أهلًا بعودتك — أدخل بيانات حسابك للمتابعة</p></header>}
               {mode === "login" ? (
                 <form className="auth-form" onSubmit={onLogin} noValidate>
                   <Field icon="mail" type="email" placeholder="البريد الإلكتروني" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" dir="ltr" disabled={loginOperationBusy} />
@@ -180,20 +160,7 @@ export function Authentication() {
                   <div className="auth-divider"><span>أو</span></div>
                   <p className="auth-switch">ليس لديك حساب؟ <button type="button" disabled={loginOperationBusy} onClick={() => { setMode("register"); setError(""); }}>أنشئ حسابًا جديدًا</button></p>
                 </form>
-              ) : (
-                <form className="auth-form" onSubmit={onRegister} noValidate>
-                  <Field icon="user" placeholder="الاسم الكامل" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} autoComplete="name" />
-                  <Field icon="phone" placeholder="05xxxxxxxx" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 10) })} inputMode="numeric" autoComplete="tel" dir="ltr" />
-                  <Field icon="store" placeholder="اسم المتجر (التجاري)" value={form.store} onChange={(event) => setForm({ ...form, store: event.target.value })} />
-                  <Field icon="mail" placeholder="البريد الإلكتروني" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} autoComplete="email" dir="ltr" />
-                  <Field icon="lock" placeholder="كلمة المرور (8 أحرف فأكثر)" type={showPassword ? "text" : "password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} autoComplete="new-password" suffix={passwordToggle} />
-                  <Field icon="lock" placeholder="تأكيد كلمة المرور" type={showPassword ? "text" : "password"} value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} autoComplete="new-password" />
-                  {error && <p className="form-error"><Icon name="alert" size={15} />{error}</p>}
-                  <Button type="submit" full loading={busy}>إنشاء الحساب</Button>
-                  <p className="auth-switch">لديك حساب بالفعل؟ <button type="button" onClick={() => { setMode("login"); setError(""); }}>سجّل الدخول</button></p>
-                  <p className="auth-legal">بإنشاء الحساب أنت توافق على شروط الاستخدام وسياسة الخصوصية.</p>
-                </form>
-              )}
+              ) : <RegistrationFlow onCancel={() => { setMode("login"); setError(""); }} onRequest={requestRegistration} onVerify={verifyRegistration} />}
 
               {mode === "login" && <div className="tracking-box"><h2>تتبّع طردك بدون تسجيل دخول</h2><div className="tracking-box__row"><Field icon="scan" placeholder="ALX-20200001" value={tracking} onChange={(event) => setTracking(event.target.value.toUpperCase())} dir="ltr" /><IconButton name="camera" label="مسح رمز التتبع" className="tracking-box__camera" onClick={() => openScanner((value) => { setTracking(value); void findShipment(value); })} /></div><Button variant="secondary" full disabled={!tracking.trim()} onClick={() => { void findShipment(tracking); }}>تتبّع الطرد</Button></div>}
             </>

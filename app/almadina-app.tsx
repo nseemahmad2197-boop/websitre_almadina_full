@@ -7,10 +7,10 @@ import { ApplicationShell } from "./components/application-shell";
 import { Authentication } from "./components/auth";
 import { Icon } from "./components/icon";
 import { Avatar, Brand, Button, Field, IconButton, Modal } from "./components/ui";
-import { AppContext, type ConfirmOptions, type ToastKind, type View } from "./lib/app-context";
+import { AppContext, type ConfirmOptions, type RegistrationChallenge, type RegistrationFormValues, type ToastKind, type View } from "./lib/app-context";
 import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/available-accounts";
 import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiometricAvailability, getAppLockStatus, registerBiometricUnlock, removeAppLock, removeBiometricUnlock, startSignedOutBiometricAuthentication, verifyAppLockPin, verifySignedOutBiometricAuthentication, type AppLockState } from "./lib/app-lock-client";
-import { createSeedDatabase, defaultPreferences, uid, type Database, type LinkedDevice, type Notice, type NoticeAudience, type Preferences, type User } from "./lib/data";
+import { createSeedDatabase, defaultPreferences, uid, type Database, type LinkedDevice, type Notice, type NoticeAudience, type Preferences } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
 type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number; removedCount?: number };
@@ -1002,15 +1002,28 @@ export default function AlmadinaApplication() {
     }
   }
 
-  async function register(values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">): Promise<boolean> {
-    try {
-      const snapshot = await sharedRequest("register", { method: "POST", body: JSON.stringify(values) });
-      activateSession(snapshot, "تم إنشاء حسابك بنجاح. أهلًا بك!");
-      return true;
-    } catch (error) {
-      if (error instanceof SharedApiError && error.status === 409) return false;
-      throw error;
+  async function requestRegistration(values: RegistrationFormValues): Promise<RegistrationChallenge> {
+    const response = await fetch("/api/almadina/register/request", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+    const payload = await response.json().catch(() => ({})) as Partial<RegistrationChallenge> & { success?: boolean; error?: string };
+    if (!response.ok || !payload.success) {
+      throw new SharedApiError(payload.error ?? "تعذّر إرسال رمز تأكيد البريد الإلكتروني.", response.status);
     }
+    if (typeof payload.email !== "string" || !Number.isFinite(payload.expiresIn) || !Number.isFinite(payload.resendAfter)) {
+      throw new SharedApiError("استجابة خادم التسجيل غير مكتملة.", 500);
+    }
+    return { email: payload.email, expiresIn: payload.expiresIn!, resendAfter: payload.resendAfter! };
+  }
+
+  async function verifyRegistration(code: string): Promise<boolean> {
+    const snapshot = await sharedRequest("register/verify", { method: "POST", body: JSON.stringify({ code }) });
+    activateSession(snapshot, "تم تأكيد بريدك وإنشاء حسابك بنجاح. أهلًا بك!");
+    return true;
   }
 
   function updatePreferences(values: Partial<Preferences>) {
@@ -1046,7 +1059,7 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, register, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

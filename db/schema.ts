@@ -86,3 +86,20 @@ export const almadinaPasswordResetRequests = sqliteTable("almadina_password_rese
   index("almadina_password_reset_requests_expires_at_idx").on(table.expiresAt),
   index("almadina_password_reset_requests_reset_token_hash_idx").on(table.resetTokenHash),
 ]);
+
+export const almadinaRegistrationRequests = sqliteTable("almadina_registration_requests", {
+  requestHash: text("request_hash").primaryKey(),
+  email: text("email").notNull(),
+  name: text("name").notNull(),
+  phone: text("phone").notNull(),
+  store: text("store").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  codeHash: text("code_hash").notNull(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  index("almadina_registration_requests_email_idx").on(table.email),
+  index("almadina_registration_requests_phone_idx").on(table.phone),
+  index("almadina_registration_requests_expires_at_idx").on(table.expiresAt),
+]);

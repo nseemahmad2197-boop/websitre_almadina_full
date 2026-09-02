@@ -71,6 +71,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .theme-switch .icon-button { width: 36px; height: 36px; color: #fff; }
 .theme-switch .icon-button.is-selected { background: #fff; color: var(--green-dark); }
 .auth-shell { z-index: 1; width: min(100%, 392px); margin: auto; }
+.auth-shell--register { width: min(100%, 430px); }
 .auth-shell > .brand { margin-bottom: 27px; animation: float-in .55s ease both; }
 .auth-card { padding: 25px 24px 21px; border-radius: 23px; background: var(--surface); color: var(--text); box-shadow: 0 23px 65px rgb(0 0 0 / 14%); animation: card-arrive .38s ease both; }
 .auth-card__header { margin-bottom: 19px; text-align: center; }
@@ -84,6 +85,40 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .auth-switch { text-align: center; color: var(--muted); font-size: 12px; }
 .auth-switch button { padding: 0; border: 0; background: none; color: var(--green); font-weight: 750; cursor: pointer; }
 .auth-legal { color: var(--muted); font-size: 10px; line-height: 1.8; text-align: center; }
+.registration-flow { display: grid; }
+.registration-flow__header { margin-bottom: 12px; }
+.registration-flow__header p { max-width: 330px; margin-right: auto; margin-left: auto; line-height: 1.7; }
+.registration-flow__progress { display: grid; justify-items: center; gap: 7px; margin-bottom: 17px; }
+.registration-flow__progress > strong { color: var(--muted); font-size: 9px; font-weight: 750; }
+.registration-flow__dots { display: flex; direction: ltr; align-items: center; gap: 7px; }
+.registration-flow__dots > span { width: 8px; height: 8px; border-radius: 999px; background: var(--line); transition: width .2s, background-color .2s, box-shadow .2s; }
+.registration-flow__dots > span.is-active { width: 22px; background: var(--green); box-shadow: 0 3px 8px rgb(8 124 69 / 20%); }
+.registration-flow__form { min-height: 295px; align-content: start; }
+.registration-flow__stage { display: grid; gap: 12px; animation: fade-in .2s ease both; }
+.registration-flow__secure-note { display: flex; align-items: center; gap: 7px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 76%); border-radius: 12px; background: color-mix(in srgb, var(--green-pale), var(--surface) 62%); color: var(--muted); font-size: 9px; line-height: 1.7; }
+.registration-flow__secure-note > svg { flex: 0 0 auto; color: var(--green); }
+.registration-flow__summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.registration-flow__summary > div { display: grid; min-width: 0; gap: 4px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-muted); }
+.registration-flow__summary span { color: var(--muted); font-size: 8px; font-weight: 700; }
+.registration-flow__summary strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.registration-flow__consent { display: flex; align-items: flex-start; gap: 9px; padding: 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 72%); border-radius: 13px; background: color-mix(in srgb, var(--green-pale), var(--surface) 67%); color: var(--muted); cursor: pointer; font-size: 9px; line-height: 1.8; }
+.registration-flow__consent input { width: 17px; height: 17px; flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--green); }
+.registration-flow__consent b { color: var(--text); }
+.registration-flow__verification { justify-items: center; text-align: center; }
+.registration-flow__mail-icon { display: grid; width: 55px; height: 55px; place-items: center; border-radius: 17px; background: var(--green-pale); color: var(--green); }
+.registration-flow__verification > p { max-width: 340px; color: var(--muted); font-size: 10px; line-height: 1.8; }
+.registration-flow__verification > p strong { color: var(--text); }
+.registration-flow__code { display: grid; width: 100%; direction: ltr; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
+.registration-flow__code input { width: 100%; min-width: 0; height: 52px; padding: 0; border: 1px solid var(--line); border-radius: 12px; outline: none; background: var(--surface-muted); color: var(--text); font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 850; text-align: center; transition: border-color .18s, box-shadow .18s, background-color .18s; }
+.registration-flow__code input:focus { border-color: var(--green); background: var(--surface); box-shadow: 0 0 0 3px rgb(8 124 69 / 10%); }
+.registration-flow__status { display: flex; align-items: center; gap: 5px; color: var(--green); font-size: 9px; font-weight: 750; }
+.registration-flow__resend { display: grid; justify-items: center; gap: 2px; }
+.registration-flow__resend > span { display: flex; min-height: 20px; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
+.registration-flow__resend > .button { margin-top: 0; }
+.registration-flow__back { display: inline-flex; min-height: 32px; justify-self: center; align-items: center; gap: 4px; padding: 0 7px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 700; }
+.registration-flow__back > svg { transform: rotate(180deg); }
+.registration-flow__back:hover:not(:disabled) { color: var(--green); }
+.registration-flow__back:disabled { cursor: not-allowed; opacity: .5; }
 .auth-forgot-link { min-height: 28px; justify-self: end; padding: 0 3px; margin-top: -7px; border: 0; background: transparent; color: var(--green); cursor: pointer; font-size: 11px; font-weight: 750; }
 .auth-forgot-link:hover:not(:disabled) { color: var(--green-dark); text-decoration: underline; text-underline-offset: 3px; }
 .auth-forgot-link:disabled { cursor: not-allowed; opacity: .5; }
@@ -1055,6 +1090,17 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .password-recovery__code-control { height: 56px; }
   .password-recovery__code-control input[dir="ltr"] { font-size: 23px !important; }
   .password-recovery__back { min-height: 30px; font-size: 9px; }
+  .registration-flow__header { margin-bottom: 10px; }
+  .registration-flow__progress { gap: 6px; margin-bottom: 14px; }
+  .registration-flow__form { min-height: 280px; }
+  .registration-flow__stage { gap: 10px; }
+  .registration-flow__summary { gap: 6px; }
+  .registration-flow__summary > div { padding: 9px; }
+  .registration-flow__secure-note, .registration-flow__consent { padding: 9px 10px; font-size: 8px; }
+  .registration-flow__mail-icon { width: 50px; height: 50px; border-radius: 15px; }
+  .registration-flow__code { gap: 5px; }
+  .registration-flow__code input { height: 48px; border-radius: 10px; font-size: 20px; }
+  .registration-flow__back { min-height: 30px; font-size: 9px; }
   .available-accounts-button { min-height: 57px; gap: 8px; padding: 8px 9px; border-radius: 12px; }
   .available-accounts-button__icon { width: 36px; height: 36px; border-radius: 11px; }
   .available-accounts-button__copy > strong { font-size: 10px; }

@@ -9,11 +9,12 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
-import { deliverPasswordResetCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
+import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 
 const SESSION_COOKIE = "almadina_session";
 const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
 const PASSWORD_RESET_COOKIE = "almadina_password_reset";
+const REGISTRATION_COOKIE = "almadina_registration";
 const SESSION_DURATION = 30 * 24 * 60 * 60;
 const PASSWORD_ITERATIONS = 100_000;
 const APP_LOCK_CHALLENGE_DURATION = 5 * 60;
@@ -37,6 +38,13 @@ const PASSWORD_RESET_REQUEST_IP_LIMIT = 10;
 const PASSWORD_RESET_REQUEST_IDENTIFIER_LIMIT = 3;
 const PASSWORD_RESET_VERIFY_IP_LIMIT = 20;
 const PASSWORD_RESET_COMPLETE_IP_LIMIT = 10;
+const REGISTRATION_CODE_DURATION = 10 * 60;
+const REGISTRATION_RETRY_DELAY = 60;
+const REGISTRATION_MAX_FAILED_ATTEMPTS = 5;
+const REGISTRATION_RATE_LIMIT_WINDOW = 15 * 60;
+const REGISTRATION_REQUEST_IP_LIMIT = 10;
+const REGISTRATION_REQUEST_EMAIL_LIMIT = 3;
+const REGISTRATION_VERIFY_IP_LIMIT = 20;
 const DEVICE_ACTIVITY_UPDATE_INTERVAL = 5 * 60 * 1000;
 const initializedDatabases = new WeakMap<D1Database, Promise<void>>();
 
@@ -94,6 +102,18 @@ type PasswordResetRow = {
   verified_at: number | null;
   reset_token_hash: string | null;
   reset_expires_at: number | null;
+};
+type RegistrationRequestRow = {
+  request_hash: string;
+  email: string;
+  name: string;
+  phone: string;
+  store: string;
+  password_hash: string;
+  code_hash: string;
+  failed_attempts: number;
+  expires_at: number;
+  created_at: string;
 };
 
 export type AlmadinaApiConfig = PasswordResetDeliveryConfig;
@@ -291,6 +311,21 @@ async function initializeDatabase(database: D1Database): Promise<void> {
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_password_reset_requests_user_id_idx ON almadina_password_reset_requests (user_id)"),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_password_reset_requests_expires_at_idx ON almadina_password_reset_requests (expires_at)"),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_password_reset_requests_reset_token_hash_idx ON almadina_password_reset_requests (reset_token_hash)"),
+    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_registration_requests (
+      request_hash TEXT PRIMARY KEY NOT NULL,
+      email TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      store TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      failed_attempts INTEGER DEFAULT 0 NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    )`),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_registration_requests_email_idx ON almadina_registration_requests (email)"),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_registration_requests_phone_idx ON almadina_registration_requests (phone)"),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_registration_requests_expires_at_idx ON almadina_registration_requests (expires_at)"),
   ]);
 
   const existing = await database.prepare("SELECT revision FROM almadina_state WHERE id = ?").bind("main").first<{ revision: number }>();
@@ -409,6 +444,43 @@ async function savePasswordReset(
   return (results[0]?.meta?.changes ?? 0) === 1;
 }
 
+async function saveVerifiedRegistration(
+  database: D1Database,
+  state: Database,
+  revision: number,
+  requestHash: string,
+  codeHash: string,
+  accountId: string,
+  request: Request,
+): Promise<{ saved: boolean; sessionToken?: string }> {
+  const payload = JSON.stringify(removeLegacyDemoData(state));
+  const nextRevision = revision + 1;
+  const now = Math.floor(Date.now() / 1000);
+  const createdAt = new Date().toISOString();
+  const sessionToken = randomSecret();
+  const sessionTokenHash = await sha256(sessionToken);
+  const expiresAt = now + SESSION_DURATION;
+  const descriptor = describeDevice(request);
+  const stateMatches = "EXISTS (SELECT 1 FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?)";
+  const results = await database.batch<D1Result>([
+    database.prepare(`UPDATE almadina_state SET payload = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ?
+        AND EXISTS (SELECT 1 FROM almadina_registration_requests
+          WHERE request_hash = ? AND code_hash = ? AND expires_at > ? AND failed_attempts < ?)`)
+      .bind(payload, createdAt, "main", revision, requestHash, codeHash, now, REGISTRATION_MAX_FAILED_ATTEMPTS),
+    database.prepare(`DELETE FROM almadina_registration_requests WHERE request_hash = ? AND ${stateMatches}`)
+      .bind(requestHash, "main", nextRevision, payload),
+    database.prepare(`INSERT INTO almadina_sessions (token_hash, user_id, expires_at, created_at)
+      SELECT ?, ?, ?, ? FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?`)
+      .bind(sessionTokenHash, accountId, expiresAt, createdAt, "main", nextRevision, payload),
+    database.prepare(`INSERT INTO almadina_session_devices (token_hash, user_id, device_name, device_type, browser_name, created_at, last_active_at)
+      SELECT ?, ?, ?, ?, ?, ?, ? FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?`)
+      .bind(sessionTokenHash, accountId, descriptor.name, descriptor.type, descriptor.browser, createdAt, createdAt, "main", nextRevision, payload),
+  ]);
+  const saved = (results[0]?.meta?.changes ?? 0) === 1;
+  return { saved, ...(saved ? { sessionToken } : {}) };
+}
+
 function getCookie(request: Request, cookieName: string): string | null {
   const cookie = request.headers.get("cookie") ?? "";
   for (const item of cookie.split(";")) {
@@ -435,6 +507,11 @@ function passkeyLoginCookie(request: Request, token: string, maxAge = APP_LOCK_C
 function passwordResetCookie(request: Request, token: string, maxAge = PASSWORD_RESET_CODE_DURATION): string {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return `${PASSWORD_RESET_COOKIE}=${token}; Path=/api/almadina/password-reset; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+}
+
+function registrationCookie(request: Request, token: string, maxAge = REGISTRATION_CODE_DURATION): string {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${REGISTRATION_COOKIE}=${token}; Path=/api/almadina/register; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
 }
 
 async function enforcePublicPasskeyRateLimit(database: D1Database, request: Request, action: "options" | "verify", limit: number): Promise<void> {
@@ -568,6 +645,48 @@ async function enforcePasswordResetRequestRateLimits(
     "request-identifier",
     PASSWORD_RESET_REQUEST_IDENTIFIER_LIMIT,
     PASSWORD_RESET_RATE_LIMIT_WINDOW,
+  );
+}
+
+async function enforceRegistrationRateLimit(
+  database: D1Database,
+  keyMaterial: string,
+  action: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<void> {
+  const keyHash = await sha256(`registration:${action}:${keyMaterial}`);
+  const now = Math.floor(Date.now() / 1000);
+  const resetAt = now + windowSeconds;
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
+  const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT (key_hash) DO UPDATE SET
+      action = excluded.action,
+      request_count = CASE WHEN almadina_rate_limits.reset_at <= ? THEN 1 ELSE almadina_rate_limits.request_count + 1 END,
+      reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
+    RETURNING request_count, reset_at`)
+    .bind(keyHash, `registration-${action}`, resetAt, now, now).first<RateLimitRow>();
+  if (!rate || rate.request_count > limit) {
+    throw new ApiRequestError("محاولات كثيرة لإنشاء الحساب. انتظر بضع دقائق ثم حاول مجددًا.", 429);
+  }
+}
+
+async function enforceRegistrationRequestRateLimits(database: D1Database, request: Request, email: string): Promise<void> {
+  await enforceRegistrationRateLimit(database, email, "request-cooldown", 1, REGISTRATION_RETRY_DELAY);
+  await enforceRegistrationRateLimit(
+    database,
+    requestClientAddress(request),
+    "request-ip",
+    REGISTRATION_REQUEST_IP_LIMIT,
+    REGISTRATION_RATE_LIMIT_WINDOW,
+  );
+  await enforceRegistrationRateLimit(
+    database,
+    email,
+    "request-email",
+    REGISTRATION_REQUEST_EMAIL_LIMIT,
+    REGISTRATION_RATE_LIMIT_WINDOW,
   );
 }
 
@@ -1989,40 +2108,177 @@ async function login(database: D1Database, request: Request): Promise<Response> 
   return json(snapshot(state, account), 200, { "Set-Cookie": sessionCookie(request, token) });
 }
 
-async function register(database: D1Database, request: Request): Promise<Response> {
-  const payload = await request.json() as Partial<User>;
-  const name = payload.name?.trim() ?? "";
-  const phone = normalizeAccountPhone(payload.phone ?? "") ?? "";
-  const store = payload.store?.trim() ?? "";
-  const email = payload.email?.trim().toLowerCase() ?? "";
-  const password = payload.password ?? "";
+async function requestRegistration(
+  database: D1Database,
+  request: Request,
+  config: AlmadinaApiConfig,
+): Promise<Response> {
+  let submitted: unknown;
+  try {
+    submitted = await request.json();
+  } catch {
+    return json({ error: "بيانات إنشاء الحساب غير صالحة." }, 400);
+  }
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) {
+    return json({ error: "بيانات إنشاء الحساب غير صالحة." }, 400);
+  }
 
-  if (!name || !store || !/^05\d{8}$/.test(phone) || !validEmail(email) || password.length < 8) {
-    return json({ error: "تحقق من الاسم والمتجر ورقم الجوال والبريد وكلمة المرور." }, 400);
+  const payload = submitted as Record<string, unknown>;
+  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  const phone = normalizeAccountPhone(typeof payload.phone === "string" ? payload.phone : "") ?? "";
+  const store = typeof payload.store === "string" ? payload.store.trim() : "";
+  const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  const password = typeof payload.password === "string" ? payload.password : "";
+  const acceptedTerms = payload.acceptedTerms === true;
+
+  if (name.length < 2 || name.length > 120) return json({ error: "أدخل الاسم الكامل بصورة صحيحة." }, 400);
+  if (!/^05\d{8}$/.test(phone)) return json({ error: "أدخل رقم جوال مكوّنًا من 10 أرقام ويبدأ بـ 05." }, 400);
+  if (!store || store.length > 120) return json({ error: "أدخل اسم المتجر بصورة صحيحة." }, 400);
+  if (!validEmail(email) || email.length > 254) return json({ error: "أدخل بريدًا إلكترونيًا صحيحًا." }, 400);
+  if (!validNewPassword(password)) {
+    return json({ error: "يجب أن تحتوي كلمة المرور على 8 أحرف على الأقل وحرف ورقم ورمز." }, 400);
+  }
+  if (!acceptedTerms) return json({ error: "يجب الموافقة على شروط الاستخدام وسياسة الخصوصية للمتابعة." }, 400);
+  if (!isPasswordResetDeliveryConfigured(config)) {
+    return json({ error: "خدمة إرسال رموز التحقق غير مهيأة حاليًا. تواصل مع إدارة الموقع." }, 503);
+  }
+
+  const state = await readState(database);
+  if (state.database.users.some((entry) => entry.email.trim().toLowerCase() === email)) {
+    return json({ error: "يوجد حساب مسجل بهذا البريد الإلكتروني." }, 409);
+  }
+  if (state.database.users.some((entry) => normalizeAccountPhone(entry.phone) === phone)) {
+    return json({ error: "يوجد حساب مسجل برقم الجوال هذا." }, 409);
+  }
+
+  await enforceRegistrationRequestRateLimits(database, request, email);
+
+  const requestToken = randomSecret();
+  const requestHash = await sha256(requestToken);
+  const verificationCode = randomVerificationCode();
+  const codeHash = await hashPasswordResetCode(requestToken, verificationCode);
+  const passwordHash = await hashPassword(password);
+  const now = Math.floor(Date.now() / 1000);
+  const createdAt = new Date().toISOString();
+  await database.batch([
+    database.prepare("DELETE FROM almadina_registration_requests WHERE expires_at <= ?").bind(now),
+    database.prepare("DELETE FROM almadina_registration_requests WHERE email = ? OR phone = ?").bind(email, phone),
+    database.prepare(`INSERT INTO almadina_registration_requests
+      (request_hash, email, name, phone, store, password_hash, code_hash, failed_attempts, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`)
+      .bind(requestHash, email, name, phone, store, passwordHash, codeHash, now + REGISTRATION_CODE_DURATION, createdAt),
+  ]);
+
+  try {
+    await deliverRegistrationVerificationCode(config, {
+      destination: email,
+      code: verificationCode,
+      expiresInMinutes: Math.floor(REGISTRATION_CODE_DURATION / 60),
+    });
+  } catch (error) {
+    console.error("Registration verification delivery failed.", error instanceof Error ? error.message : "Unknown delivery error.");
+    await database.prepare("DELETE FROM almadina_registration_requests WHERE request_hash = ?").bind(requestHash).run();
+    return json({ error: "تعذّر إرسال رمز التحقق إلى بريدك. تحقق من إعدادات البريد ثم حاول مجددًا." }, 502);
+  }
+
+  return json({
+    success: true,
+    expiresIn: REGISTRATION_CODE_DURATION,
+    resendAfter: REGISTRATION_RETRY_DELAY,
+    email,
+  }, 202, { "Set-Cookie": registrationCookie(request, requestToken) });
+}
+
+function invalidRegistrationCode(): Response {
+  return json({ error: "رمز التحقق غير صحيح أو انتهت صلاحيته." }, 422);
+}
+
+async function verifyRegistration(database: D1Database, request: Request): Promise<Response> {
+  let submitted: unknown;
+  try {
+    submitted = await request.json();
+  } catch {
+    return json({ error: "أدخل رمز التحقق المكوّن من 6 أرقام." }, 400);
+  }
+  const code = submitted && typeof submitted === "object" && !Array.isArray(submitted)
+    ? normalizeArabicDigits(String((submitted as Record<string, unknown>).code ?? "")).trim()
+    : "";
+  if (!/^\d{6}$/.test(code)) return json({ error: "أدخل رمز التحقق المكوّن من 6 أرقام." }, 400);
+
+  await enforceRegistrationRateLimit(
+    database,
+    requestClientAddress(request),
+    "verify-ip",
+    REGISTRATION_VERIFY_IP_LIMIT,
+    REGISTRATION_RATE_LIMIT_WINDOW,
+  );
+  const requestToken = getCookie(request, REGISTRATION_COOKIE) ?? "";
+  if (!/^[\da-f]{64}$/i.test(requestToken)) return invalidRegistrationCode();
+
+  const requestHash = await sha256(requestToken);
+  const row = await database.prepare(`SELECT request_hash, email, name, phone, store, password_hash,
+    code_hash, failed_attempts, expires_at, created_at
+    FROM almadina_registration_requests WHERE request_hash = ?`)
+    .bind(requestHash).first<RegistrationRequestRow>();
+  const now = Math.floor(Date.now() / 1000);
+  if (!row || row.expires_at <= now || row.failed_attempts >= REGISTRATION_MAX_FAILED_ATTEMPTS) {
+    return invalidRegistrationCode();
+  }
+
+  const submittedCodeHash = await hashPasswordResetCode(requestToken, code);
+  if (!equalIdentifier(submittedCodeHash, row.code_hash)) {
+    await database.prepare(`UPDATE almadina_registration_requests
+      SET failed_attempts = failed_attempts + 1
+      WHERE request_hash = ? AND expires_at > ? AND failed_attempts < ?`)
+      .bind(requestHash, now, REGISTRATION_MAX_FAILED_ATTEMPTS).run();
+    return invalidRegistrationCode();
   }
 
   const account: User = {
-    id: uid("merchant"), name, phone, store, email,
-    password: await hashPassword(password),
-    role: "merchant", membership: "standard", joinedAt: new Date().toISOString(), avatarColor: "#187a50",
+    id: uid("merchant"),
+    name: row.name,
+    phone: row.phone,
+    store: row.store,
+    email: row.email,
+    password: row.password_hash,
+    role: "merchant",
+    membership: "standard",
+    joinedAt: new Date().toISOString(),
+    avatarColor: "#187a50",
   };
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const state = await readState(database);
-    if (state.database.users.some((entry) => entry.email.toLowerCase() === email || normalizeAccountPhone(entry.phone) === phone)) {
-      return json({ error: "يوجد حساب مسجل بهذا البريد الإلكتروني أو رقم الجوال." }, 409);
+    if (state.database.users.some((entry) => (
+      entry.email.trim().toLowerCase() === row.email
+      || normalizeAccountPhone(entry.phone) === row.phone
+    ))) {
+      await database.prepare("DELETE FROM almadina_registration_requests WHERE request_hash = ?").bind(requestHash).run();
+      return json(
+        { error: "تم تسجيل حساب بهذه البيانات أثناء التحقق. سجّل الدخول أو استخدم بيانات أخرى." },
+        409,
+        { "Set-Cookie": registrationCookie(request, "", 0) },
+      );
     }
 
     const next = { ...state.database, users: [...state.database.users, account] };
-    if (!await saveState(database, next, state.revision)) continue;
-
-    const token = await createSession(database, account.id, request);
-    return json(snapshot({ database: next, revision: state.revision + 1 }, account), 201, {
-      "Set-Cookie": sessionCookie(request, token),
-    });
+    const saved = await saveVerifiedRegistration(database, next, state.revision, requestHash, submittedCodeHash, account.id, request);
+    if (!saved.saved || !saved.sessionToken) continue;
+    return json(snapshot({ database: next, revision: state.revision + 1 }, account), 201, cookieHeaders(
+      sessionCookie(request, saved.sessionToken),
+      registrationCookie(request, "", 0),
+    ));
   }
 
-  return json({ error: "تعذّر حفظ الحساب بسبب تحديث متزامن. حاول مجددًا." }, 409);
+  return json({ error: "تعذّر حفظ الحساب بسبب تحديث متزامن. حاول إدخال الرمز مجددًا." }, 409);
+}
+
+function legacyRegistrationEndpoint(request: Request): Response {
+  return json(
+    { error: "أكمل خطوات إنشاء الحساب ثم أكّد بريدك الإلكتروني بالرمز المرسل." },
+    410,
+    { "Set-Cookie": registrationCookie(request, "", 0) },
+  );
 }
 
 async function publicTracking(database: D1Database, request: Request): Promise<Response> {
@@ -2167,7 +2423,9 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     await ensureDatabase(database);
 
     if (url.pathname === "/api/almadina/login" && request.method === "POST") return await login(database, request);
-    if (url.pathname === "/api/almadina/register" && request.method === "POST") return await register(database, request);
+    if (url.pathname === "/api/almadina/register/request" && request.method === "POST") return await requestRegistration(database, request, config);
+    if (url.pathname === "/api/almadina/register/verify" && request.method === "POST") return await verifyRegistration(database, request);
+    if (url.pathname === "/api/almadina/register" && request.method === "POST") return legacyRegistrationEndpoint(request);
     if (url.pathname === "/api/almadina/password-reset/request" && request.method === "POST") return await requestPasswordReset(database, request, config);
     if (url.pathname === "/api/almadina/password-reset/verify" && request.method === "POST") return await verifyPasswordReset(database, request);
     if (url.pathname === "/api/almadina/password-reset/complete" && request.method === "POST") return await completePasswordReset(database, request);

@@ -37,6 +37,9 @@ export type ConfirmOptions = {
 
 export type ToastKind = "success" | "error" | "info";
 
+export type RegistrationFormValues = Pick<User, "name" | "phone" | "store" | "email" | "password"> & { acceptedTerms: boolean };
+export type RegistrationChallenge = { expiresIn: number; resendAfter: number; email: string };
+
 export type AppContextValue = {
   database: Database;
   user: User | null;
@@ -58,7 +61,8 @@ export type AppContextValue = {
   login: (email: string, password: string) => Promise<boolean>;
   loginWithBiometric: () => Promise<boolean>;
   logout: () => Promise<boolean>;
-  register: (values: Omit<User, "id" | "role" | "joinedAt" | "avatarColor">) => Promise<boolean>;
+  requestRegistration: (values: RegistrationFormValues) => Promise<RegistrationChallenge>;
+  verifyRegistration: (code: string) => Promise<boolean>;
   changePassword: (currentPassword: string, newPassword: string, confirmPassword: string, signOutAllDevices: boolean) => Promise<boolean>;
   listLinkedDevices: () => Promise<LinkedDevice[] | null>;
   revokeLinkedDevice: (deviceId: string) => Promise<LinkedDevice[] | null>;
