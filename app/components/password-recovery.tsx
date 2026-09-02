@@ -4,8 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Icon } from "./icon";
 import { Button, Field } from "./ui";
 
-type RecoveryStep = "identify" | "method" | "code" | "password";
-type RecoveryChannel = "email" | "sms";
+type RecoveryStep = "identify" | "code" | "password";
 type PendingOperation = "request" | "resend" | "verify" | "complete" | null;
 
 type RecoveryResponse = {
@@ -22,7 +21,7 @@ type PasswordRecoveryProps = {
   onComplete: (loginEmail?: string) => void;
 };
 
-const STEP_ORDER: RecoveryStep[] = ["identify", "method", "code", "password"];
+const STEP_ORDER: RecoveryStep[] = ["identify", "code", "password"];
 
 function normalizeDigits(value: string): string {
   return value
@@ -31,13 +30,11 @@ function normalizeDigits(value: string): string {
 }
 
 function normalizeIdentifier(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.includes("@")) return trimmed.toLowerCase();
-  return normalizeDigits(trimmed).replace(/[\s()-]/g, "");
+  return value.trim().toLowerCase();
 }
 
 function validIdentifier(value: string): boolean {
-  return /^05\d{8}$/.test(value) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function strongPassword(value: string): boolean {
@@ -71,7 +68,6 @@ function ErrorMessage({ message }: { message: string }) {
 export function PasswordRecovery({ initialIdentifier = "", onCancel, onComplete }: PasswordRecoveryProps) {
   const [step, setStep] = useState<RecoveryStep>("identify");
   const [identifier, setIdentifier] = useState(initialIdentifier);
-  const [channel, setChannel] = useState<RecoveryChannel | null>(null);
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -100,28 +96,27 @@ export function PasswordRecovery({ initialIdentifier = "", onCancel, onComplete 
     setCooldown(seconds);
   }
 
-  function submitIdentifier(event: FormEvent) {
+  async function submitIdentifier(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
     const normalized = normalizeIdentifier(identifier);
     setError("");
     setStatusMessage("");
     if (!validIdentifier(normalized)) {
-      setError("أدخل بريدًا إلكترونيًا صحيحًا أو رقم جوال من 10 أرقام يبدأ بـ 05.");
+      setError("أدخل بريدًا إلكترونيًا صحيحًا.");
       return;
     }
     setIdentifier(normalized);
-    setChannel(null);
-    setStep("method");
+    await sendCode("request", normalized);
   }
 
-  async function sendCode(operation: "request" | "resend") {
-    if (busy || !channel || (operation === "resend" && cooldown > 0)) return;
+  async function sendCode(operation: "request" | "resend", requestedIdentifier = normalizeIdentifier(identifier)) {
+    if (busy || (operation === "resend" && cooldown > 0)) return;
     setError("");
     setStatusMessage("");
     setPending(operation);
     try {
-      const response = await recoveryRequest("request", { identifier: normalizeIdentifier(identifier), channel });
+      const response = await recoveryRequest("request", { identifier: requestedIdentifier });
       updateCooldown(response);
       setCode("");
       setStep("code");
@@ -188,15 +183,10 @@ export function PasswordRecovery({ initialIdentifier = "", onCancel, onComplete 
     setError("");
     setStatusMessage("");
     if (step === "identify") return onCancel();
-    if (step === "method") {
-      setChannel(null);
-      setStep("identify");
-      return;
-    }
     if (step === "code") {
       setCode("");
       setCooldown(0);
-      setStep("method");
+      setStep("identify");
       return;
     }
     onCancel();
@@ -208,20 +198,16 @@ export function PasswordRecovery({ initialIdentifier = "", onCancel, onComplete 
   }
 
   const header = step === "identify"
-    ? { title: "إعادة تعيين كلمة المرور", subtitle: "أدخل البريد الإلكتروني أو رقم الجوال المسجّل في حسابك" }
-    : step === "method"
-      ? { title: "اختر طريقة التحقق", subtitle: "سنرسل إليك رمز تحقق مكوّنًا من 6 أرقام" }
-      : step === "code"
-        ? { title: "أدخل رمز التحقق", subtitle: channel === "sms" ? "أدخل الرمز المرسل إلى رقم الجوال المسجّل" : "أدخل الرمز المرسل إلى البريد الإلكتروني المسجّل" }
-        : { title: "كلمة مرور جديدة", subtitle: "أنشئ كلمة مرور قوية وآمنة لحسابك" };
+    ? { title: "إعادة تعيين كلمة المرور", subtitle: "أدخل البريد الإلكتروني المسجّل في حسابك" }
+    : step === "code"
+      ? { title: "أدخل رمز التحقق", subtitle: "أدخل الرمز المرسل إلى البريد الإلكتروني المسجّل" }
+      : { title: "كلمة مرور جديدة", subtitle: "أنشئ كلمة مرور قوية وآمنة لحسابك" };
 
   const backLabel = step === "identify"
     ? "العودة إلى تسجيل الدخول"
-    : step === "method"
-      ? "تعديل البريد أو رقم الجوال"
-      : step === "code"
-        ? "تغيير طريقة الإرسال"
-        : "إلغاء والعودة إلى تسجيل الدخول";
+    : step === "code"
+      ? "تعديل البريد الإلكتروني"
+      : "إلغاء والعودة إلى تسجيل الدخول";
 
   return (
     <div className="password-recovery">
@@ -235,34 +221,10 @@ export function PasswordRecovery({ initialIdentifier = "", onCancel, onComplete 
 
       {step === "identify" && (
         <form className="auth-form password-recovery__form" onSubmit={submitIdentifier} noValidate aria-busy={busy}>
-          <Field icon="user" label="البريد الإلكتروني أو رقم الجوال" placeholder="name@example.com أو 05xxxxxxxx" value={identifier} onChange={(event) => { setIdentifier(event.target.value); setError(""); }} autoComplete="username" autoCapitalize="none" spellCheck={false} dir="ltr" autoFocus disabled={busy} aria-invalid={Boolean(error)} aria-describedby={error ? "password-recovery-error" : undefined} />
+          <Field icon="mail" label="البريد الإلكتروني" placeholder="name@example.com" type="email" value={identifier} onChange={(event) => { setIdentifier(event.target.value); setError(""); }} autoComplete="email" autoCapitalize="none" spellCheck={false} dir="ltr" autoFocus disabled={busy} aria-invalid={Boolean(error)} aria-describedby={error ? "password-recovery-error" : undefined} />
           <p className="password-recovery__notice"><Icon name="shield" size={16} /><span>لن نعرض بيانات الحساب، وسنتابع بنفس الرسالة سواء كانت البيانات مسجّلة أم لا.</span></p>
           <ErrorMessage message={error} />
-          <Button type="submit" icon="chevronLeft" full disabled={busy}>متابعة</Button>
-          <button type="button" className="password-recovery__back" disabled={busy} onClick={goBack}><Icon name="chevronLeft" size={17} />{backLabel}</button>
-        </form>
-      )}
-
-      {step === "method" && (
-        <form className="auth-form password-recovery__form" onSubmit={(event) => { event.preventDefault(); void sendCode("request"); }} aria-busy={busy}>
-          <fieldset className="password-recovery__methods" disabled={busy}>
-            <legend>اختر وسيلة استلام الرمز</legend>
-            <label className="password-recovery__method">
-              <input type="radio" name="recovery-channel" value="email" checked={channel === "email"} onChange={() => { setChannel("email"); setError(""); }} />
-              <span className="password-recovery__method-icon"><Icon name="mail" size={21} /></span>
-              <span className="password-recovery__method-copy"><strong>البريد الإلكتروني</strong><small>إرسال الرمز إلى البريد المسجّل في الحساب</small></span>
-              <Icon name="check" size={18} className="password-recovery__method-check" />
-            </label>
-            <label className="password-recovery__method">
-              <input type="radio" name="recovery-channel" value="sms" checked={channel === "sms"} onChange={() => { setChannel("sms"); setError(""); }} />
-              <span className="password-recovery__method-icon"><Icon name="phone" size={21} /></span>
-              <span className="password-recovery__method-copy"><strong>رسالة نصية SMS</strong><small>إرسال الرمز إلى رقم الجوال المسجّل في الحساب</small></span>
-              <Icon name="check" size={18} className="password-recovery__method-check" />
-            </label>
-          </fieldset>
-          <p className="password-recovery__notice"><Icon name="info" size={16} /><span>إذا كانت البيانات مطابقة لحساب، فسيصل رمز التحقق إلى الوسيلة المختارة.</span></p>
-          <ErrorMessage message={error} />
-          <Button type="submit" icon="send" full loading={pending === "request"} disabled={!channel || busy}>إرسال رمز التحقق</Button>
+          <Button type="submit" icon="send" full loading={pending === "request"} disabled={busy}>إرسال رمز التحقق</Button>
           <button type="button" className="password-recovery__back" disabled={busy} onClick={goBack}><Icon name="chevronLeft" size={17} />{backLabel}</button>
         </form>
       )}

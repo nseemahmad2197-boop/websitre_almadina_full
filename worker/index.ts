@@ -19,11 +19,9 @@ interface Env extends PasswordResetDeliveryBindings {
 
 function passwordResetDeliveryConfig(env: Env, ctx: ExecutionContext): PasswordResetDeliveryConfig {
   return {
-    resendApiKey: env.RESEND_API_KEY,
-    resendFromEmail: env.RESEND_FROM_EMAIL,
-    twilioAccountSid: env.TWILIO_ACCOUNT_SID,
-    twilioAuthToken: env.TWILIO_AUTH_TOKEN,
-    twilioMessagingServiceSid: env.TWILIO_MESSAGING_SERVICE_SID,
+    brevoApiKey: env.BREVO_API_KEY,
+    brevoFromEmail: env.BREVO_FROM_EMAIL,
+    brevoFromName: env.BREVO_FROM_NAME,
     sender: env.PASSWORD_RESET_SENDER,
     defer: (promise) => ctx.waitUntil(promise),
   };

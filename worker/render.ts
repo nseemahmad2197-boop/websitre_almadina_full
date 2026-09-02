@@ -23,11 +23,9 @@ function resolveDatabase(env?: Env): D1Database {
 
 function passwordResetDeliveryConfig(env: Env | undefined, ctx: ExecutionContext): PasswordResetDeliveryConfig {
   return {
-    resendApiKey: process.env.RESEND_API_KEY,
-    resendFromEmail: process.env.RESEND_FROM_EMAIL,
-    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
-    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
-    twilioMessagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID,
+    brevoApiKey: process.env.BREVO_API_KEY,
+    brevoFromEmail: process.env.BREVO_FROM_EMAIL,
+    brevoFromName: process.env.BREVO_FROM_NAME,
     sender: env?.PASSWORD_RESET_SENDER,
     defer: (promise) => ctx.waitUntil(promise),
   };

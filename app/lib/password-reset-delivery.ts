@@ -1,7 +1,4 @@
-export type PasswordResetChannel = "email" | "sms";
-
 export type PasswordResetDeliveryMessage = {
-  channel: PasswordResetChannel;
   destination: string;
   code: string;
   expiresInMinutes: number;
@@ -10,48 +7,16 @@ export type PasswordResetDeliveryMessage = {
 export type PasswordResetSender = (message: PasswordResetDeliveryMessage) => Promise<void>;
 
 export type PasswordResetDeliveryConfig = {
-  resendApiKey?: string;
-  resendFromEmail?: string;
-  twilioAccountSid?: string;
-  twilioAuthToken?: string;
-  twilioMessagingServiceSid?: string;
+  brevoApiKey?: string;
+  brevoFromEmail?: string;
+  brevoFromName?: string;
   sender?: PasswordResetSender;
   defer?: (promise: Promise<void>) => void;
 };
 
-const ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
-
-function latinDigits(value: string): string {
-  return value.replace(/[٠-٩]/g, (digit) => String(ARABIC_DIGITS.indexOf(digit)));
-}
-
-/**
- * Converts stored Palestinian/Israeli mobile numbers to the E.164 form required
- * by the SMS provider. Existing local accounts use 05xxxxxxxx: the Palestinian
- * mobile allocations 056/059 use +970 and the remaining 05 prefixes use +972.
- * Newer records may already contain +970 or +972.
- */
-export function normalizeSmsDestination(value: string): string | null {
-  const normalized = latinDigits(value).trim().replace(/[\s().-]/g, "");
-  const international = normalized.startsWith("00") ? `+${normalized.slice(2)}` : normalized;
-
-  if (/^\+(?:970|972)\d{8,9}$/.test(international) && international.length <= 16) {
-    return international;
-  }
-
-  if (!/^05\d{8}$/.test(international)) return null;
-  const countryCode = /^(?:056|059)/.test(international) ? "+970" : "+972";
-  return `${countryCode}${international.slice(1)}`;
-}
-
-export function isPasswordResetChannelConfigured(config: PasswordResetDeliveryConfig, channel: PasswordResetChannel): boolean {
+export function isPasswordResetDeliveryConfigured(config: PasswordResetDeliveryConfig): boolean {
   if (config.sender) return true;
-  if (channel === "email") return Boolean(config.resendApiKey?.trim() && config.resendFromEmail?.trim());
-  return Boolean(
-    config.twilioAccountSid?.trim()
-      && config.twilioAuthToken?.trim()
-      && config.twilioMessagingServiceSid?.trim(),
-  );
+  return Boolean(config.brevoApiKey?.trim() && config.brevoFromEmail?.trim());
 }
 
 function resetEmailHtml(code: string, expiresInMinutes: number): string {
@@ -73,51 +38,31 @@ function resetEmailHtml(code: string, expiresInMinutes: number): string {
 }
 
 async function deliverEmail(config: PasswordResetDeliveryConfig, message: PasswordResetDeliveryMessage): Promise<void> {
-  const response = await fetch("https://api.resend.com/emails", {
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
     headers: {
-      Authorization: `Bearer ${config.resendApiKey!.trim()}`,
+      "api-key": config.brevoApiKey!.trim(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: config.resendFromEmail!.trim(),
-      to: [message.destination],
+      sender: {
+        name: config.brevoFromName?.trim() || "المدينة إكسبرس",
+        email: config.brevoFromEmail!.trim(),
+      },
+      to: [{ email: message.destination }],
       subject: "رمز إعادة تعيين كلمة المرور | المدينة إكسبرس",
-      text: `رمز إعادة تعيين كلمة مرور المدينة إكسبرس هو: ${message.code}. الرمز صالح لمدة ${message.expiresInMinutes} دقائق. لا تشاركه مع أي شخص.`,
-      html: resetEmailHtml(message.code, message.expiresInMinutes),
+      textContent: `رمز إعادة تعيين كلمة مرور المدينة إكسبرس هو: ${message.code}. الرمز صالح لمدة ${message.expiresInMinutes} دقائق. لا تشاركه مع أي شخص.`,
+      htmlContent: resetEmailHtml(message.code, message.expiresInMinutes),
     }),
   });
 
-  if (response.status !== 200) throw new Error(`Resend rejected the password reset message with status ${response.status}.`);
-}
-
-async function deliverSms(config: PasswordResetDeliveryConfig, message: PasswordResetDeliveryMessage): Promise<void> {
-  const form = new URLSearchParams({
-    To: message.destination,
-    MessagingServiceSid: config.twilioMessagingServiceSid!.trim(),
-    Body: `رمز إعادة تعيين كلمة مرور المدينة إكسبرس: ${message.code}. صالح لمدة ${message.expiresInMinutes} دقائق. لا تشاركه مع أحد.`,
-  });
-  const accountSid = config.twilioAccountSid!.trim();
-  const credentials = btoa(`${accountSid}:${config.twilioAuthToken!.trim()}`);
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
-    method: "POST",
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-    },
-    body: form,
-  });
-
-  if (response.status !== 201) throw new Error(`Twilio rejected the password reset message with status ${response.status}.`);
+  if (!response.ok) throw new Error(`Brevo rejected the password reset message with status ${response.status}.`);
 }
 
 export async function deliverPasswordResetCode(config: PasswordResetDeliveryConfig, message: PasswordResetDeliveryMessage): Promise<void> {
-  if (!isPasswordResetChannelConfigured(config, message.channel)) throw new Error("Password reset delivery is not configured.");
+  if (!isPasswordResetDeliveryConfigured(config)) throw new Error("Password reset delivery is not configured.");
   if (config.sender) return config.sender(message);
-  if (message.channel === "email") return deliverEmail(config, message);
-  return deliverSms(config, message);
+  return deliverEmail(config, message);
 }

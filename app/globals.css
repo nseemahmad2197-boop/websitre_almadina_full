@@ -92,25 +92,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .password-recovery__header p { max-width: 300px; margin-right: auto; margin-left: auto; line-height: 1.75; }
 .password-recovery__progress { display: grid; gap: 7px; margin-bottom: 17px; }
 .password-recovery__progress > strong { color: var(--muted); font-size: 9px; font-weight: 750; text-align: center; }
-.password-recovery__steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.password-recovery__steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .password-recovery__steps > span { height: 4px; border-radius: 999px; background: var(--line); transition: background-color .2s, box-shadow .2s; }
 .password-recovery__steps > span.is-active { background: var(--green); box-shadow: 0 2px 6px rgb(8 124 69 / 18%); }
 .password-recovery__form { animation: fade-in .2s ease both; }
 .password-recovery__form > .field .field__control input { font-size: 16px; }
-.password-recovery__methods { display: grid; min-width: 0; gap: 8px; padding: 0; margin: 0; border: 0; }
-.password-recovery__methods > legend { padding: 0; margin-bottom: 1px; font-size: 12px; font-weight: 750; }
-.password-recovery__method { position: relative; display: grid; min-height: 67px; grid-template-columns: 42px minmax(0, 1fr) 20px; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-muted); cursor: pointer; transition: border-color .18s, background-color .18s, box-shadow .18s, transform .18s; }
-.password-recovery__method:hover { border-color: color-mix(in srgb, var(--green), var(--line) 55%); transform: translateY(-1px); }
-.password-recovery__method > input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.password-recovery__method:has(input:focus-visible) { outline: 3px solid rgb(22 162 92 / 35%); outline-offset: 2px; }
-.password-recovery__method:has(input:checked) { border-color: color-mix(in srgb, var(--green), var(--line) 24%); background: color-mix(in srgb, var(--green-pale), var(--surface) 42%); box-shadow: 0 7px 17px rgb(8 124 69 / 8%); }
-.password-recovery__methods:disabled .password-recovery__method { cursor: not-allowed; opacity: .6; transform: none; }
-.password-recovery__method-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 12px; background: var(--surface); color: var(--green); box-shadow: 0 3px 9px rgb(24 32 28 / 5%); }
-.password-recovery__method-copy { display: grid; min-width: 0; gap: 3px; }
-.password-recovery__method-copy > strong { font-size: 11px; font-weight: 800; }
-.password-recovery__method-copy > small { color: var(--muted); font-size: 9px; line-height: 1.6; }
-.password-recovery__method-check { color: var(--green); opacity: 0; transform: scale(.7); transition: opacity .18s, transform .18s; }
-.password-recovery__method:has(input:checked) .password-recovery__method-check { opacity: 1; transform: scale(1); }
 .password-recovery__notice { display: flex; align-items: flex-start; gap: 7px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 74%); border-radius: 12px; background: color-mix(in srgb, var(--green-pale), var(--surface) 62%); color: var(--muted); font-size: 9px; line-height: 1.75; }
 .password-recovery__notice > svg { flex: 0 0 auto; margin-top: 1px; color: var(--green); }
 .password-recovery__code-control { height: 59px; padding-right: 18px; padding-left: 18px; }
@@ -1065,10 +1051,6 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .auth-forgot-link { min-height: 26px; margin-top: -6px; font-size: 10px; }
   .password-recovery__header { margin-bottom: 11px; }
   .password-recovery__progress { gap: 6px; margin-bottom: 14px; }
-  .password-recovery__method { min-height: 62px; grid-template-columns: 38px minmax(0, 1fr) 18px; gap: 8px; padding: 8px 9px; border-radius: 12px; }
-  .password-recovery__method-icon { width: 38px; height: 38px; border-radius: 11px; }
-  .password-recovery__method-copy > strong { font-size: 10px; }
-  .password-recovery__method-copy > small { font-size: 8px; }
   .password-recovery__notice { padding: 9px 10px; font-size: 8px; }
   .password-recovery__code-control { height: 56px; }
   .password-recovery__code-control input[dir="ltr"] { font-size: 23px !important; }

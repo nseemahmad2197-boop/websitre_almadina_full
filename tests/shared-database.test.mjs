@@ -2902,7 +2902,7 @@ test("rate limits repeated wrong current-password attempts without changing host
   assert.equal((await call(worker, database, "database", { cookie })).status, 200);
 });
 
-test("resets passwords through generic email and SMS verification flows and consumes every security grant once", async () => {
+test("resets passwords through the email-only verification flow and consumes every security grant once", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
   const delivered = [];
@@ -2916,27 +2916,27 @@ test("resets passwords through generic email and SMS verification flows and cons
     method: "POST",
     payload: accountPayload("حساب استعادة البريد", "recovery-email@example.test", "0597000001"),
   });
-  const smsAccount = await call(worker, database, "register", {
+  const secondaryAccount = await call(worker, database, "register", {
     method: "POST",
-    payload: accountPayload("حساب استعادة الهاتف", "recovery-sms@example.test", "0597000002"),
+    payload: accountPayload("حساب استعادة ثانٍ", "recovery-secondary@example.test", "0597000002"),
   });
   assert.equal(emailAccount.status, 201);
-  assert.equal(smsAccount.status, 201);
+  assert.equal(secondaryAccount.status, 201);
 
   const emailFirstCookie = sessionFrom(emailAccount);
-  const smsFirstCookie = sessionFrom(smsAccount);
+  const secondaryFirstCookie = sessionFrom(secondaryAccount);
   const emailSecond = await call(worker, database, "login", {
     method: "POST",
     payload: { email: "recovery-email@example.test", password: "Customer@123" },
   });
-  const smsSecond = await call(worker, database, "login", {
+  const secondarySecond = await call(worker, database, "login", {
     method: "POST",
-    payload: { email: "recovery-sms@example.test", password: "Customer@123" },
+    payload: { email: "recovery-secondary@example.test", password: "Customer@123" },
   });
   assert.equal(emailSecond.status, 200);
-  assert.equal(smsSecond.status, 200);
+  assert.equal(secondarySecond.status, 200);
   const emailSecondCookie = sessionFrom(emailSecond);
-  const smsSecondCookie = sessionFrom(smsSecond);
+  const secondarySecondCookie = sessionFrom(secondarySecond);
 
   function addSecurityFixtures(userId, suffix) {
     database.appLocks.set(userId, {
@@ -2953,11 +2953,19 @@ test("resets passwords through generic email and SMS verification flows and cons
   }
 
   addSecurityFixtures(emailAccount.body.userId, "recovery-email");
-  addSecurityFixtures(smsAccount.body.userId, "recovery-sms");
+  addSecurityFixtures(secondaryAccount.body.userId, "recovery-secondary");
+
+  const rejectedPhone = await call(worker, database, "password-reset/request", {
+    method: "POST",
+    payload: { identifier: "0597000002" },
+    environment,
+  });
+  assert.equal(rejectedPhone.status, 400);
+  assert.equal(delivered.length, 0);
 
   const unknown = await call(worker, database, "password-reset/request", {
     method: "POST",
-    payload: { identifier: "unknown-recovery@example.test", channel: "email" },
+    payload: { identifier: "unknown-recovery@example.test" },
     environment,
   });
   assert.equal(unknown.status, 202);
@@ -2971,7 +2979,6 @@ test("resets passwords through generic email and SMS verification flows and cons
     userId,
     email,
     identifier,
-    channel,
     destination,
     newPassword,
     oldCookies,
@@ -2981,7 +2988,7 @@ test("resets passwords through generic email and SMS verification flows and cons
     const deliveryCount = delivered.length;
     const requested = await call(worker, database, "password-reset/request", {
       method: "POST",
-      payload: { identifier, channel },
+      payload: { identifier },
       environment,
     });
     assert.equal(requested.status, 202);
@@ -2992,9 +2999,10 @@ test("resets passwords through generic email and SMS verification flows and cons
 
     const message = delivered.at(-1);
     assert.deepEqual(
-      { channel: message.channel, destination: message.destination, expiresInMinutes: message.expiresInMinutes },
-      { channel, destination, expiresInMinutes: 10 },
+      { destination: message.destination, expiresInMinutes: message.expiresInMinutes },
+      { destination, expiresInMinutes: 10 },
     );
+    assert.equal(Object.hasOwn(message, "channel"), false);
     assert.match(message.code, /^\d{6}$/);
     assert.equal(Object.hasOwn(requested.body, "code"), false);
     assert.equal(Object.hasOwn(requested.body, "userId"), false);
@@ -3005,7 +3013,7 @@ test("resets passwords through generic email and SMS verification flows and cons
     assert.equal(database.passwordResets.has(requestToken), false);
     const resetBeforeVerification = [...database.passwordResets.values()].find((reset) => reset.user_id === userId);
     assert.ok(resetBeforeVerification);
-    assert.equal(resetBeforeVerification.channel, channel);
+    assert.equal(resetBeforeVerification.channel, "email");
     assert.notEqual(resetBeforeVerification.code_hash, message.code);
     assert.ok(!JSON.stringify(resetBeforeVerification).includes(message.code));
 
@@ -3096,30 +3104,31 @@ test("resets passwords through generic email and SMS verification flows and cons
     userId: emailAccount.body.userId,
     email: "recovery-email@example.test",
     identifier: " RECOVERY-EMAIL@EXAMPLE.TEST ",
-    channel: "email",
     destination: "recovery-email@example.test",
     newPassword: "بريدNew!123",
     oldCookies: [emailFirstCookie, emailSecondCookie],
-    preservedCookie: smsFirstCookie,
+    preservedCookie: secondaryFirstCookie,
   });
-  assert.equal(database.credentials.has("credential-recovery-sms"), true);
-  assert.equal(database.passkeyLoginCredentials.has("credential-recovery-sms"), true);
-  assert.equal(database.challenges.has("recovery-sms:registration"), true);
-  assert.equal(database.appLocks.has(smsAccount.body.userId), true);
+  assert.equal(database.credentials.has("credential-recovery-secondary"), true);
+  assert.equal(database.passkeyLoginCredentials.has("credential-recovery-secondary"), true);
+  assert.equal(database.challenges.has("recovery-secondary:registration"), true);
+  assert.equal(database.appLocks.has(secondaryAccount.body.userId), true);
 
   await exerciseReset({
-    userId: smsAccount.body.userId,
-    email: "recovery-sms@example.test",
-    identifier: "0597000002",
-    channel: "sms",
-    destination: "+970597000002",
-    newPassword: "هاتفNew!456",
-    oldCookies: [smsFirstCookie, smsSecondCookie],
+    userId: secondaryAccount.body.userId,
+    email: "recovery-secondary@example.test",
+    identifier: "recovery-secondary@example.test",
+    destination: "recovery-secondary@example.test",
+    newPassword: "ثانيNew!456",
+    oldCookies: [secondaryFirstCookie, secondarySecondCookie],
     preservedCookie: emailNewCookie,
   });
 
   assert.equal(delivered.length, 2);
-  assert.deepEqual(delivered.map((message) => message.channel), ["email", "sms"]);
+  assert.deepEqual(delivered.map((message) => message.destination), [
+    "recovery-email@example.test",
+    "recovery-secondary@example.test",
+  ]);
 
   const deliveryFailureAccount = await call(worker, database, "register", {
     method: "POST",
@@ -3132,7 +3141,7 @@ test("resets passwords through generic email and SMS verification flows and cons
     console.error = () => {};
     failedDelivery = await call(worker, database, "password-reset/request", {
       method: "POST",
-      payload: { identifier: "recovery-delivery-failure@example.test", channel: "email" },
+      payload: { identifier: "recovery-delivery-failure@example.test" },
       environment: { PASSWORD_RESET_SENDER: async () => { throw new Error("simulated delivery failure"); } },
     });
   } finally {

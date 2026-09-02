@@ -9,7 +9,7 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
-import { deliverPasswordResetCode, isPasswordResetChannelConfigured, normalizeSmsDestination, type PasswordResetChannel, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
+import { deliverPasswordResetCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 
 const SESSION_COOKIE = "almadina_session";
 const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
@@ -29,7 +29,7 @@ const PASSWORD_CHANGE_RATE_LIMIT_WINDOW = 10 * 60;
 const PASSWORD_CHANGE_RATE_LIMIT = 5;
 const PASSWORD_RESET_CODE_DURATION = 10 * 60;
 const PASSWORD_RESET_TOKEN_DURATION = 10 * 60;
-const PASSWORD_RESET_RESEND_DELAY = 60;
+const PASSWORD_RESET_RETRY_DELAY = 60;
 const PASSWORD_RESET_CODE_ITERATIONS = 120_000;
 const PASSWORD_RESET_MAX_FAILED_ATTEMPTS = 5;
 const PASSWORD_RESET_RATE_LIMIT_WINDOW = 15 * 60;
@@ -87,7 +87,7 @@ type RateLimitRow = { request_count: number; reset_at: number };
 type PasswordResetRow = {
   request_hash: string;
   user_id: string;
-  channel: PasswordResetChannel;
+  channel: "email";
   code_hash: string;
   failed_attempts: number;
   expires_at: number;
@@ -160,12 +160,10 @@ function normalizeAccountPhone(value: string): string | null {
   return null;
 }
 
-function normalizeResetIdentifier(value: unknown): { value: string; kind: "email" | "phone" } | null {
+function normalizeResetIdentifier(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (validEmail(trimmed.toLowerCase())) return { value: trimmed.toLowerCase(), kind: "email" };
-  const phone = normalizeAccountPhone(trimmed);
-  return phone ? { value: phone, kind: "phone" } : null;
+  const email = value.trim().toLowerCase();
+  return validEmail(email) ? email : null;
 }
 
 async function hashPassword(password: string): Promise<string> {
@@ -549,14 +547,13 @@ async function enforcePasswordResetRequestRateLimits(
   database: D1Database,
   request: Request,
   identifier: string,
-  channel: PasswordResetChannel,
 ): Promise<void> {
   await enforcePasswordResetRateLimit(
     database,
     identifier,
     "request-cooldown",
     1,
-    PASSWORD_RESET_RESEND_DELAY,
+    PASSWORD_RESET_RETRY_DELAY,
   );
   await enforcePasswordResetRateLimit(
     database,
@@ -567,7 +564,7 @@ async function enforcePasswordResetRequestRateLimits(
   );
   await enforcePasswordResetRateLimit(
     database,
-    `${channel}:${identifier}`,
+    identifier,
     "request-identifier",
     PASSWORD_RESET_REQUEST_IDENTIFIER_LIMIT,
     PASSWORD_RESET_RATE_LIMIT_WINDOW,
@@ -1770,33 +1767,26 @@ async function requestPasswordReset(
   try {
     submitted = await request.json();
   } catch {
-    return json({ error: "أدخل بريدًا إلكترونيًا أو رقم جوال صالحًا." }, 400);
+    return json({ error: "أدخل بريدًا إلكترونيًا صالحًا." }, 400);
   }
   if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) {
-    return json({ error: "أدخل بريدًا إلكترونيًا أو رقم جوال صالحًا." }, 400);
+    return json({ error: "أدخل بريدًا إلكترونيًا صالحًا." }, 400);
   }
 
   const payload = submitted as Record<string, unknown>;
   const identifier = normalizeResetIdentifier(payload.identifier);
-  const channel = payload.channel === "email" || payload.channel === "sms" ? payload.channel : null;
-  if (!identifier || !channel) return json({ error: "اختر وسيلة التحقق وأدخل بيانات حساب صالحة." }, 400);
-  if (!isPasswordResetChannelConfigured(config, channel)) {
+  if (!identifier) return json({ error: "أدخل البريد الإلكتروني المسجّل في حسابك." }, 400);
+  if (!isPasswordResetDeliveryConfigured(config)) {
     return json({ error: "خدمة إرسال رموز التحقق غير مهيأة حاليًا. تواصل مع إدارة الموقع." }, 503);
   }
 
-  await enforcePasswordResetRequestRateLimits(database, request, identifier.value, channel);
+  await enforcePasswordResetRequestRateLimits(database, request, identifier);
 
   const state = await readState(database);
-  const matches = state.database.users.filter((account) => (
-    identifier.kind === "email"
-      ? account.email.trim().toLowerCase() === identifier.value
-      : normalizeAccountPhone(account.phone) === identifier.value
-  ));
+  const matches = state.database.users.filter((account) => account.email.trim().toLowerCase() === identifier);
   const account = matches.length === 1 ? matches[0] : null;
-  const destination = account
-    ? channel === "email"
-      ? (validEmail(account.email.trim().toLowerCase()) ? account.email.trim().toLowerCase() : null)
-      : normalizeSmsDestination(account.phone)
+  const destination = account && validEmail(account.email.trim().toLowerCase())
+    ? account.email.trim().toLowerCase()
     : null;
 
   const requestToken = randomSecret();
@@ -1814,12 +1804,11 @@ async function requestPasswordReset(
   statements.push(database.prepare(`INSERT INTO almadina_password_reset_requests
     (request_hash, user_id, channel, code_hash, failed_attempts, expires_at, verified_at, reset_token_hash, reset_expires_at, created_at)
     VALUES (?, ?, ?, ?, 0, ?, NULL, NULL, NULL, ?)`)
-    .bind(requestHash, account && destination ? account.id : "", channel, codeHash, now + PASSWORD_RESET_CODE_DURATION, createdAt));
+    .bind(requestHash, account && destination ? account.id : "", "email", codeHash, now + PASSWORD_RESET_CODE_DURATION, createdAt));
   await database.batch(statements);
 
   if (account && destination) {
     const delivery = deliverPasswordResetCode(config, {
-      channel,
       destination,
       code: verificationCode,
       expiresInMinutes: Math.floor(PASSWORD_RESET_CODE_DURATION / 60),
@@ -1838,8 +1827,8 @@ async function requestPasswordReset(
   return json({
     success: true,
     expiresIn: PASSWORD_RESET_CODE_DURATION,
-    resendAfter: PASSWORD_RESET_RESEND_DELAY,
-    message: "إذا كانت البيانات مطابقة لحساب مسجل، فسيصل رمز التحقق إلى الوسيلة المختارة.",
+    resendAfter: PASSWORD_RESET_RETRY_DELAY,
+    message: "إذا كان البريد الإلكتروني مطابقًا لحساب مسجّل، فسيصل إليه رمز التحقق.",
   }, 202, { "Set-Cookie": passwordResetCookie(request, requestToken) });
 }
 

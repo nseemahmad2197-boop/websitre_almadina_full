@@ -57,7 +57,7 @@ test("renders the Almadina Express Arabic login application", async () => {
   assert.doesNotMatch(html, /name="codex-preview"/);
 });
 
-test("offers a responsive generic email-or-SMS password recovery flow backed by public one-time server grants", async () => {
+test("offers a responsive Brevo email-only password recovery flow backed by public one-time server grants", async () => {
   const [auth, recovery, server, delivery, worker, renderWorker, schema, migration, styles, blueprint, readme] = await Promise.all([
     readFile(new URL("../app/components/auth.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/password-recovery.tsx", import.meta.url), "utf8"),
@@ -77,13 +77,13 @@ test("offers a responsive generic email-or-SMS password recovery flow backed by 
   assert.match(auth, /className="auth-forgot-link"[^>]*>نسيت كلمة المرور؟<\/button>/);
   assert.match(auth, /<PasswordRecovery initialIdentifier=\{email\} onCancel=\{closePasswordRecovery\} onComplete=\{completePasswordRecovery\} \/>/);
 
-  assert.match(recovery, /type RecoveryStep = "identify" \| "method" \| "code" \| "password"/);
-  assert.match(recovery, /STEP_ORDER: RecoveryStep\[\] = \["identify", "method", "code", "password"\]/);
-  assert.match(recovery, /recoveryRequest\("request", \{ identifier: normalizeIdentifier\(identifier\), channel \}\)/);
+  assert.match(recovery, /type RecoveryStep = "identify" \| "code" \| "password"/);
+  assert.match(recovery, /STEP_ORDER: RecoveryStep\[\] = \["identify", "code", "password"\]/);
+  assert.match(recovery, /recoveryRequest\("request", \{ identifier: requestedIdentifier \}\)/);
   assert.match(recovery, /recoveryRequest\("verify", \{ code: normalizedCode \}\)/);
   assert.match(recovery, /recoveryRequest\("complete", \{ newPassword, confirmPassword \}\)/);
-  assert.match(recovery, /value="email"[\s\S]*البريد الإلكتروني/);
-  assert.match(recovery, /value="sms"[\s\S]*رسالة نصية SMS/);
+  assert.match(recovery, /label="البريد الإلكتروني"[\s\S]*type="email"/);
+  assert.doesNotMatch(recovery, /recovery-channel|رسالة نصية SMS|رقم الجوال/);
   assert.match(recovery, /autoComplete="one-time-code"/);
   assert.equal((recovery.match(/autoComplete="new-password"/g) ?? []).length, 2);
   assert.match(recovery, /لن نعرض بيانات الحساب، وسنتابع بنفس الرسالة سواء كانت البيانات مسجّلة أم لا/);
@@ -103,7 +103,7 @@ test("offers a responsive generic email-or-SMS password recovery flow backed by 
   assert.match(server, /DELETE FROM almadina_sessions WHERE user_id = \?/);
   assert.match(server, /DELETE FROM almadina_webauthn_credentials WHERE user_id = \?/);
   assert.match(server, /DELETE FROM almadina_password_reset_requests WHERE user_id = \?/);
-  assert.match(server, /إذا كانت البيانات مطابقة لحساب مسجل، فسيصل رمز التحقق إلى الوسيلة المختارة/);
+  assert.match(server, /إذا كان البريد الإلكتروني مطابقًا لحساب مسجّل، فسيصل إليه رمز التحقق/);
 
   assert.match(schema, /sqliteTable\("almadina_password_reset_requests"/);
   assert.match(migration, /CREATE TABLE `almadina_password_reset_requests`/);
@@ -111,27 +111,30 @@ test("offers a responsive generic email-or-SMS password recovery flow backed by 
   assert.match(migration, /`reset_token_hash` text/);
   assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM|ALTER TABLE/);
 
-  assert.match(delivery, /export type PasswordResetChannel = "email" \| "sms"/);
-  assert.match(delivery, /https:\/\/api\.resend\.com\/emails/);
-  assert.match(delivery, /https:\/\/api\.twilio\.com\/2010-04-01\/Accounts/);
+  assert.match(delivery, /https:\/\/api\.brevo\.com\/v3\/smtp\/email/);
+  assert.match(delivery, /"api-key": config\.brevoApiKey/);
+  assert.match(delivery, /to: \[\{ email: message\.destination \}\]/);
+  assert.doesNotMatch(delivery, /Resend|Twilio|deliverSms|PasswordResetChannel/);
   assert.match(delivery, /if \(config\.sender\) return config\.sender\(message\)/);
   assert.match(delivery, /defer\?: \(promise: Promise<void>\) => void/);
   assert.match(worker, /PASSWORD_RESET_SENDER\?: PasswordResetSender/);
   assert.match(worker, /defer: \(promise\) => ctx\.waitUntil\(promise\)/);
   assert.match(worker, /handleAlmadinaApi\(request, env\.DB, passwordResetDeliveryConfig\(env, ctx\)\)/);
   assert.match(renderWorker, /handleAlmadinaApi\(request, resolveDatabase\(env\), passwordResetDeliveryConfig\(env, ctx\)\)/);
-  assert.match(renderWorker, /process\.env\.RESEND_API_KEY/);
-  assert.match(renderWorker, /process\.env\.TWILIO_AUTH_TOKEN/);
+  assert.match(renderWorker, /process\.env\.BREVO_API_KEY/);
+  assert.match(renderWorker, /process\.env\.BREVO_FROM_EMAIL/);
 
-  for (const key of ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_MESSAGING_SERVICE_SID"]) {
+  for (const key of ["BREVO_API_KEY", "BREVO_FROM_EMAIL"]) {
     assert.match(blueprint, new RegExp(`key:\\s*${key}\\s*\\n\\s*sync:\\s*false`));
     assert.match(readme, new RegExp(`\\b${key}\\b`));
   }
+  assert.match(blueprint, /key:\s*BREVO_FROM_NAME\s*\n\s*value:\s*Almadina Express/);
+  assert.doesNotMatch(`${recovery}\n${server}\n${delivery}\n${renderWorker}\n${blueprint}\n${readme}`, /RESEND_API_KEY|TWILIO_|api\.resend\.com|api\.twilio\.com/);
   assert.doesNotMatch(blueprint, /(?:re_|AC)[A-Za-z0-9_-]{20,}/);
   assert.match(styles, /\.auth-forgot-link\s*\{/);
   assert.match(styles, /\.password-recovery__form > \.field \.field__control input\s*\{[^}]*font-size:\s*16px/);
   assert.match(styles, /\.password-recovery__code-control input\[dir="ltr"\]/);
-  assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.password-recovery__method/);
+  assert.match(styles, /\.password-recovery__steps\s*\{[^}]*repeat\(3,/);
 });
 
 test("starts with only the administrator and removes all persisted demonstration accounts and records", async () => {

@@ -19,16 +19,12 @@ services:
         fromDatabase:
           name: almadina-express-db
           property: connectionString
-      - key: RESEND_API_KEY
+      - key: BREVO_API_KEY
         sync: false
-      - key: RESEND_FROM_EMAIL
+      - key: BREVO_FROM_EMAIL
         sync: false
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_MESSAGING_SERVICE_SID
-        sync: false
+      - key: BREVO_FROM_NAME
+        value: Almadina Express
 
 databases:
   - name: almadina-express-db

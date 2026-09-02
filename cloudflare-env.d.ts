@@ -23,20 +23,16 @@ interface D1Database {
 }
 
 interface PasswordResetDeliveryBindings {
-  RESEND_API_KEY?: string;
-  RESEND_FROM_EMAIL?: string;
-  TWILIO_ACCOUNT_SID?: string;
-  TWILIO_AUTH_TOKEN?: string;
-  TWILIO_MESSAGING_SERVICE_SID?: string;
+  BREVO_API_KEY?: string;
+  BREVO_FROM_EMAIL?: string;
+  BREVO_FROM_NAME?: string;
 }
 
 declare namespace NodeJS {
   interface ProcessEnv {
-    RESEND_API_KEY?: string;
-    RESEND_FROM_EMAIL?: string;
-    TWILIO_ACCOUNT_SID?: string;
-    TWILIO_AUTH_TOKEN?: string;
-    TWILIO_MESSAGING_SERVICE_SID?: string;
+    BREVO_API_KEY?: string;
+    BREVO_FROM_EMAIL?: string;
+    BREVO_FROM_NAME?: string;
   }
 }
 
