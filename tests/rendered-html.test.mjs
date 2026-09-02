@@ -563,6 +563,9 @@ test("keeps merchant and courier account fields read-only while administrators m
   assert.match(admin, /type AccountEditor =/);
   assert.match(admin, /function openAccountEditor\(account: User\)/);
   assert.match(admin, /function saveAccount\(event: FormEvent\)/);
+  assert.equal((admin.match(/role === "courier" \? "الاسم" : "اسم المتجر"/g) ?? []).length, 3);
+  assert.match(admin, /placeholder=\{form\.role === "courier" \? "الاسم" : "اسم المتجر"\}/);
+  assert.doesNotMatch(admin, /role === "courier" \? "المنطقة" : "اسم المتجر"/);
   assert.match(admin, /className="admin-account-edit"/);
   assert.match(admin, /className="admin-account-edit-modal"/);
   assert.match(admin, /المسؤول فقط يستطيع حفظ التغييرات على بيانات هذا الحساب/);
