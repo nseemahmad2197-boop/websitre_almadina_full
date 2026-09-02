@@ -778,14 +778,19 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .recipient-card > div { display: grid; flex: 1; gap: 4px; }
 .recipient-card > div > strong { font-size: 12px; }
 .recipient-card > div > a, .recipient-card > div > span { color: var(--muted); font-size: 10px; }
-.notification-card { display: flex; align-items: flex-start; gap: 11px; padding: 13px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); text-align: right; cursor: pointer; }
+.notification-card { display: flex; align-items: flex-start; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); text-align: right; }
 .notification-card.is-unread { border-color: rgb(8 124 69 / 18%); background: color-mix(in srgb, var(--green-pale), var(--surface) 68%); }
-.notification-card > span { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 12px; background: var(--green-pale); color: var(--green); }
-.notification-card > div { display: grid; flex: 1; gap: 5px; }
-.notification-card > div > strong { font-size: 12px; }
-.notification-card > div > p { color: var(--muted); font-size: 10px; line-height: 1.7; }
-.notification-card > div > small { color: var(--muted); font-size: 9px; }
-.notification-card > i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.notification-card__content { display: flex; min-width: 0; flex: 1; align-items: flex-start; gap: 11px; padding: 5px; border: 0; border-radius: 11px; background: transparent; color: inherit; font: inherit; text-align: right; cursor: pointer; }
+.notification-card__content:hover { background: color-mix(in srgb, var(--surface-muted), transparent 46%); }
+.notification-card__content > span { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 12px; background: var(--green-pale); color: var(--green); }
+.notification-card__content > div { display: grid; min-width: 0; flex: 1; gap: 5px; }
+.notification-card__content > div > strong { font-size: 12px; }
+.notification-card__content > div > p { color: var(--muted); font-size: 10px; line-height: 1.7; }
+.notification-card__content > div > small { color: var(--muted); font-size: 9px; }
+.notification-card__content > i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--green); }
+.notification-card__delete { width: 34px; height: 34px; margin-top: 3px; border: 1px solid color-mix(in srgb, var(--danger), transparent 82%); background: color-mix(in srgb, var(--danger-soft), transparent 24%); }
+.notification-card__delete:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
+.notification-card__delete svg { width: 18px; height: 18px; }
 .notification-page-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }
 .notification-page-actions .button { min-height: 38px; padding-right: 10px; padding-left: 10px; white-space: nowrap; }
 .notification-clear-button { color: var(--danger); }
@@ -1460,7 +1465,8 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .notification-page-actions { gap: 0; }
   .notification-page-actions .button { min-height: 36px; gap: 4px; padding-right: 7px; padding-left: 7px; font-size: 9px; }
   .notification-page-actions .button svg { width: 15px; height: 15px; }
-  .notification-card { padding: 10px; }
+  .notification-card { padding: 7px; }
+  .notification-card__content { gap: 8px; padding: 4px; }
 }
 
 @media (max-width: 350px) {

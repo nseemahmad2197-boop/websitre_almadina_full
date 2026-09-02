@@ -1332,6 +1332,13 @@ test("lets a signed-in account clear only its own selected notifications through
   assert.match(management, /إشعارات هذا الحساب فقط/);
   assert.match(management, /danger: true/);
   assert.match(management, /className="notification-clear-button"[\s\S]*مسح الكل/);
+  assert.match(management, /function requestClearNotice\(noticeId: string, noticeTitle: string\)/);
+  assert.match(management, /title: "حذف الإشعار\؟"/);
+  assert.match(management, /performClearNotices\(\[noticeId\], noticeId\)/);
+  assert.match(management, /<article className=\{`notification-card/);
+  assert.match(management, /className="notification-card__delete is-danger"/);
+  assert.match(management, /label=\{`حذف الإشعار: \$\{notice\.title\}`\}/);
+  assert.match(management, /disabled=\{clearingNotices\}/);
   assert.match(server, /async function clearNotices\(database: D1Database, request: Request, session: AuthenticatedSession\): Promise<Response>/);
   assert.match(server, /Array\.isArray\(payload\.noticeIds\)[\s\S]*payload\.noticeIds\.length > 5_000/);
   assert.match(server, /const noticeIds = new Set\(payload\.noticeIds\.map/);
@@ -1342,6 +1349,7 @@ test("lets a signed-in account clear only its own selected notifications through
   assert.match(server, /if \(!session\) return[\s\S]*url\.pathname === "\/api\/almadina\/notices\/clear" && request\.method === "POST"[\s\S]*return await clearNotices\(database, request, session\)/);
   assert.match(styles, /\.notification-page-actions\s*\{/);
   assert.match(styles, /\.notification-clear-button\s*\{[^}]*color:\s*var\(--danger\)/);
+  assert.match(styles, /\.notification-card__delete\s*\{/);
 });
 
 test("shows a reference-style account deletion page and performs deletion only through the protected server route", async () => {
