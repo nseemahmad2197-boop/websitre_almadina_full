@@ -783,6 +783,26 @@ async function enforceEndpointRateLimit(
   if (!rate || rate.request_count > limit) throw new ApiRequestError(message, 429);
 }
 
+async function assertEndpointRateLimit(
+  database: D1Database,
+  namespace: string,
+  keyMaterial: string,
+  limit: number,
+  message: string,
+): Promise<void> {
+  const keyHash = await sha256(`${namespace}:${keyMaterial}`);
+  const now = Math.floor(Date.now() / 1000);
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
+  const rate = await database.prepare("SELECT request_count, reset_at FROM almadina_rate_limits WHERE key_hash = ?")
+    .bind(keyHash).first<RateLimitRow>();
+  if (rate && rate.reset_at > now && rate.request_count >= limit) throw new ApiRequestError(message, 429);
+}
+
+async function clearEndpointRateLimit(database: D1Database, namespace: string, keyMaterial: string): Promise<void> {
+  const keyHash = await sha256(`${namespace}:${keyMaterial}`);
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE key_hash = ?").bind(keyHash).run();
+}
+
 async function enforcePasswordResetRateLimit(
   database: D1Database,
   keyMaterial: string,
@@ -2399,28 +2419,35 @@ async function login(database: D1Database, request: Request): Promise<Response> 
     : {};
   const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase().slice(0, 254) : "";
   const password = typeof payload.password === "string" ? payload.password.slice(0, 256) : "";
-  await enforceEndpointRateLimit(
-    database,
-    "login-ip",
-    requestClientAddress(request),
-    LOGIN_REQUEST_IP_LIMIT,
-    LOGIN_RATE_LIMIT_WINDOW,
-    "محاولات تسجيل دخول كثيرة. انتظر بضع دقائق ثم حاول مجددًا.",
-  );
-  await enforceEndpointRateLimit(
-    database,
-    "login-identifier",
-    email || "invalid",
-    LOGIN_REQUEST_IDENTIFIER_LIMIT,
-    LOGIN_RATE_LIMIT_WINDOW,
-    "محاولات تسجيل دخول كثيرة. انتظر بضع دقائق ثم حاول مجددًا.",
-  );
+  const rateLimitMessage = "محاولات تسجيل دخول كثيرة. انتظر بضع دقائق ثم حاول مجددًا.";
+  const loginLimits = [
+    { namespace: "login-ip-failures-v2", key: requestClientAddress(request), limit: LOGIN_REQUEST_IP_LIMIT },
+    { namespace: "login-identifier-failures-v2", key: email || "invalid", limit: LOGIN_REQUEST_IDENTIFIER_LIMIT },
+  ];
+  for (const limit of loginLimits) {
+    await assertEndpointRateLimit(database, limit.namespace, limit.key, limit.limit, rateLimitMessage);
+  }
   let state = await readState(database);
   let account = state.database.users.find((entry) => entry.email.toLowerCase() === email);
 
   if (!account || !await verifyPassword(password, account.password)) {
+    let limitError: ApiRequestError | null = null;
+    for (const limit of loginLimits) {
+      try {
+        await enforceEndpointRateLimit(database, limit.namespace, limit.key, limit.limit, LOGIN_RATE_LIMIT_WINDOW, rateLimitMessage);
+      } catch (error) {
+        if (error instanceof ApiRequestError) limitError ??= error;
+        else throw error;
+      }
+    }
+    if (limitError) throw limitError;
     return json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة." }, 401);
   }
+
+  // Successful sign-ins do not consume the retry budget. Clear only this
+  // account's failed-attempt counter; the shared-IP failure counter remains
+  // in place to keep distributed account guessing rate-limited.
+  await clearEndpointRateLimit(database, "login-identifier-failures-v2", email);
 
   if (passwordHashNeedsUpgrade(account.password)) {
     const upgradedAccount = { ...account, password: await hashPassword(password) };

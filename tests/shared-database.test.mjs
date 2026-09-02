@@ -129,6 +129,10 @@ class FakeD1Statement {
       return this.database.state ? { payload: this.database.state.payload, revision: this.database.state.revision } : null;
     }
 
+    if (this.sql.startsWith("SELECT request_count, reset_at FROM almadina_rate_limits WHERE key_hash")) {
+      return this.database.rateLimits.get(this.values[0]) ?? null;
+    }
+
     if (this.sql.startsWith("SELECT user_id, expires_at, created_at FROM almadina_sessions")) {
       const session = this.database.sessions.get(this.values[0]);
       return session ? { user_id: session.user_id, expires_at: session.expires_at, created_at: session.created_at } : null;
@@ -673,6 +677,10 @@ class FakeD1Statement {
         changes += 1;
       }
       return { success: true, meta: { changes } };
+    }
+
+    if (this.sql.startsWith("DELETE FROM almadina_rate_limits WHERE key_hash")) {
+      return { success: true, meta: { changes: Number(this.database.rateLimits.delete(this.values[0])) } };
     }
 
     throw new Error(`Unsupported mock D1 run() query: ${this.sql}`);
@@ -3825,4 +3833,38 @@ test("saves settings when an untouched legacy recipient has no governorate", asy
   });
   assert.equal(forgedLegacyChange.status, 400);
   assert.match(forgedLegacyChange.body.error, /بيانات المستلم المحفوظ غير صالحة/);
+});
+
+test("counts only failed sign-ins while keeping brute-force protection active", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const headers = { "X-Forwarded-For": "203.0.113.25" };
+  const validPayload = { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD };
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const successful = await call(worker, database, "login", {
+      method: "POST",
+      payload: validPayload,
+      headers,
+    });
+    assert.equal(successful.status, 200);
+  }
+  assert.equal([...database.rateLimits.values()].some((entry) => entry.action.startsWith("login-")), false);
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const rejected = await call(worker, database, "login", {
+      method: "POST",
+      payload: { ...validPayload, password: "WrongPassword!123" },
+      headers,
+    });
+    assert.equal(rejected.status, 401);
+  }
+
+  const blocked = await call(worker, database, "login", {
+    method: "POST",
+    payload: validPayload,
+    headers,
+  });
+  assert.equal(blocked.status, 429);
+  assert.match(blocked.body.error, /محاولات تسجيل دخول كثيرة/);
 });
