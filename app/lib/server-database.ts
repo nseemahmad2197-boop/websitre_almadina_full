@@ -58,6 +58,7 @@ const ACCOUNT_DELETE_ATTEMPT_LIMIT = 6;
 const COURIER_SCAN_RATE_LIMIT_WINDOW = 10 * 60;
 const COURIER_SCAN_ATTEMPT_LIMIT = 120;
 const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
+const BOOTSTRAP_ADMIN_ID = "admin-almadina";
 const LEGACY_DEFAULT_ADMIN_PASSWORD = "Admin@123";
 const BOOTSTRAP_LOCKED_PASSWORD = "disabled:bootstrap-password-required";
 const DEVICE_ACTIVITY_UPDATE_INTERVAL = 5 * 60 * 1000;
@@ -335,7 +336,7 @@ async function configuredBootstrapAdministrator(config: AlmadinaApiConfig, exist
   }
 
   return {
-    id: existing?.id || "admin-almadina",
+    id: existing?.id || BOOTSTRAP_ADMIN_ID,
     name: config.bootstrapAdminName?.trim().slice(0, 120) || existing?.name || "إدارة المدينة إكسبرس",
     email,
     password: await hashPassword(password),
@@ -348,36 +349,73 @@ async function configuredBootstrapAdministrator(config: AlmadinaApiConfig, exist
 }
 
 async function secureBootstrapAdministrator(database: D1Database, config: AlmadinaApiConfig): Promise<void> {
-  const state = await readState(database);
-  const administrators = state.database.users.filter((account) => account.role === "admin");
-  let retiredDefault: User | undefined;
-  for (const administrator of administrators) {
-    if (administrator.password === BOOTSTRAP_LOCKED_PASSWORD || await verifyPassword(LEGACY_DEFAULT_ADMIN_PASSWORD, administrator.password)) {
-      retiredDefault = administrator;
-      break;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const administrators = state.database.users.filter((account) => account.role === "admin");
+    let retiredDefault: User | undefined;
+    for (const administrator of administrators) {
+      if (
+        administrator.password === BOOTSTRAP_LOCKED_PASSWORD
+        || administrator.password === LEGACY_DEFAULT_ADMIN_PASSWORD
+        || await verifyPassword(LEGACY_DEFAULT_ADMIN_PASSWORD, administrator.password)
+      ) {
+        retiredDefault = administrator;
+        break;
+      }
     }
+
+    // Render's ALMADINA_ADMIN_* values are the recovery source of truth for the
+    // original administrator. This also repairs databases created by older
+    // releases that stored the bootstrap password as plaintext or that kept an
+    // earlier environment value after the Blueprint secrets were rotated.
+    const existing = administrators.find((account) => account.id === BOOTSTRAP_ADMIN_ID)
+      ?? retiredDefault
+      ?? (administrators.length === 1 ? administrators[0] : undefined);
+    const configured = await configuredBootstrapAdministrator(config, existing);
+    if (!configured && !retiredDefault) return;
+
+    const target = existing ?? retiredDefault;
+    const targetId = target?.id ?? configured!.id;
+    let replacement: User;
+    if (configured) {
+      const passwordMatches = Boolean(target && config.bootstrapAdminPassword)
+        && await verifyPassword(config.bootstrapAdminPassword!, target!.password);
+      replacement = {
+        ...target,
+        ...configured,
+        password: passwordMatches ? target!.password : configured.password,
+      };
+    } else {
+      replacement = { ...retiredDefault!, password: BOOTSTRAP_LOCKED_PASSWORD };
+    }
+
+    if (state.database.users.some((account) => account.id !== targetId && account.email.trim().toLowerCase() === replacement.email.trim().toLowerCase())) {
+      throw new Error("ALMADINA_ADMIN_EMAIL is already assigned to another account.");
+    }
+
+    const credentialsChanged = !target
+      || target.email.trim().toLowerCase() !== replacement.email.trim().toLowerCase()
+      || target.password !== replacement.password;
+    const accountChanged = !target || JSON.stringify(target) !== JSON.stringify(replacement);
+    if (!accountChanged) return;
+
+    const next = {
+      ...state.database,
+      users: target
+        ? state.database.users.map((account) => account.id === targetId ? replacement : account)
+        : [...state.database.users, replacement],
+    };
+    if (!await saveState(database, next, state.revision)) continue;
+    if (credentialsChanged) {
+      await database.batch([
+        database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(targetId),
+        database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(targetId),
+      ]);
+    }
+    return;
   }
 
-  if (!retiredDefault && administrators.length) return;
-  const configured = await configuredBootstrapAdministrator(config, retiredDefault);
-  if (!configured && !retiredDefault) return;
-
-  const targetId = retiredDefault?.id ?? configured!.id;
-  const replacement = configured ?? { ...retiredDefault!, password: BOOTSTRAP_LOCKED_PASSWORD };
-  if (state.database.users.some((account) => account.id !== targetId && account.email.trim().toLowerCase() === replacement.email.trim().toLowerCase())) {
-    throw new Error("ALMADINA_ADMIN_EMAIL is already assigned to another account.");
-  }
-  const next = {
-    ...state.database,
-    users: retiredDefault
-      ? state.database.users.map((account) => account.id === retiredDefault!.id ? replacement : account)
-      : [...state.database.users, replacement],
-  };
-  if (!await saveState(database, next, state.revision)) throw new Error("Could not secure the bootstrap administrator because the database changed concurrently.");
-  await database.batch([
-    database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(targetId),
-    database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(targetId),
-  ]);
+  throw new Error("Could not synchronize the bootstrap administrator because the database changed concurrently.");
 }
 
 async function initializeDatabase(database: D1Database, config: AlmadinaApiConfig): Promise<void> {

@@ -825,6 +825,104 @@ function namedCookieFrom(result, name) {
   return match[1];
 }
 
+test("synchronizes the bootstrap administrator when Render environment credentials change", async () => {
+  const worker = await loadWorker();
+  const originalDatabase = new FakeD1Database();
+  const originalEnvironment = {
+    ALMADINA_ADMIN_EMAIL: "old-admin@example.test",
+    ALMADINA_ADMIN_PASSWORD: "OldAdmin@Test-2026!",
+    ALMADINA_ADMIN_PHONE: "0591000000",
+  };
+  const originalLogin = await rawCall(worker, originalDatabase, "login", {
+    method: "POST",
+    payload: { email: originalEnvironment.ALMADINA_ADMIN_EMAIL, password: originalEnvironment.ALMADINA_ADMIN_PASSWORD },
+    environment: originalEnvironment,
+  });
+  assert.equal(originalLogin.status, 200);
+
+  const database = new FakeD1Database();
+  database.state = structuredClone(originalDatabase.state);
+  database.sessions.set("stale-session", {
+    token_hash: "stale-session",
+    user_id: "admin-almadina",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    created_at: new Date().toISOString(),
+  });
+  database.sessionDevices.set("stale-session", {
+    token_hash: "stale-session",
+    user_id: "admin-almadina",
+    device_name: "Old device",
+    device_type: "desktop",
+    browser_name: "Old browser",
+    created_at: new Date().toISOString(),
+    last_active_at: new Date().toISOString(),
+  });
+
+  const updatedEnvironment = {
+    ALMADINA_ADMIN_EMAIL: "current-admin@example.test",
+    ALMADINA_ADMIN_PASSWORD: "CurrentAdmin@Test-2026!",
+    ALMADINA_ADMIN_PHONE: "0592000000",
+  };
+  const updatedLogin = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: { email: updatedEnvironment.ALMADINA_ADMIN_EMAIL, password: updatedEnvironment.ALMADINA_ADMIN_PASSWORD },
+    environment: updatedEnvironment,
+  });
+  assert.equal(updatedLogin.status, 200);
+  assert.equal(updatedLogin.body.userId, "admin-almadina");
+  assert.equal(updatedLogin.body.database.users[0].email, updatedEnvironment.ALMADINA_ADMIN_EMAIL);
+  assert.equal(updatedLogin.body.database.users[0].phone, updatedEnvironment.ALMADINA_ADMIN_PHONE);
+  assert.equal(database.sessions.has("stale-session"), false);
+  assert.equal(database.sessionDevices.has("stale-session"), false);
+
+  const storedAdministrator = JSON.parse(database.state.payload).users.find((account) => account.id === "admin-almadina");
+  assert.match(storedAdministrator.password, /^pbkdf2:600000:/);
+  assert.notEqual(storedAdministrator.password, updatedEnvironment.ALMADINA_ADMIN_PASSWORD);
+
+  const oldCredentials = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: { email: originalEnvironment.ALMADINA_ADMIN_EMAIL, password: originalEnvironment.ALMADINA_ADMIN_PASSWORD },
+    environment: updatedEnvironment,
+  });
+  assert.equal(oldCredentials.status, 401);
+});
+
+test("repairs an administrator stored by a legacy plaintext release", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const legacy = createSeedDatabase();
+  legacy.users.push({
+    id: "admin-almadina",
+    name: "إدارة قديمة",
+    email: "legacy-admin@example.test",
+    password: "Admin@123",
+    phone: "0593000000",
+    store: "المدينة إكسبرس",
+    role: "admin",
+    joinedAt: new Date().toISOString(),
+    avatarColor: "#087c45",
+  });
+  database.state = {
+    id: "main",
+    payload: JSON.stringify(legacy),
+    revision: 4,
+    updated_at: new Date().toISOString(),
+  };
+
+  const environment = {
+    ALMADINA_ADMIN_EMAIL: "recovered-admin@example.test",
+    ALMADINA_ADMIN_PASSWORD: "RecoveredAdmin@Test-2026!",
+    ALMADINA_ADMIN_PHONE: "0594000000",
+  };
+  const recovered = await rawCall(worker, database, "login", {
+    method: "POST",
+    payload: { email: environment.ALMADINA_ADMIN_EMAIL, password: environment.ALMADINA_ADMIN_PASSWORD },
+    environment,
+  });
+  assert.equal(recovered.status, 200);
+  assert.equal(recovered.body.database.users[0].email, environment.ALMADINA_ADMIN_EMAIL);
+});
+
 test("reverse-geocodes a registration pin with a safe manual fallback", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
