@@ -1683,6 +1683,18 @@ function mergeMerchantTrackingNote(existing: Order, candidate: Order, account: U
   return note ? appendOrderTrackingNote(existing, account.name, note) : existing;
 }
 
+function isUnchangedRecipient(candidate: Recipient, existing: Recipient | undefined): existing is Recipient {
+  if (!existing) return false;
+  return candidate.id === existing.id
+    && candidate.merchantId === existing.merchantId
+    && candidate.name === existing.name
+    && candidate.phone === existing.phone
+    && (candidate.governorate ?? "") === (existing.governorate ?? "")
+    && candidate.city === existing.city
+    && candidate.address === existing.address
+    && candidate.favorite === existing.favorite;
+}
+
 function collectionVerificationCode(): string {
   const values = crypto.getRandomValues(new Uint16Array(1));
   return String(1000 + (values[0] % 9000));
@@ -1820,7 +1832,13 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     };
   }, (entry) => entry.status !== "draft");
 
-  const recipients = mergeMerchantRecords<Recipient>(current.recipients, submitted.recipients, account.id, (candidate) => {
+  const recipients = mergeMerchantRecords<Recipient>(current.recipients, submitted.recipients, account.id, (candidate, existing) => {
+    // Older saved recipients may predate the governorate field. Unrelated writes,
+    // such as changing notification settings, must not reject or delete an
+    // untouched legacy record. Any actual recipient change still goes through
+    // the strict validation below.
+    if (isUnchangedRecipient(candidate, existing)) return existing;
+
     const name = candidate.name.trim().slice(0, 120);
     const phone = normalizeAccountPhone(candidate.phone) ?? "";
     const governorate = candidate.governorate?.trim().slice(0, 120) ?? "";

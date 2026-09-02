@@ -3743,3 +3743,86 @@ test("resets passwords through the email-only verification flow and consumes eve
   assert.equal(invalidatedDelivery.failed_attempts, 5);
   assert.equal(invalidatedDelivery.reset_token_hash, null);
 });
+
+test("saves settings when an untouched legacy recipient has no governorate", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const merchant = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("تاجر المستلم القديم", "legacy-recipient@example.test", "0597000011"),
+  });
+  assert.equal(merchant.status, 201);
+  const merchantCookie = sessionFrom(merchant);
+
+  const administrator = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
+  });
+  assert.equal(administrator.status, 200);
+  const adminCookie = sessionFrom(administrator);
+  const legacyRecipient = {
+    id: "recipient-without-governorate",
+    merchantId: merchant.body.userId,
+    name: "مستلم قديم",
+    phone: "0597123456",
+    city: "نابلس",
+    address: "العنوان القديم",
+    favorite: true,
+  };
+
+  const seeded = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: administrator.body.revision,
+      database: {
+        ...administrator.body.database,
+        recipients: [legacyRecipient, ...administrator.body.database.recipients],
+      },
+    },
+  });
+  assert.equal(seeded.status, 200);
+
+  const synchronized = await call(worker, database, "database", { cookie: merchantCookie });
+  assert.equal(synchronized.status, 200);
+  assert.deepEqual(synchronized.body.database.recipients, [legacyRecipient]);
+
+  const preferences = {
+    ...synchronized.body.database.preferences,
+    [merchant.body.userId]: {
+      theme: "light",
+      notifications: false,
+      sounds: true,
+      orderUpdates: true,
+      biometric: false,
+      pin: "",
+      rating: 0,
+      compact: false,
+    },
+  };
+  const saved = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: merchantCookie,
+    payload: {
+      revision: synchronized.body.revision,
+      database: { ...synchronized.body.database, preferences },
+    },
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.database.preferences[merchant.body.userId].notifications, false);
+  assert.deepEqual(saved.body.database.recipients, [legacyRecipient]);
+
+  const forgedLegacyChange = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: merchantCookie,
+    payload: {
+      revision: saved.body.revision,
+      database: {
+        ...saved.body.database,
+        recipients: saved.body.database.recipients.map((recipient) => ({ ...recipient, city: "مدينة غير مدعومة" })),
+      },
+    },
+  });
+  assert.equal(forgedLegacyChange.status, 400);
+  assert.match(forgedLegacyChange.body.error, /بيانات المستلم المحفوظ غير صالحة/);
+});
