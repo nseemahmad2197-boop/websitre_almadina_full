@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { detectBiometricAvailability } from "../lib/app-lock-client";
 import { AVAILABLE_ACCOUNTS_EVENT, AVAILABLE_ACCOUNTS_STORAGE_KEY, readAvailableAccounts, type AvailableAccount } from "../lib/available-accounts";
-import type { Order } from "../lib/data";
+import type { TrackableOrder } from "../lib/data";
 import { Icon } from "./icon";
 import { PasswordRecovery } from "./password-recovery";
 import { RegistrationFlow } from "./registration-flow";
@@ -18,7 +18,7 @@ export function Authentication() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [tracking, setTracking] = useState("");
-  const [trackedOrder, setTrackedOrder] = useState<Order | null>(null);
+  const [trackedOrder, setTrackedOrder] = useState<TrackableOrder | null>(null);
   const [availableAccounts, setAvailableAccounts] = useState<AvailableAccount[]>([]);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [error, setError] = useState("");
@@ -82,7 +82,7 @@ export function Authentication() {
 
     try {
       const response = await fetch(`/api/almadina/track?tracking=${encodeURIComponent(normalized)}`, { cache: "no-store" });
-      const result = await response.json() as { order?: Order; error?: string };
+      const result = await response.json() as { order?: TrackableOrder; error?: string };
       if (!response.ok || !result.order) return showToast(result.error ?? "لم نعثر على طرد بهذا الرقم. تحقق من رقم التتبع.", "error");
       setTrackedOrder(result.order);
     } catch {
@@ -169,7 +169,7 @@ export function Authentication() {
         <footer className="auth-footer">توصيل أسرع، متابعة أسهل — إلى كل فلسطين</footer>
       </div>
 
-      {trackedOrder && <Modal onClose={() => setTrackedOrder(null)} title="تتبّع الطرد" className="tracking-modal"><div className="tracking-modal__number"><Icon name="package" size={32} /><div><strong dir="ltr">{trackedOrder.trackingNumber}</strong><span>{trackedOrder.recipientName} · {trackedOrder.city}</span></div><StatusPill status={trackedOrder.status} /></div><TrackingHistory order={trackedOrder} compact /><Button full onClick={() => setTrackedOrder(null)}>حسنًا</Button></Modal>}
+      {trackedOrder && <Modal onClose={() => setTrackedOrder(null)} title="تتبّع الطرد" className="tracking-modal"><div className="tracking-modal__number"><Icon name="package" size={32} /><div><strong dir="ltr">{trackedOrder.trackingNumber}</strong><span>بيانات المستلم محمية</span></div><StatusPill status={trackedOrder.status} /></div><TrackingHistory order={trackedOrder} compact /><Button full onClick={() => setTrackedOrder(null)}>حسنًا</Button></Modal>}
       {accountsOpen && (
         <Modal title="الحسابات المتاحة" onClose={() => setAccountsOpen(false)} className="available-accounts-modal" sheet>
           <p className="modal-description">اختيار حساب من هذه القائمة يملأ البريد الإلكتروني لتسجيل الدخول بكلمة المرور فقط. عند الضغط على زر حماية الجهاز، يعرض الجهاز الحسابات المرتبطة بالبصمة ويختار المستخدم منها.</p>

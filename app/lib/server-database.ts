@@ -17,7 +17,7 @@ const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
 const PASSWORD_RESET_COOKIE = "almadina_password_reset";
 const REGISTRATION_COOKIE = "almadina_registration";
 const SESSION_DURATION = 30 * 24 * 60 * 60;
-const PASSWORD_ITERATIONS = 100_000;
+const PASSWORD_ITERATIONS = 600_000;
 const APP_LOCK_CHALLENGE_DURATION = 5 * 60;
 const APP_LOCK_MAX_FAILED_ATTEMPTS = 5;
 const APP_LOCK_COOLDOWN = 5 * 60;
@@ -48,6 +48,18 @@ const REGISTRATION_REQUEST_EMAIL_LIMIT = 3;
 const REGISTRATION_VERIFY_IP_LIMIT = 20;
 const REVERSE_GEOCODE_RATE_LIMIT_WINDOW = 10 * 60;
 const REVERSE_GEOCODE_REQUEST_IP_LIMIT = 20;
+const LOGIN_RATE_LIMIT_WINDOW = 15 * 60;
+const LOGIN_REQUEST_IP_LIMIT = 40;
+const LOGIN_REQUEST_IDENTIFIER_LIMIT = 10;
+const PUBLIC_TRACKING_RATE_LIMIT_WINDOW = 10 * 60;
+const PUBLIC_TRACKING_REQUEST_IP_LIMIT = 30;
+const ACCOUNT_DELETE_RATE_LIMIT_WINDOW = 10 * 60;
+const ACCOUNT_DELETE_ATTEMPT_LIMIT = 6;
+const COURIER_SCAN_RATE_LIMIT_WINDOW = 10 * 60;
+const COURIER_SCAN_ATTEMPT_LIMIT = 120;
+const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
+const LEGACY_DEFAULT_ADMIN_PASSWORD = "Admin@123";
+const BOOTSTRAP_LOCKED_PASSWORD = "disabled:bootstrap-password-required";
 const DEVICE_ACTIVITY_UPDATE_INTERVAL = 5 * 60 * 1000;
 const initializedDatabases = new WeakMap<D1Database, Promise<void>>();
 
@@ -128,7 +140,14 @@ type RegistrationLocationRow = {
   created_at: string;
 };
 
-export type AlmadinaApiConfig = PasswordResetDeliveryConfig & ReverseGeocodingConfig;
+type BootstrapAdministratorConfig = {
+  bootstrapAdminEmail?: string;
+  bootstrapAdminPassword?: string;
+  bootstrapAdminPhone?: string;
+  bootstrapAdminName?: string;
+};
+
+export type AlmadinaApiConfig = PasswordResetDeliveryConfig & ReverseGeocodingConfig & BootstrapAdministratorConfig;
 
 class ApiRequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -140,10 +159,65 @@ class ApiRequestError extends Error {
 function json(payload: unknown, status = 200, headers: HeadersInit = {}): Response {
   const responseHeaders = new Headers(headers);
   responseHeaders.set("Cache-Control", "no-store");
+  responseHeaders.set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+  responseHeaders.set("Referrer-Policy", "no-referrer");
+  responseHeaders.set("X-Content-Type-Options", "nosniff");
+  responseHeaders.set("X-Frame-Options", "DENY");
   return Response.json(payload, {
     status,
     headers: responseHeaders,
   });
+}
+
+async function validateApiRequestEnvelope(request: Request): Promise<Request | Response> {
+  const method = request.method.toUpperCase();
+  const unsafeMethod = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+  if (!unsafeMethod) return request;
+
+  const fetchSite = request.headers.get("sec-fetch-site")?.toLowerCase();
+  if (fetchSite === "cross-site") return json({ error: "مصدر الطلب غير مسموح." }, 403);
+
+  const lengthHeader = request.headers.get("content-length");
+  const contentLength = lengthHeader === null ? 0 : Number(lengthHeader);
+  if (Number.isFinite(contentLength) && contentLength > MAX_API_BODY_BYTES) {
+    return json({ error: "حجم الطلب أكبر من الحد المسموح." }, 413);
+  }
+
+  if (request.body === null) return request;
+
+  {
+    const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() ?? "";
+    if (contentType !== "application/json" && !contentType.endsWith("+json")) {
+      return json({ error: "نوع محتوى الطلب غير مدعوم." }, 415);
+    }
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalLength += value.byteLength;
+      if (totalLength > MAX_API_BODY_BYTES) {
+        await reader.cancel();
+        return json({ error: "حجم الطلب أكبر من الحد المسموح." }, 413);
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return json({ error: "تعذّرت قراءة بيانات الطلب." }, 400);
+  }
+
+  const body = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new Request(request, { body });
 }
 
 function cookieHeaders(...cookies: string[]): Headers {
@@ -238,7 +312,72 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
   }
 }
 
-async function initializeDatabase(database: D1Database): Promise<void> {
+function passwordHashNeedsUpgrade(stored: string): boolean {
+  const [algorithm, iterationValue] = stored.split(":");
+  const iterations = Number(iterationValue);
+  return algorithm === "pbkdf2" && Number.isSafeInteger(iterations) && iterations < PASSWORD_ITERATIONS;
+}
+
+async function configuredBootstrapAdministrator(config: AlmadinaApiConfig, existing?: User): Promise<User | null> {
+  const password = config.bootstrapAdminPassword ?? "";
+  if (!password) return null;
+  if (!validNewPassword(password) || password === LEGACY_DEFAULT_ADMIN_PASSWORD || password.length < 12) {
+    throw new Error("ALMADINA_ADMIN_PASSWORD must contain at least 12 characters, a letter, a number, and a symbol, and must not use the retired default password.");
+  }
+
+  const email = (config.bootstrapAdminEmail?.trim().toLowerCase() || existing?.email || "admin@almadinaexpress.com");
+  const phone = normalizeAccountPhone(config.bootstrapAdminPhone || existing?.phone || "0599000000") ?? "";
+  if (!validEmail(email) || email.length > 254 || !phone) {
+    throw new Error("ALMADINA_ADMIN_EMAIL or ALMADINA_ADMIN_PHONE is invalid.");
+  }
+
+  return {
+    id: existing?.id || "admin-almadina",
+    name: config.bootstrapAdminName?.trim().slice(0, 120) || existing?.name || "إدارة المدينة إكسبرس",
+    email,
+    password: await hashPassword(password),
+    phone,
+    store: existing?.store || "المدينة إكسبرس",
+    role: "admin",
+    joinedAt: existing?.joinedAt || new Date().toISOString(),
+    avatarColor: existing?.avatarColor || "#087c45",
+  };
+}
+
+async function secureBootstrapAdministrator(database: D1Database, config: AlmadinaApiConfig): Promise<void> {
+  const state = await readState(database);
+  const administrators = state.database.users.filter((account) => account.role === "admin");
+  let retiredDefault: User | undefined;
+  for (const administrator of administrators) {
+    if (administrator.password === BOOTSTRAP_LOCKED_PASSWORD || await verifyPassword(LEGACY_DEFAULT_ADMIN_PASSWORD, administrator.password)) {
+      retiredDefault = administrator;
+      break;
+    }
+  }
+
+  if (!retiredDefault && administrators.length) return;
+  const configured = await configuredBootstrapAdministrator(config, retiredDefault);
+  if (!configured && !retiredDefault) return;
+
+  const targetId = retiredDefault?.id ?? configured!.id;
+  const replacement = configured ?? { ...retiredDefault!, password: BOOTSTRAP_LOCKED_PASSWORD };
+  if (state.database.users.some((account) => account.id !== targetId && account.email.trim().toLowerCase() === replacement.email.trim().toLowerCase())) {
+    throw new Error("ALMADINA_ADMIN_EMAIL is already assigned to another account.");
+  }
+  const next = {
+    ...state.database,
+    users: retiredDefault
+      ? state.database.users.map((account) => account.id === retiredDefault!.id ? replacement : account)
+      : [...state.database.users, replacement],
+  };
+  if (!await saveState(database, next, state.revision)) throw new Error("Could not secure the bootstrap administrator because the database changed concurrently.");
+  await database.batch([
+    database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(targetId),
+    database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(targetId),
+  ]);
+}
+
+async function initializeDatabase(database: D1Database, config: AlmadinaApiConfig): Promise<void> {
   await database.batch([
     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_state (
       id TEXT PRIMARY KEY NOT NULL,
@@ -350,18 +489,22 @@ async function initializeDatabase(database: D1Database): Promise<void> {
   ]);
 
   const existing = await database.prepare("SELECT revision FROM almadina_state WHERE id = ?").bind("main").first<{ revision: number }>();
-  if (existing) return;
+  if (existing) {
+    await secureBootstrapAdministrator(database, config);
+    return;
+  }
 
   const initial = createSeedDatabase();
-  initial.users = await Promise.all(initial.users.map(async (account) => ({ ...account, password: await hashPassword(account.password) })));
+  const administrator = await configuredBootstrapAdministrator(config);
+  if (administrator) initial.users.push(administrator);
   await database.prepare("INSERT INTO almadina_state (id, payload, revision, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
     .bind("main", JSON.stringify(initial), 0, new Date().toISOString()).run();
 }
 
-async function ensureDatabase(database: D1Database): Promise<void> {
+async function ensureDatabase(database: D1Database, config: AlmadinaApiConfig): Promise<void> {
   let initialization = initializedDatabases.get(database);
   if (!initialization) {
-    initialization = initializeDatabase(database);
+    initialization = initializeDatabase(database, config);
     initializedDatabases.set(database, initialization);
   }
 
@@ -519,7 +662,7 @@ function getSessionToken(request: Request): string | null {
 
 function sessionCookie(request: Request, token: string, maxAge = SESSION_DURATION): string {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
 }
 
 function passkeyLoginCookie(request: Request, token: string, maxAge = APP_LOCK_CHALLENGE_DURATION): string {
@@ -538,12 +681,7 @@ function registrationCookie(request: Request, token: string, maxAge = REGISTRATI
 }
 
 async function enforcePublicPasskeyRateLimit(database: D1Database, request: Request, action: "options" | "verify", limit: number): Promise<void> {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
-  // Render sets the first X-Forwarded-For entry to the real client address.
-  // A Cloudflare-specific address is trusted only when the runtime supplies the
-  // non-header `request.cf` property, which an HTTP client cannot forge.
-  const cloudflareAddress = "cf" in request ? request.headers.get("cf-connecting-ip")?.trim() : "";
-  const clientAddress = (cloudflareAddress || forwarded.at(0) || "unknown").slice(0, 128).toLowerCase();
+  const clientAddress = requestClientAddress(request);
   const keyHash = await sha256(`passkey-login:${action}:${clientAddress}`);
   const now = Math.floor(Date.now() / 1000);
   const resetAt = now + PASSKEY_RATE_LIMIT_WINDOW;
@@ -617,6 +755,29 @@ function requestClientAddress(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for")?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
   const cloudflareAddress = "cf" in request ? request.headers.get("cf-connecting-ip")?.trim() : "";
   return (cloudflareAddress || forwarded.at(0) || "unknown").slice(0, 128).toLowerCase();
+}
+
+async function enforceEndpointRateLimit(
+  database: D1Database,
+  namespace: string,
+  keyMaterial: string,
+  limit: number,
+  windowSeconds: number,
+  message: string,
+): Promise<void> {
+  const keyHash = await sha256(`${namespace}:${keyMaterial}`);
+  const now = Math.floor(Date.now() / 1000);
+  const resetAt = now + windowSeconds;
+  await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
+  const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT (key_hash) DO UPDATE SET
+      action = excluded.action,
+      request_count = CASE WHEN almadina_rate_limits.reset_at <= ? THEN 1 ELSE almadina_rate_limits.request_count + 1 END,
+      reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
+    RETURNING request_count, reset_at`)
+    .bind(keyHash, namespace, resetAt, now, now).first<RateLimitRow>();
+  if (!rate || rate.request_count > limit) throw new ApiRequestError(message, 429);
 }
 
 async function enforcePasswordResetRateLimit(
@@ -1349,11 +1510,47 @@ function snapshot(state: StoredState, account: User) {
 }
 
 function isValidDatabase(value: unknown): value is Database {
-  if (!value || typeof value !== "object") return false;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<Database>;
-  return Array.isArray(candidate.users) && Array.isArray(candidate.orders) && Array.isArray(candidate.recipients)
-    && Array.isArray(candidate.collections) && Array.isArray(candidate.notices)
-    && !!candidate.preferences && typeof candidate.preferences === "object";
+  const record = (entry: unknown): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry);
+  const stringFields = (entry: Record<string, unknown>, fields: string[]) => fields.every((field) => typeof entry[field] === "string");
+  const validId = (entry: Record<string, unknown>) => typeof entry.id === "string" && /^[a-zA-Z0-9_-]{1,160}$/.test(entry.id);
+  const validUser = (entry: unknown) => record(entry) && validId(entry)
+    && stringFields(entry, ["name", "email", "password", "phone", "store", "role", "joinedAt", "avatarColor"]);
+  const validTrackingEvent = (entry: unknown) => record(entry) && validId(entry)
+    && stringFields(entry, ["status", "title", "location", "actor", "note", "createdAt"]);
+  const validOrder = (entry: unknown) => record(entry) && validId(entry)
+    && stringFields(entry, ["trackingNumber", "merchantId", "merchantName", "merchantStore", "recipientName", "recipientPhone", "city", "address", "pickupAddress", "content", "dimensions", "notes", "privateNotes", "reference", "type", "status", "courierName", "createdAt", "updatedAt"])
+    && (entry.weight === undefined || typeof entry.weight === "string")
+    && typeof entry.amount === "number" && Number.isFinite(entry.amount)
+    && typeof entry.deliveryFee === "number" && Number.isFinite(entry.deliveryFee)
+    && typeof entry.deleted === "boolean"
+    && (entry.trackingEvents === undefined || (Array.isArray(entry.trackingEvents) && entry.trackingEvents.length <= 5_000 && entry.trackingEvents.every(validTrackingEvent)));
+  const validRecipient = (entry: unknown) => record(entry) && validId(entry)
+    && stringFields(entry, ["merchantId", "name", "phone", "city", "address"])
+    && typeof entry.favorite === "boolean";
+  const validCollection = (entry: unknown) => record(entry) && validId(entry)
+    && stringFields(entry, ["merchantId", "merchantName", "invoiceNumber", "status", "verificationCode", "authorizedRecipient", "createdAt", "updatedAt", "scheduledAt"])
+    && Array.isArray(entry.orderIds) && entry.orderIds.length <= 50_000 && entry.orderIds.every((id) => typeof id === "string" && id.length <= 160);
+  const validNotice = (entry: unknown) => record(entry) && validId(entry)
+    && stringFields(entry, ["userId", "title", "message", "icon", "createdAt"])
+    && typeof entry.read === "boolean";
+  const uniqueIds = (entries: unknown[]) => new Set(entries.map((entry) => (entry as Record<string, unknown>).id)).size === entries.length;
+  const preferences = candidate.preferences;
+  return Array.isArray(candidate.users) && candidate.users.length <= 5_000
+    && candidate.users.every(validUser) && uniqueIds(candidate.users)
+    && Array.isArray(candidate.orders) && candidate.orders.length <= 50_000
+    && candidate.orders.every(validOrder) && uniqueIds(candidate.orders)
+    && Array.isArray(candidate.recipients) && candidate.recipients.length <= 50_000
+    && candidate.recipients.every(validRecipient) && uniqueIds(candidate.recipients)
+    && Array.isArray(candidate.collections) && candidate.collections.length <= 20_000
+    && candidate.collections.every(validCollection) && uniqueIds(candidate.collections)
+    && Array.isArray(candidate.notices) && candidate.notices.length <= 20_000
+    && candidate.notices.every(validNotice) && uniqueIds(candidate.notices)
+    && !!preferences && typeof preferences === "object" && !Array.isArray(preferences)
+    && Object.keys(preferences).length <= 5_000
+    && Object.entries(preferences).every(([id, preference]) => id.length <= 160 && record(preference))
+    && Number.isSafeInteger(candidate.nextOrder) && Number.isSafeInteger(candidate.nextCollection);
 }
 
 function validEmail(value: string): boolean {
@@ -1398,7 +1595,7 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
       continue;
     }
 
-    if ((candidate.role !== "merchant" && candidate.role !== "courier") || candidate.password.length < 8) {
+    if ((candidate.role !== "merchant" && candidate.role !== "courier") || !validNewPassword(candidate.password)) {
       throw new ApiRequestError("تعذّر إنشاء الحساب: تأكد من نوعه وكلمة المرور.", 400);
     }
 
@@ -1448,11 +1645,30 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
   });
 }
 
-function mergeMerchantRecords<T extends { id: string; merchantId: string }>(current: T[], submitted: T[], userId: string, update: (candidate: T, existing?: T) => T): T[] {
+function mergeMerchantRecords<T extends { id: string; merchantId: string }>(
+  current: T[],
+  submitted: T[],
+  userId: string,
+  update: (candidate: T, existing?: T) => T,
+  preserveMissing: (entry: T) => boolean = () => false,
+): T[] {
   const others = current.filter((entry) => entry.merchantId !== userId);
-  const existing = new Map(current.filter((entry) => entry.merchantId === userId).map((entry) => [entry.id, entry]));
-  const mine = submitted.filter((entry) => entry.merchantId === userId).map((entry) => update(entry, existing.get(entry.id)));
-  return [...mine, ...others];
+  const currentMine = current.filter((entry) => entry.merchantId === userId);
+  const existing = new Map(currentMine.map((entry) => [entry.id, entry]));
+  if (submitted.some((entry) => entry.merchantId !== userId)) {
+    throw new ApiRequestError("لا يمكنك تعديل بيانات تابعة لحساب آخر.", 403);
+  }
+  const foreignIds = new Set(others.map((entry) => entry.id));
+  const submittedIds = new Set<string>();
+  const mine = submitted.map((entry) => {
+    if (foreignIds.has(entry.id) || submittedIds.has(entry.id)) {
+      throw new ApiRequestError("معرّف السجل مستخدم بالفعل ولا يمكن تكراره.", 409);
+    }
+    submittedIds.add(entry.id);
+    return update(entry, existing.get(entry.id));
+  });
+  const protectedMissing = currentMine.filter((entry) => !submittedIds.has(entry.id) && preserveMissing(entry));
+  return [...mine, ...protectedMissing, ...others];
 }
 
 function mergeMerchantTrackingNote(existing: Order, candidate: Order, account: User): Order {
@@ -1536,28 +1752,9 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     if (existing) {
       const trackedOrder = mergeMerchantTrackingNote(existing, candidate, savedAccount);
       return {
-        ...candidate,
-        merchantId: account.id,
-        merchantName: existing.merchantName,
-        merchantStore: existing.merchantStore,
-        trackingNumber: existing.trackingNumber,
-        status: existing.status,
-        courierName: existing.courierName,
-        courierId: existing.courierId,
-        shippedAt: existing.shippedAt,
-        governorate: existing.governorate,
-        dimensions: existing.dimensions,
-        lengthCm: existing.lengthCm,
-        widthCm: existing.widthCm,
-        heightCm: existing.heightCm,
-        weight: existing.weight,
-        weightFee: existing.weightFee,
-        oversizeFee: existing.oversizeFee,
-        deliveryFee: existing.deliveryFee,
-        notes: existing.notes,
-        privateNotes: existing.privateNotes,
+        ...existing,
+        deleted: candidate.deleted === true,
         trackingEvents: trackedOrder.trackingEvents,
-        createdAt: existing.createdAt,
         updatedAt: trackedOrder.updatedAt,
       };
     }
@@ -1569,6 +1766,14 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     const oversizeFee = getOrderOversizeFee(candidate);
     const region = resolveDeliveryRegion(candidate.governorate ?? "", candidate.city);
     if (!region) throw new ApiRequestError("تحقق من تطابق المحافظة والمدينة قبل حفظ الطرد.", 400);
+    const recipientName = candidate.recipientName.trim().slice(0, 120);
+    const recipientPhone = normalizeAccountPhone(candidate.recipientPhone) ?? "";
+    const city = candidate.city.trim().slice(0, 120);
+    const address = candidate.address.trim().slice(0, 240);
+    const amount = Number(candidate.amount);
+    if (!recipientName || !recipientPhone || !city || !address || !Number.isFinite(amount) || amount < 0 || amount > 1_000_000) {
+      throw new ApiRequestError("تحقق من اسم المستلم ورقمه وعنوانه وقيمة الطرد.", 400);
+    }
     const deliveryFee = getDeliveryFee(region, savedAccount.membership) + weightFee + oversizeFee;
     const notes = typeof candidate.notes === "string" ? candidate.notes.trim().slice(0, 500) : "";
     const privateNotes = typeof candidate.privateNotes === "string" ? candidate.privateNotes.trim().slice(0, 1000) : "";
@@ -1578,7 +1783,16 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
       merchantName: savedAccount.name,
       merchantStore: savedAccount.store,
       trackingNumber: `ALX-${nextOrder++}`,
+      recipientName,
+      recipientPhone,
       governorate: candidate.governorate?.trim().slice(0, 120),
+      city,
+      address,
+      pickupAddress: candidate.pickupAddress.trim().slice(0, 240),
+      amount,
+      content: candidate.content.trim().slice(0, 500),
+      reference: candidate.reference.trim().slice(0, 120),
+      type: candidate.type.trim().slice(0, 120) || "طرد عادي",
       lengthCm: lengthCm || undefined,
       widthCm: widthCm || undefined,
       heightCm: heightCm || undefined,
@@ -1601,9 +1815,19 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
       createdAt: now,
       updatedAt: now,
     };
-  });
+  }, (entry) => entry.status !== "draft");
 
-  const recipients = mergeMerchantRecords<Recipient>(current.recipients, submitted.recipients, account.id, (candidate) => ({ ...candidate, merchantId: account.id }));
+  const recipients = mergeMerchantRecords<Recipient>(current.recipients, submitted.recipients, account.id, (candidate) => {
+    const name = candidate.name.trim().slice(0, 120);
+    const phone = normalizeAccountPhone(candidate.phone) ?? "";
+    const governorate = candidate.governorate?.trim().slice(0, 120) ?? "";
+    const city = candidate.city.trim().slice(0, 120);
+    const address = candidate.address.trim().slice(0, 240);
+    if (!name || !phone || !governorate || !city || !resolveDeliveryRegion(governorate, city)) {
+      throw new ApiRequestError("بيانات المستلم المحفوظ غير صالحة.", 400);
+    }
+    return { ...candidate, merchantId: account.id, name, phone, governorate, city, address, favorite: candidate.favorite === true };
+  });
   const { collections, nextCollection } = mergeMerchantCollections(current.collections, submitted.collections, orders, savedAccount, current.nextCollection);
 
   const otherNotices = current.notices.filter((notice) => notice.userId !== account.id);
@@ -1761,7 +1985,7 @@ type AccountDeletionEligibility = {
 };
 
 function accountDeletionEligibility(database: Database, account: User): AccountDeletionEligibility {
-  const assignedOrders = database.orders.filter((order) => !order.deleted && (
+  const assignedOrders = database.orders.filter((order) => (
     account.role === "merchant" ? order.merchantId === account.id : order.courierId === account.id
   ));
   const activeOrderCount = assignedOrders.filter((order) => order.status !== "delivered" && order.status !== "returned").length;
@@ -1793,6 +2017,14 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
   const confirmation = typeof payload.confirmation === "string" ? payload.confirmation.trim() : "";
   if (confirmation !== "حذف حسابي") return json({ error: "اكتب عبارة «حذف حسابي» كما هي للتأكيد." }, 400);
   if (!password) return json({ error: "أدخل كلمة مرور الحساب للتأكيد." }, 400);
+  await enforceEndpointRateLimit(
+    database,
+    "account-delete",
+    session.account.id,
+    ACCOUNT_DELETE_ATTEMPT_LIMIT,
+    ACCOUNT_DELETE_RATE_LIMIT_WINDOW,
+    "محاولات كثيرة لحذف الحساب. انتظر عشر دقائق ثم حاول مجددًا.",
+  );
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const state = await readState(database);
@@ -2135,14 +2367,47 @@ async function completePasswordReset(database: D1Database, request: Request): Pr
 }
 
 async function login(database: D1Database, request: Request): Promise<Response> {
-  const payload = await request.json() as { email?: string; password?: string };
-  const email = payload.email?.trim().toLowerCase() ?? "";
-  const password = payload.password ?? "";
-  const state = await readState(database);
-  const account = state.database.users.find((entry) => entry.email.toLowerCase() === email);
+  let submitted: unknown;
+  try {
+    submitted = await request.json();
+  } catch {
+    return json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة." }, 401);
+  }
+  const payload = submitted && typeof submitted === "object" && !Array.isArray(submitted)
+    ? submitted as Record<string, unknown>
+    : {};
+  const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase().slice(0, 254) : "";
+  const password = typeof payload.password === "string" ? payload.password.slice(0, 256) : "";
+  await enforceEndpointRateLimit(
+    database,
+    "login-ip",
+    requestClientAddress(request),
+    LOGIN_REQUEST_IP_LIMIT,
+    LOGIN_RATE_LIMIT_WINDOW,
+    "محاولات تسجيل دخول كثيرة. انتظر بضع دقائق ثم حاول مجددًا.",
+  );
+  await enforceEndpointRateLimit(
+    database,
+    "login-identifier",
+    email || "invalid",
+    LOGIN_REQUEST_IDENTIFIER_LIMIT,
+    LOGIN_RATE_LIMIT_WINDOW,
+    "محاولات تسجيل دخول كثيرة. انتظر بضع دقائق ثم حاول مجددًا.",
+  );
+  let state = await readState(database);
+  let account = state.database.users.find((entry) => entry.email.toLowerCase() === email);
 
   if (!account || !await verifyPassword(password, account.password)) {
     return json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة." }, 401);
+  }
+
+  if (passwordHashNeedsUpgrade(account.password)) {
+    const upgradedAccount = { ...account, password: await hashPassword(password) };
+    const upgradedDatabase = { ...state.database, users: state.database.users.map((entry) => entry.id === account!.id ? upgradedAccount : entry) };
+    if (await saveState(database, upgradedDatabase, state.revision)) {
+      state = { database: upgradedDatabase, revision: state.revision + 1 };
+      account = upgradedAccount;
+    }
   }
 
   const token = await createSession(database, account.id, request);
@@ -2210,8 +2475,9 @@ async function requestRegistration(
   const address = typeof payload.address === "string" ? payload.address.trim() : "";
   const submittedLatitude = typeof payload.latitude === "number" ? payload.latitude : Number.NaN;
   const submittedLongitude = typeof payload.longitude === "number" ? payload.longitude : Number.NaN;
-  const latitude = Math.round(submittedLatitude * 1_000_000) / 1_000_000;
-  const longitude = Math.round(submittedLongitude * 1_000_000) / 1_000_000;
+  const locationMethod = payload.locationMethod === "manual" ? "manual" : "map";
+  const latitude = locationMethod === "manual" ? 0 : Math.round(submittedLatitude * 1_000_000) / 1_000_000;
+  const longitude = locationMethod === "manual" ? 0 : Math.round(submittedLongitude * 1_000_000) / 1_000_000;
   const password = typeof payload.password === "string" ? payload.password : "";
   const acceptedTerms = payload.acceptedTerms === true;
 
@@ -2219,14 +2485,18 @@ async function requestRegistration(
   if (!/^05\d{8}$/.test(phone)) return json({ error: "أدخل رقم جوال مكوّنًا من 10 أرقام ويبدأ بـ 05." }, 400);
   if (!store || store.length > 120) return json({ error: "أدخل اسم المتجر بصورة صحيحة." }, 400);
   if (!validEmail(email) || email.length > 254) return json({ error: "أدخل بريدًا إلكترونيًا صحيحًا." }, 400);
-  const deliveryRegion = resolveDeliveryRegion(submittedGovernorate, city);
-  if (!submittedGovernorate || !city || !deliveryRegion || submittedGovernorate.length > 120 || city.length > 120) {
-    return json({ error: "اختر مدينة ومنطقة متطابقتين من قائمة العناوين." }, 400);
+  if (!submittedGovernorate || !city || submittedGovernorate.length > 120 || city.length > 120) {
+    return json({ error: "أدخل المدينة والمنطقة بصورة صحيحة." }, 400);
   }
-  const governorate = deliveryRegion.name;
+  const namedGovernorate = resolveDeliveryRegion(submittedGovernorate);
+  const cityRegion = resolveDeliveryRegion("", city);
+  if (namedGovernorate && cityRegion && namedGovernorate.name !== cityRegion.name) {
+    return json({ error: "المدينة والمنطقة المدخلتان غير متطابقتين." }, 400);
+  }
+  const governorate = namedGovernorate?.name ?? submittedGovernorate;
   if (address.length < 2 || address.length > 180) return json({ error: "أدخل اسم الشارع أو وصف العنوان بصورة صحيحة." }, 400);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
-    || latitude < 29.35 || latitude > 33.55 || longitude < 34.1 || longitude > 35.95) {
+  if (locationMethod === "map" && (!Number.isFinite(latitude) || !Number.isFinite(longitude)
+    || latitude < 29.35 || latitude > 33.55 || longitude < 34.1 || longitude > 35.95)) {
     return json({ error: "حدد موقعًا داخل نطاق التوصيل على الخريطة." }, 400);
   }
   if (!validNewPassword(password)) {
@@ -2351,8 +2621,10 @@ async function verifyRegistration(database: D1Database, request: Request): Promi
     governorate: location.governorate,
     city: location.city,
     address: location.address,
-    latitude: location.latitude,
-    longitude: location.longitude,
+    ...(location.latitude === 0 && location.longitude === 0 ? {} : {
+      latitude: location.latitude,
+      longitude: location.longitude,
+    }),
     email: row.email,
     password: row.password_hash,
     role: "merchant",
@@ -2400,7 +2672,15 @@ function legacyRegistrationEndpoint(request: Request): Response {
 
 async function publicTracking(database: D1Database, request: Request): Promise<Response> {
   const trackingNumber = new URL(request.url).searchParams.get("tracking")?.trim().toUpperCase() ?? "";
-  if (!trackingNumber) return json({ error: "أدخل رقم تتبع الطرد." }, 400);
+  if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return json({ error: "أدخل رقم تتبع صحيحًا." }, 400);
+  await enforceEndpointRateLimit(
+    database,
+    "public-tracking-ip",
+    requestClientAddress(request),
+    PUBLIC_TRACKING_REQUEST_IP_LIMIT,
+    PUBLIC_TRACKING_RATE_LIMIT_WINDOW,
+    "طلبات تتبع كثيرة. انتظر بضع دقائق ثم حاول مجددًا.",
+  );
 
   const state = await readState(database);
   const order = state.database.orders.find((entry) => entry.trackingNumber.toUpperCase() === trackingNumber && !entry.deleted);
@@ -2410,8 +2690,8 @@ async function publicTracking(database: D1Database, request: Request): Promise<R
     const safeEvent = createTrackingEvent(event.status, "فريق المدينة إكسبرس", { createdAt: event.createdAt });
     return { ...safeEvent, id: event.id };
   });
-  const { id, recipientName, city, status, createdAt, updatedAt } = order;
-  return json({ order: { id, trackingNumber: order.trackingNumber, recipientName, city, status, createdAt, updatedAt, trackingEvents } });
+  const { status, createdAt, updatedAt } = order;
+  return json({ order: { id: `public-${order.trackingNumber}`, trackingNumber: order.trackingNumber, status, createdAt, updatedAt, trackingEvents } });
 }
 
 async function shipScannedOrder(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
@@ -2424,6 +2704,14 @@ async function shipScannedOrder(database: D1Database, request: Request, session:
   if (!/^ALX-\d+$/.test(trackingNumber)) {
     return json({ error: "كود الطرد غير صالح. امسح رمز ملصق الشحن مجددًا." }, 400);
   }
+  await enforceEndpointRateLimit(
+    database,
+    "courier-order-scan",
+    session.account.id,
+    COURIER_SCAN_ATTEMPT_LIMIT,
+    COURIER_SCAN_RATE_LIMIT_WINDOW,
+    "محاولات مسح كثيرة. انتظر عشر دقائق ثم حاول مجددًا.",
+  );
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const state = attempt === 0 ? session.state : await readState(database);
@@ -2536,8 +2824,11 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
     if (request.method !== "GET" && origin && origin !== url.origin) return json({ error: "مصدر الطلب غير مسموح." }, 403);
+    const validatedRequest = await validateApiRequestEnvelope(request);
+    if (validatedRequest instanceof Response) return validatedRequest;
+    request = validatedRequest;
 
-    await ensureDatabase(database);
+    await ensureDatabase(database, config);
 
     if (url.pathname === "/api/almadina/login" && request.method === "POST") return await login(database, request);
     if (url.pathname === "/api/almadina/geocode/reverse" && request.method === "POST") return await reverseGeocodeRegistrationAddress(database, request, config);
@@ -2643,6 +2934,7 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     if (url.pathname === "/api/almadina/database" && request.method === "PUT") {
       const payload = await request.json() as { database?: unknown; revision?: number };
       if (!isValidDatabase(payload.database) || !Number.isSafeInteger(payload.revision)) return json({ error: "بيانات الحفظ غير صالحة." }, 400);
+      if (JSON.stringify(payload.database).length > MAX_API_BODY_BYTES) return json({ error: "حجم بيانات الحفظ أكبر من الحد المسموح." }, 413);
 
       if (payload.revision !== session.state.revision) {
         return json({ error: "تم تحديث البيانات من جهاز آخر.", ...snapshot(session.state, session.account) }, 409);

@@ -72,6 +72,29 @@ function isInsideServiceArea(point: MapPoint): boolean {
     && point.longitude <= SERVICE_BOUNDS.maxLongitude;
 }
 
+function getDevicePosition(options: PositionOptions): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, options));
+}
+
+async function geolocationPermission(): Promise<PermissionState | undefined> {
+  if (!navigator.permissions?.query) return undefined;
+  try {
+    return (await navigator.permissions.query({ name: "geolocation" })).state;
+  } catch {
+    return undefined;
+  }
+}
+
+function geolocationErrorMessage(error: GeolocationPositionError, permission: PermissionState | undefined): string {
+  if (error.code === error.PERMISSION_DENIED || permission === "denied") {
+    return "الوصول إلى الموقع مرفوض. فعّل إذن الموقع لهذا الموقع من إعدادات المتصفح والجهاز ثم أعد المحاولة، أو أدخل العنوان يدويًا.";
+  }
+  if (error.code === error.TIMEOUT) {
+    return "استغرق تحديد الموقع وقتًا طويلًا. فعّل خدمات الموقع وWi‑Fi ثم أعد المحاولة، أو حرّك الدبوس يدويًا.";
+  }
+  return "المتصفح يملك الإذن لكن الجهاز لم يوفّر موقعًا. فعّل خدمات الموقع وWi‑Fi وتأكد من عدم حظر الموقع على مستوى النظام، ثم أعد المحاولة.";
+}
+
 export function RegistrationLocationMap({
   latitude,
   longitude,
@@ -178,28 +201,44 @@ export function RegistrationLocationMap({
     }
   }
 
-  function useCurrentLocation() {
+  async function locateCurrentPosition() {
+    onError("");
+    if (!window.isSecureContext) {
+      onError("تحديد الموقع يعمل عبر اتصال HTTPS آمن فقط. افتح النسخة الآمنة من الموقع أو استخدم الإدخال اليدوي.");
+      return;
+    }
     if (!navigator.geolocation) {
       onError("تحديد الموقع غير مدعوم في هذا الجهاز. حرّك الخريطة وحدد النقطة يدويًا.");
       return;
     }
     setLocating(true);
-    navigator.geolocation.getCurrentPosition((position) => {
-      setLocating(false);
+    try {
+      let position: GeolocationPosition;
+      try {
+        // الوضع المتوازن ينجح بصورة أفضل على الحواسيب والأجهزة التي لا تتوفر فيها إشارة GPS.
+        position = await getDevicePosition({ enableHighAccuracy: false, timeout: 12_000, maximumAge: 5 * 60_000 });
+      } catch (firstError) {
+        const error = firstError as GeolocationPositionError;
+        if (error.code === error.PERMISSION_DENIED) throw error;
+        // محاولة ثانية أدق تعالج فشل مزود الشبكة أو انتهاء مهلة المحاولة الأولى.
+        position = await getDevicePosition({ enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 });
+      }
       const point = {
         latitude: roundCoordinate(position.coords.latitude),
         longitude: roundCoordinate(position.coords.longitude),
       };
       if (!isInsideServiceArea(point)) {
-        onError("موقع الجهاز خارج نطاق التوصيل. اختر عنوان المتجر يدويًا من الخريطة.");
+        onError("موقع الجهاز خارج نطاق التوصيل. يمكنك إدخال عنوان الحساب يدويًا دون استخدام الخريطة.");
         return;
       }
       onChange(point);
       setZoom(15);
-    }, () => {
+    } catch (locationError) {
+      const error = locationError as GeolocationPositionError;
+      onError(geolocationErrorMessage(error, await geolocationPermission()));
+    } finally {
       setLocating(false);
-      onError("تعذّر الوصول إلى موقع الجهاز. اسمح بالوصول للموقع أو اختر النقطة يدويًا.");
-    }, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 });
+    }
   }
 
   async function confirmLocation() {
@@ -243,7 +282,7 @@ export function RegistrationLocationMap({
           <button type="button" aria-label="تكبير الخريطة" disabled={zoom >= MAX_ZOOM} onClick={() => setZoom((current) => Math.min(MAX_ZOOM, current + 1))}>+</button>
           <button type="button" aria-label="تصغير الخريطة" disabled={zoom <= MIN_ZOOM} onClick={() => setZoom((current) => Math.max(MIN_ZOOM, current - 1))}>−</button>
         </div>
-        <button className="registration-map__locate" type="button" disabled={locating} onPointerDown={(event) => event.stopPropagation()} onClick={useCurrentLocation}>
+        <button className="registration-map__locate" type="button" disabled={locating} onPointerDown={(event) => event.stopPropagation()} onClick={() => { void locateCurrentPosition(); }}>
           <Icon name="mapPin" size={15} />{locating ? "جارٍ التحديد..." : "موقعي"}
         </button>
         <button className="registration-map__confirm" type="button" disabled={confirmDisabled || resolving} aria-busy={resolving} onPointerDown={(event) => event.stopPropagation()} onClick={() => { void confirmLocation(); }}>

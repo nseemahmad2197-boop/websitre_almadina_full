@@ -1,4 +1,5 @@
 export type ReverseGeocodedAddress = {
+  name?: string;
   state?: string;
   stateDistrict?: string;
   county?: string;
@@ -14,6 +15,7 @@ export type ReverseGeocodedAddress = {
   street?: string;
   houseNumber?: string;
   addressLine1?: string;
+  addressLine2?: string;
   formatted?: string;
 };
 
@@ -32,6 +34,7 @@ function cleanText(value: unknown, maximumLength = 180): string | undefined {
 
 function normalizedAddress(properties: Record<string, unknown>): ReverseGeocodedAddress {
   return {
+    name: cleanText(properties.name),
     state: cleanText(properties.state),
     stateDistrict: cleanText(properties.state_district),
     county: cleanText(properties.county),
@@ -47,6 +50,7 @@ function normalizedAddress(properties: Record<string, unknown>): ReverseGeocoded
     street: cleanText(properties.street),
     houseNumber: cleanText(properties.housenumber, 40),
     addressLine1: cleanText(properties.address_line1),
+    addressLine2: cleanText(properties.address_line2),
     formatted: cleanText(properties.formatted, 300),
   };
 }
@@ -80,8 +84,12 @@ export async function reverseGeocode(
   });
   if (!response.ok) throw new Error(`Geoapify rejected reverse geocoding with status ${response.status}.`);
 
-  const payload = await response.json() as { results?: unknown[] };
-  const result = Array.isArray(payload.results) ? payload.results[0] : undefined;
+  const payload = await response.json() as { results?: unknown[]; features?: Array<{ properties?: unknown }> };
+  const result = Array.isArray(payload.results)
+    ? payload.results[0]
+    : Array.isArray(payload.features)
+      ? payload.features[0]?.properties
+      : undefined;
   if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("No reverse geocoding result was found.");
   return normalizedAddress(result as Record<string, unknown>);
 }

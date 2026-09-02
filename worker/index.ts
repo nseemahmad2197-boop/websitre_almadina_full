@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { handleAlmadinaApi, type AlmadinaApiConfig } from "../app/lib/server-database";
 import type { PasswordResetSender } from "../app/lib/password-reset-delivery";
 import type { ReverseGeocoder } from "../app/lib/reverse-geocoding";
+import { withSecurityHeaders } from "./security-headers";
 
 interface Env extends PasswordResetDeliveryBindings {
   ASSETS: Fetcher;
@@ -25,6 +26,10 @@ function passwordResetDeliveryConfig(env: Env, ctx: ExecutionContext): AlmadinaA
     brevoFromEmail: env.BREVO_FROM_EMAIL,
     brevoFromName: env.BREVO_FROM_NAME,
     geoapifyApiKey: env.GEOAPIFY_API_KEY,
+    bootstrapAdminEmail: env.ALMADINA_ADMIN_EMAIL,
+    bootstrapAdminPassword: env.ALMADINA_ADMIN_PASSWORD,
+    bootstrapAdminPhone: env.ALMADINA_ADMIN_PHONE,
+    bootstrapAdminName: env.ALMADINA_ADMIN_NAME,
     reverseGeocoder: env.REVERSE_GEOCODER,
     sender: env.PASSWORD_RESET_SENDER,
     defer: (promise) => ctx.waitUntil(promise),
@@ -47,22 +52,22 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/almadina/")) {
-      if (!env.DB) return Response.json({ error: "قاعدة البيانات المشتركة غير متاحة على الخادم." }, { status: 503 });
-      return handleAlmadinaApi(request, env.DB, passwordResetDeliveryConfig(env, ctx));
+      if (!env.DB) return withSecurityHeaders(request, Response.json({ error: "قاعدة البيانات المشتركة غير متاحة على الخادم." }, { status: 503 }));
+      return withSecurityHeaders(request, await handleAlmadinaApi(request, env.DB, passwordResetDeliveryConfig(env, ctx)));
     }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
+      return withSecurityHeaders(request, await handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
           const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();
         },
-      }, allowedWidths);
+      }, allowedWidths));
     }
 
-    return handler.fetch(request, env, ctx);
+    return withSecurityHeaders(request, await handler.fetch(request, env, ctx));
   },
 };
 

@@ -16,6 +16,10 @@ function variants(value: string): string[] {
   return [...new Set([normalizeLocation(value), normalizeLocation(withoutAdministrativePrefix)].filter(Boolean))];
 }
 
+function withoutAdministrativePrefix(value: string): string {
+  return value.replace(/^(?:محافظة|لواء|قضاء|منطقة|مدينة)\s+/u, "").trim();
+}
+
 function labelsMatch(first: string, second: string): boolean {
   const firstVariants = variants(first);
   const secondVariants = variants(second);
@@ -60,6 +64,7 @@ function findGovernorate(address: ReverseGeocodedAddress) {
 
 export function matchRegistrationMapAddress(address: ReverseGeocodedAddress): RegistrationMapAddressMatch {
   const governorate = findGovernorate(address);
+  const administrativeCandidates = values(address.stateDistrict, address.county, address.state, address.municipality);
   const localityCandidates = values(
     address.neighbourhood,
     address.suburb,
@@ -73,9 +78,11 @@ export function matchRegistrationMapAddress(address: ReverseGeocodedAddress): Re
   );
   const city = governorate
     ? localityCandidates.flatMap((candidate) => governorate.cities.filter((entry) => labelsMatch(entry, candidate))).at(0)
-    : undefined;
+      ?? localityCandidates.find((candidate) => !labelsMatch(candidate, governorate.name))
+      ?? localityCandidates[0]
+    : localityCandidates[0];
 
-  const street = address.street?.trim() || address.addressLine1?.trim();
+  const street = address.street?.trim() || address.addressLine1?.trim() || address.name?.trim() || address.formatted?.trim();
   const houseNumber = address.houseNumber?.trim();
   const automaticAddress = street
     ? houseNumber && !normalizeLocation(street).includes(normalizeLocation(houseNumber))
@@ -84,8 +91,8 @@ export function matchRegistrationMapAddress(address: ReverseGeocodedAddress): Re
     : undefined;
 
   return {
-    governorate: governorate?.name,
-    city,
+    governorate: governorate?.name ?? (administrativeCandidates[0] ? withoutAdministrativePrefix(administrativeCandidates[0]) : undefined),
+    city: city?.slice(0, 120),
     address: automaticAddress?.slice(0, 180),
   };
 }

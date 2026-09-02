@@ -13,6 +13,7 @@ import { Button, Field, Modal } from "./ui";
 type RegistrationStep = "identity" | "business" | "location" | "security" | "review" | "verify";
 type PendingOperation = "request" | "verify" | "resend" | null;
 type LocationPicker = "governorate" | "city" | null;
+type RegistrationFormState = Omit<RegistrationFormValues, "acceptedTerms"> & { confirm: string };
 
 type RegistrationFlowProps = {
   onCancel: () => void;
@@ -21,7 +22,7 @@ type RegistrationFlowProps = {
 };
 
 const FORM_STEPS: RegistrationStep[] = ["identity", "business", "location", "security", "review"];
-const EMPTY_FORM = {
+const EMPTY_FORM: RegistrationFormState = {
   name: "",
   phone: "",
   store: "",
@@ -31,6 +32,7 @@ const EMPTY_FORM = {
   address: "",
   latitude: DEFAULT_REGISTRATION_MAP_POINT.latitude,
   longitude: DEFAULT_REGISTRATION_MAP_POINT.longitude,
+  locationMethod: "manual",
   password: "",
   confirm: "",
 };
@@ -154,8 +156,8 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
       if (!form.governorate) return "اختر المدينة أو المحافظة.";
       if (!form.city) return "اختر المنطقة التابعة للمدينة.";
       if (form.address.trim().length < 2 || form.address.trim().length > 180) return "أدخل اسم الشارع أو وصف العنوان بصورة صحيحة.";
-      if (!mapConfirmed) return "حرّك الخريطة إلى عنوانك ثم اضغط «تثبيت هذا الموقع».";
-      if (form.latitude < 29.35 || form.latitude > 33.55 || form.longitude < 34.1 || form.longitude > 35.95) return "اختر نقطة داخل نطاق التوصيل على الخريطة.";
+      if (form.locationMethod === "map" && !mapConfirmed) return "حرّك الخريطة إلى عنوانك ثم اضغط «تثبيت وقراءة العنوان»، أو اختر الإدخال اليدوي.";
+      if (form.locationMethod === "map" && (form.latitude < 29.35 || form.latitude > 33.55 || form.longitude < 34.1 || form.longitude > 35.95)) return "اختر نقطة داخل نطاق التوصيل على الخريطة.";
     }
     if (target === "security") {
       if (!strongPassword(form.password)) return "يجب أن تحتوي كلمة المرور على 8 أحرف على الأقل وحرف ورقم ورمز.";
@@ -209,6 +211,7 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
         address: form.address.trim(),
         latitude: form.latitude,
         longitude: form.longitude,
+        locationMethod: form.locationMethod,
         password: form.password,
         acceptedTerms: accepted,
       });
@@ -288,16 +291,28 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
   function chooseLocation(value: string) {
     if (locationPicker === "governorate") {
       const point = REGISTRATION_REGION_CENTERS[value] ?? DEFAULT_REGISTRATION_MAP_POINT;
-      setForm((current) => ({ ...current, governorate: value, city: "", latitude: point.latitude, longitude: point.longitude }));
-      setMapConfirmed(false);
+      setForm((current) => ({
+        ...current,
+        governorate: value,
+        city: "",
+        ...(current.locationMethod === "manual" ? { latitude: point.latitude, longitude: point.longitude } : {}),
+      }));
     } else if (locationPicker === "city") {
       setForm((current) => ({ ...current, city: value }));
-      setMapConfirmed(false);
     }
     setError("");
     setStatus("");
     setLocationPicker(null);
     setLocationQuery("");
+  }
+
+  function chooseLocationMethod(method: "manual" | "map") {
+    setForm((current) => ({ ...current, locationMethod: method }));
+    if (method === "manual") setMapConfirmed(false);
+    setError("");
+    setStatus(method === "manual"
+      ? "أدخل العنوان يدويًا؛ لن يُطلب منك تثبيت دبوس على الخريطة."
+      : "حرّك الدبوس أو استخدم موقع الجهاز، ثم ثبّت الموقع لقراءة العنوان تلقائيًا.");
   }
 
   async function confirmMapLocation(point: { latitude: number; longitude: number }) {
@@ -323,6 +338,7 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
         return {
           ...current,
           ...point,
+          locationMethod: "map",
           governorate,
           city,
           address: matched.address ?? current.address,
@@ -345,7 +361,7 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
     : step === "business"
       ? { title: "بيانات متجرك", subtitle: "سيُستخدم بريدك لتسجيل الدخول وتأكيد الحساب" }
       : step === "location"
-        ? { title: "العنوان الخاص بك", subtitle: "اختر المدينة والمنطقة وحدد عنوانك بدقة على الخريطة" }
+        ? { title: "العنوان الخاص بك", subtitle: "اختر الإدخال اليدوي أو دع الخريطة تقرأ تفاصيل العنوان" }
         : step === "security"
           ? { title: "حماية حسابك", subtitle: "اختر كلمة مرور قوية لا تستخدمها في موقع آخر" }
           : step === "review"
@@ -374,12 +390,16 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
         </div>}
 
         {step === "location" && <div className="registration-flow__stage registration-flow__location">
+          <div className="registration-flow__location-method" role="group" aria-label="طريقة إدخال العنوان">
+            <button type="button" className={form.locationMethod === "manual" ? "is-active" : ""} aria-pressed={form.locationMethod === "manual"} disabled={busy} onClick={() => chooseLocationMethod("manual")}><Icon name="edit" size={17} />إدخال يدوي</button>
+            <button type="button" className={form.locationMethod === "map" ? "is-active" : ""} aria-pressed={form.locationMethod === "map"} disabled={busy} onClick={() => chooseLocationMethod("map")}><Icon name="mapPin" size={17} />تحديد بالخريطة</button>
+          </div>
           <div className="registration-flow__location-fields">
             <LocationPickerButton label="المدينة" value={form.governorate} placeholder="اختر المدينة أو المحافظة" disabled={busy} onClick={() => openLocationPicker("governorate")} />
             <LocationPickerButton label="المنطقة" value={form.city} placeholder={form.governorate ? "اختر المنطقة" : "اختر المدينة أولًا"} disabled={busy || !form.governorate} onClick={() => openLocationPicker("city")} />
           </div>
-          <Field icon="mapPin" label="الشارع / وصف العنوان" placeholder="مثلًا: شارع فيصل، قرب الدوار" value={form.address} onChange={(event) => updateField("address", event.target.value.slice(0, 180))} autoComplete="street-address" disabled={busy} />
-          <RegistrationLocationMap
+          <Field icon="mapPin" label="الشارع / وصف العنوان" placeholder="مثلًا: شارع فيصل، قرب الدوار" value={form.address} onChange={(event) => updateField("address", event.target.value.slice(0, 180))} autoComplete="street-address" disabled={busy} hint={form.locationMethod === "manual" ? "يكفي إكمال الحقول الثلاثة؛ الخريطة غير مطلوبة." : "يمكنك تصحيح النص بعد تعبئته من الخريطة."} />
+          {form.locationMethod === "map" && <RegistrationLocationMap
             latitude={form.latitude}
             longitude={form.longitude}
             confirmed={mapConfirmed}
@@ -392,7 +412,7 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
             }}
             onConfirm={confirmMapLocation}
             onError={setError}
-          />
+          />}
           {status && <p className="registration-flow__location-status" role="status"><Icon name="check" size={15} />{status}</p>}
         </div>}
 
@@ -408,7 +428,7 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
             <div><span>المتجر</span><strong>{form.store.trim()}</strong></div>
             <div><span>رقم الجوال</span><strong dir="ltr">{form.phone}</strong></div>
             <div><span>بريد التحقق</span><strong dir="ltr">{normalizedEmail}</strong></div>
-            <div className="registration-flow__summary-address"><span>عنوان الحساب</span><strong>{form.governorate} · {form.city} · {form.address.trim()}</strong></div>
+            <div className="registration-flow__summary-address"><span>عنوان الحساب · {form.locationMethod === "map" ? "من الخريطة" : "إدخال يدوي"}</span><strong>{form.governorate} · {form.city} · {form.address.trim()}</strong></div>
           </div>
           <button type="button" className={`registration-flow__legal-open ${legalReviewed ? "is-reviewed" : ""}`} disabled={busy} onClick={openLegalDetails}>
             <span className="registration-flow__legal-open-icon"><Icon name={legalReviewed ? "check" : "file"} size={21} /></span>

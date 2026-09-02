@@ -27,6 +27,14 @@ services:
         value: Almadina Express
       - key: GEOAPIFY_API_KEY
         sync: false
+      - key: ALMADINA_ADMIN_PASSWORD
+        sync: false
+      - key: ALMADINA_ADMIN_EMAIL
+        sync: false
+      - key: ALMADINA_ADMIN_PHONE
+        sync: false
+      - key: ALMADINA_ADMIN_NAME
+        value: إدارة المدينة إكسبرس
 
 databases:
   - name: almadina-express-db

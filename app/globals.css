@@ -96,6 +96,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .registration-flow__form { min-height: 295px; align-content: start; }
 .registration-flow__stage { display: grid; gap: 12px; animation: fade-in .2s ease both; }
 .registration-flow__location { gap: 10px; }
+.registration-flow__location-method { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-muted); }
+.registration-flow__location-method > button { display: flex; min-height: 39px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 10px; font-weight: 800; }
+.registration-flow__location-method > button.is-active { background: var(--surface); color: var(--green-dark); box-shadow: 0 3px 10px rgb(0 0 0 / 7%); }
+.registration-flow__location-method > button:focus-visible { outline: 2px solid color-mix(in srgb, var(--green), transparent 45%); outline-offset: 1px; }
+.registration-flow__location-method > button:disabled { cursor: not-allowed; opacity: .55; }
 .registration-flow__location-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .registration-location-field__button { width: 100%; justify-content: flex-start; border-color: transparent; color: var(--text); text-align: right; cursor: pointer; }
 .registration-location-field__button > span { min-width: 0; flex: 1; overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }

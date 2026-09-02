@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createSeedDatabase, removeLegacyDemoData } from "../app/lib/data.ts";
 import { matchRegistrationMapAddress } from "../app/lib/registration-map-address.ts";
+import { reverseGeocode } from "../app/lib/reverse-geocoding.ts";
+
+const TEST_ADMIN_PASSWORD = "Admin@Test-2026!";
 
 test("matches a reverse-geocoded pin to the supported registration address", () => {
   assert.deepEqual(matchRegistrationMapAddress({
@@ -15,6 +18,44 @@ test("matches a reverse-geocoded pin to the supported registration address", () 
     city: "نابلس",
     address: "شارع الجامعة، مبنى 12",
   });
+});
+
+test("reads both supported Geoapify reverse-geocoding response shapes", async () => {
+  const originalFetch = globalThis.fetch;
+  const replies = [
+    {
+      results: [{
+        state_district: "محافظة نابلس",
+        city: "نابلس",
+        suburb: "رفيديا",
+        street: "شارع الجامعة",
+        housenumber: "12",
+      }],
+    },
+    {
+      features: [{
+        properties: {
+          state: "محافظة رام الله والبيرة",
+          city: "رام الله",
+          neighbourhood: "الطيرة",
+          address_line1: "شارع الإرسال",
+        },
+      }],
+    },
+  ];
+  try {
+    globalThis.fetch = async () => Response.json(replies.shift());
+    const resultShape = await reverseGeocode({ geoapifyApiKey: "test-key" }, { latitude: 32.2211, longitude: 35.2544 });
+    assert.equal(resultShape.stateDistrict, "محافظة نابلس");
+    assert.equal(resultShape.houseNumber, "12");
+
+    const featureShape = await reverseGeocode({ geoapifyApiKey: "test-key" }, { latitude: 31.9038, longitude: 35.2034 });
+    assert.equal(featureShape.state, "محافظة رام الله والبيرة");
+    assert.equal(featureShape.neighbourhood, "الطيرة");
+    assert.equal(featureShape.addressLine1, "شارع الإرسال");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("normalizes legacy shipped collection invoices as delivered and paid", () => {
@@ -668,6 +709,10 @@ async function loadWorker() {
         geoapifyApiKey: environment.GEOAPIFY_API_KEY,
         reverseGeocoder: environment.REVERSE_GEOCODER,
         sender: environment.PASSWORD_RESET_SENDER,
+        bootstrapAdminEmail: environment.ALMADINA_ADMIN_EMAIL,
+        bootstrapAdminPassword: environment.ALMADINA_ADMIN_PASSWORD,
+        bootstrapAdminPhone: environment.ALMADINA_ADMIN_PHONE,
+        bootstrapAdminName: environment.ALMADINA_ADMIN_NAME,
         defer: (promise) => context.waitUntil(promise),
       }),
     };
@@ -679,7 +724,7 @@ async function loadWorker() {
   return worker;
 }
 
-async function rawCall(worker, database, path, { method = "GET", payload, cookie, origin, headers: extraHeaders, environment = {} } = {}) {
+async function rawCall(worker, database, path, { method = "GET", payload, rawBody, cookie, origin, headers: extraHeaders, environment = {} } = {}) {
   const headers = new Headers(extraHeaders);
   if (payload) headers.set("Content-Type", "application/json");
   if (cookie) headers.set("Cookie", cookie);
@@ -690,9 +735,17 @@ async function rawCall(worker, database, path, { method = "GET", payload, cookie
     new Request(`http://almadina.test/api/almadina/${path}`, {
       method,
       headers,
-      ...(payload ? { body: JSON.stringify(payload) } : {}),
+      ...(rawBody !== undefined
+        ? { body: rawBody }
+        : payload
+          ? { body: JSON.stringify(payload) }
+          : {}),
     }),
     {
+      ALMADINA_ADMIN_EMAIL: "admin@almadinaexpress.com",
+      ALMADINA_ADMIN_PASSWORD: TEST_ADMIN_PASSWORD,
+      ALMADINA_ADMIN_PHONE: "0599000000",
+      ALMADINA_ADMIN_NAME: "إدارة المدينة إكسبرس",
       ...environment,
       DB: database,
       ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
@@ -807,6 +860,40 @@ test("reverse-geocodes a registration pin with a safe manual fallback", async ()
   assert.match(outsideServiceArea.body.error, /نطاق التوصيل/);
 });
 
+test("rejects forged, unsupported, and oversized API request envelopes", async () => {
+  const worker = await loadWorker();
+
+  const unsupported = await rawCall(worker, new FakeD1Database(), "login", {
+    method: "POST",
+    rawBody: "{}",
+    headers: { "Content-Type": "text/plain" },
+  });
+  assert.equal(unsupported.status, 415);
+  assert.match(unsupported.body.error, /نوع محتوى/);
+
+  const crossSite = await rawCall(worker, new FakeD1Database(), "login", {
+    method: "POST",
+    payload: { email: "attacker@example.test", password: "Wrong@123" },
+    headers: { "Sec-Fetch-Site": "cross-site" },
+  });
+  assert.equal(crossSite.status, 403);
+  assert.match(crossSite.body.error, /مصدر الطلب/);
+
+  const oversized = await rawCall(worker, new FakeD1Database(), "login", {
+    method: "POST",
+    rawBody: `{"padding":"${"x".repeat(2 * 1024 * 1024)}"}`,
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(oversized.status, 413);
+  assert.match(oversized.body.error, /حجم الطلب/);
+
+  for (const response of [unsupported, crossSite, oversized]) {
+    assert.equal(response.headers.get("x-frame-options"), "DENY");
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+    assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  }
+});
+
 test("creates an account only after the six-digit email verification code succeeds", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
@@ -851,7 +938,7 @@ test("creates an account only after the six-digit email verification code succee
   const pendingLocation = [...database.registrationLocations.values()][0];
   assert.ok(pending);
   assert.ok(pendingLocation);
-  assert.match(pending.password_hash, /^pbkdf2:100000:/);
+  assert.match(pending.password_hash, /^pbkdf2:600000:/);
   assert.notEqual(pending.password_hash, payload.password);
   assert.notEqual(pending.code_hash, delivered[0].code);
   assert.ok(!JSON.stringify(pending).includes(delivered[0].code));
@@ -934,7 +1021,7 @@ test("creates an account only after the six-digit email verification code succee
     environment,
   });
   assert.equal(mismatchedArea.status, 400);
-  assert.match(mismatchedArea.body.error, /مدينة ومنطقة متطابقتين/);
+  assert.match(mismatchedArea.body.error, /غير متطابقتين/);
 
   const outsideMap = await rawCall(worker, database, "register/request", {
     method: "POST",
@@ -944,6 +1031,41 @@ test("creates an account only after the six-digit email verification code succee
   assert.equal(outsideMap.status, 400);
   assert.match(outsideMap.body.error, /نطاق التوصيل على الخريطة/);
   assert.equal(delivered.length, 1);
+});
+
+test("accepts a complete manual address without requiring or trusting map coordinates", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const delivered = [];
+  const environment = {
+    PASSWORD_RESET_SENDER: async (message) => { delivered.push(structuredClone(message)); },
+  };
+  const payload = {
+    ...accountPayload("تاجر العنوان اليدوي", "manual-location@example.test", "0591112277"),
+    locationMethod: "manual",
+    latitude: 90,
+    longitude: 180,
+  };
+
+  const requested = await rawCall(worker, database, "register/request", { method: "POST", payload, environment });
+  assert.equal(requested.status, 202);
+  assert.equal(delivered.length, 1);
+  const pendingLocation = [...database.registrationLocations.values()][0];
+  assert.equal(pendingLocation.governorate, payload.governorate);
+  assert.equal(pendingLocation.city, payload.city);
+  assert.equal(pendingLocation.address, payload.address);
+  assert.equal(pendingLocation.latitude, 0);
+  assert.equal(pendingLocation.longitude, 0);
+
+  const verified = await rawCall(worker, database, "register/verify", {
+    method: "POST",
+    cookie: namedCookieFrom(requested, "almadina_registration"),
+    payload: { code: delivered[0].code },
+    environment,
+  });
+  assert.equal(verified.status, 201);
+  assert.equal(verified.body.database.users[0].latitude, undefined);
+  assert.equal(verified.body.database.users[0].longitude, undefined);
 });
 
 test("shares accounts and orders across devices while isolating customers and protecting sessions", async () => {
@@ -1062,7 +1184,7 @@ test("shares accounts and orders across devices while isolating customers and pr
 
   const administrator = await call(worker, database, "login", {
     method: "POST",
-    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
   });
 
   assert.equal(administrator.status, 200);
@@ -1615,6 +1737,42 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(premiumCustomer.body.database.users[0].membership, "premium");
   assert.equal(premiumCustomer.body.database.orders[0].status, "delivered");
 
+  const protectedMerchantWrite = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: secondCookie,
+    payload: {
+      revision: premiumCustomer.body.revision,
+      database: {
+        ...premiumCustomer.body.database,
+        orders: premiumCustomer.body.database.orders.map((item) => item.id === order.id ? {
+          ...item,
+          trackingNumber: "ALX-20999999",
+          merchantName: "اسم مزور من أدوات المطور",
+          recipientName: "مستلم مزور",
+          recipientPhone: "0590000000",
+          city: "مدينة مزورة",
+          address: "عنوان مزور",
+          amount: 999999,
+          deliveryFee: 0,
+          status: "returned",
+          privateNotes: "محاولة حقن ملاحظة داخلية",
+        } : item),
+      },
+    },
+  });
+  assert.equal(protectedMerchantWrite.status, 200);
+  const protectedOrder = protectedMerchantWrite.body.database.orders.find((item) => item.id === order.id);
+  assert.equal(protectedOrder.trackingNumber, "ALX-20200001");
+  assert.equal(protectedOrder.merchantName, "التاجر الأول");
+  assert.equal(protectedOrder.recipientName, "المستلم");
+  assert.equal(protectedOrder.recipientPhone, "0597654321");
+  assert.equal(protectedOrder.city, "القدس");
+  assert.equal(protectedOrder.address, "عنوان خاص");
+  assert.equal(protectedOrder.amount, 100);
+  assert.equal(protectedOrder.deliveryFee, 42);
+  assert.equal(protectedOrder.status, "delivered");
+  assert.equal(protectedOrder.privateNotes, "");
+
   const collectionDraft = {
     id: "collection-cross-device",
     merchantId: firstDevice.body.userId,
@@ -1639,11 +1797,11 @@ test("shares accounts and orders across devices while isolating customers and pr
     method: "PUT",
     cookie: secondCookie,
     payload: {
-      revision: premiumCustomer.body.revision,
+      revision: protectedMerchantWrite.body.revision,
       database: {
-        ...premiumCustomer.body.database,
+        ...protectedMerchantWrite.body.database,
         collections: [collectionDraft],
-        nextCollection: premiumCustomer.body.database.nextCollection + 1,
+        nextCollection: protectedMerchantWrite.body.database.nextCollection + 1,
       },
     },
   });
@@ -1851,13 +2009,16 @@ test("shares accounts and orders across devices while isolating customers and pr
 
   const tracked = await call(worker, database, "track?tracking=ALX-20200001");
   assert.equal(tracked.status, 200);
-  assert.equal(tracked.body.order.recipientName, "المستلم");
+  assert.equal(tracked.body.order.id, "public-ALX-20200001");
+  assert.equal(tracked.body.order.recipientName, undefined);
   assert.ok(tracked.body.order.trackingEvents.length >= 2);
   assert.equal(tracked.body.order.trackingEvents.at(-1).status, "delivered");
   assert.ok(tracked.body.order.trackingEvents.every((event) => event.actor === "فريق المدينة إكسبرس"));
   assert.ok(tracked.body.order.trackingEvents.every((event) => event.kind !== "note"));
   assert.ok(tracked.body.order.trackingEvents.every((event) => event.note !== merchantNoteText));
   assert.equal(tracked.body.order.recipientPhone, undefined);
+  assert.equal(tracked.body.order.city, undefined);
+  assert.equal(tracked.body.order.governorate, undefined);
   assert.equal(tracked.body.order.address, undefined);
   assert.equal(tracked.body.order.notes, undefined);
   assert.equal(tracked.body.order.privateNotes, undefined);
@@ -1888,10 +2049,10 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(forgedOrigin.status, 403);
 
   const persisted = JSON.parse(database.state.payload);
-  assert.ok(persisted.users.every((account) => account.password.startsWith("pbkdf2:100000:")));
+  assert.ok(persisted.users.every((account) => account.password.startsWith("pbkdf2:600000:")));
   assert.equal(persisted.orders.find((item) => item.id === order.id).notes, courierInstructions);
   assert.equal(persisted.orders.find((item) => item.id === order.id).privateNotes, adminOnlyNote);
-  assert.doesNotMatch(database.state.payload, /Customer@123|Admin@123|Managed@123|Employee@123/);
+  assert.doesNotMatch(database.state.payload, /Customer@123|Admin@Test-2026!|Managed@123|Employee@123/);
 
   const loggedOut = await call(worker, database, "logout", { method: "POST", cookie: secondCookie });
   assert.equal(loggedOut.status, 200);
@@ -1913,7 +2074,7 @@ test("rate limits repeated courier collection-code attempts without changing the
 
   const administrator = await call(worker, database, "login", {
     method: "POST",
-    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
   });
   assert.equal(administrator.status, 200);
   const adminCookie = sessionFrom(administrator);
@@ -2015,7 +2176,7 @@ test("rate limits a courier after twenty collection-code attempts across differe
 
   const administrator = await call(worker, database, "login", {
     method: "POST",
-    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
   });
   assert.equal(administrator.status, 200);
   const adminCookie = sessionFrom(administrator);
@@ -2121,7 +2282,7 @@ test("allows only the administrator to change merchant and courier account field
 
   const administrator = await call(worker, database, "login", {
     method: "POST",
-    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
   });
   assert.equal(administrator.status, 200);
   const adminCookie = sessionFrom(administrator);
@@ -2363,7 +2524,7 @@ test("recalculates progressive weight and dimension fees without trusting client
       },
     });
 
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 200, `${entry.id}: ${response.body?.error ?? "unknown error"}`);
     const saved = response.body.database.orders.find((order) => order.id === entry.id);
     assert.equal(saved.deliveryFee, entry.expectedFee);
     assert.equal(saved.weight, entry.expectedWeight ?? entry.weight);
@@ -2405,7 +2566,7 @@ test("recalculates progressive weight and dimension fees without trusting client
 
   const administrator = await call(worker, database, "login", {
     method: "POST",
-    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
   });
   assert.equal(administrator.status, 200);
   const adminCookie = sessionFrom(administrator);
@@ -2489,7 +2650,7 @@ test("persists diamond membership and enforces its 15/25/55 regional prices on t
 
   const administrator = await call(worker, database, "login", {
     method: "POST",
-    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
   });
   assert.equal(administrator.status, 200);
   const diamondUpgrade = await call(worker, database, "database", {
@@ -2706,7 +2867,7 @@ test("deletes only the authenticated eligible account and preserves every other 
 
   const administrator = await call(worker, database, "login", {
     method: "POST",
-    payload: { email: "admin@almadinaexpress.com", password: "Admin@123" },
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
   });
   assert.equal(administrator.status, 200);
   const adminCookie = sessionFrom(administrator);
@@ -2720,7 +2881,7 @@ test("deletes only the authenticated eligible account and preserves every other 
   const administratorDeletion = await call(worker, database, "account/delete", {
     method: "POST",
     cookie: adminCookie,
-    payload: { password: "Admin@123", confirmation: "حذف حسابي" },
+    payload: { password: TEST_ADMIN_PASSWORD, confirmation: "حذف حسابي" },
   });
   assert.equal(administratorDeletion.status, 403);
 
@@ -3207,7 +3368,7 @@ test("changes only the authenticated account password and optionally revokes eve
   const stateAfterFirstChange = JSON.parse(database.state.payload);
   const savedTarget = stateAfterFirstChange.users.find((account) => account.id === targetId);
   const savedUnrelated = stateAfterFirstChange.users.find((account) => account.id === unrelatedId);
-  assert.match(savedTarget.password, /^pbkdf2:100000:/);
+  assert.match(savedTarget.password, /^pbkdf2:600000:/);
   assert.ok(!savedTarget.password.includes("كلمةNew!123"));
   assert.deepEqual({ ...savedTarget, password: initialTarget.password }, initialTarget);
   assert.deepEqual(savedUnrelated, initialUnrelated);

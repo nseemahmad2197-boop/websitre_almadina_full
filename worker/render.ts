@@ -4,6 +4,7 @@ import { getRenderDatabase } from "../app/lib/postgres-d1-adapter";
 import { handleAlmadinaApi, type AlmadinaApiConfig } from "../app/lib/server-database";
 import type { PasswordResetSender } from "../app/lib/password-reset-delivery";
 import type { ReverseGeocoder } from "../app/lib/reverse-geocoding";
+import { withSecurityHeaders } from "./security-headers";
 
 interface Env {
   DB?: D1Database;
@@ -29,6 +30,10 @@ function passwordResetDeliveryConfig(env: Env | undefined, ctx: ExecutionContext
     brevoFromEmail: process.env.BREVO_FROM_EMAIL,
     brevoFromName: process.env.BREVO_FROM_NAME,
     geoapifyApiKey: process.env.GEOAPIFY_API_KEY,
+    bootstrapAdminEmail: process.env.ALMADINA_ADMIN_EMAIL,
+    bootstrapAdminPassword: process.env.ALMADINA_ADMIN_PASSWORD,
+    bootstrapAdminPhone: process.env.ALMADINA_ADMIN_PHONE,
+    bootstrapAdminName: process.env.ALMADINA_ADMIN_NAME,
     reverseGeocoder: env?.REVERSE_GEOCODER,
     sender: env?.PASSWORD_RESET_SENDER,
     defer: (promise) => ctx.waitUntil(promise),
@@ -49,25 +54,26 @@ const worker = {
     if (url.pathname === "/health") {
       try {
         const result = await resolveDatabase(env).prepare("SELECT 1 AS ok").first<{ ok: number }>();
-        return result?.ok === 1
+        const response = result?.ok === 1
           ? Response.json({ status: "ok" })
           : Response.json({ status: "unhealthy" }, { status: 503 });
+        return withSecurityHeaders(request, response);
       } catch (error) {
         console.error("Render health check could not reach PostgreSQL.", error);
-        return Response.json({ status: "unhealthy" }, { status: 503 });
+        return withSecurityHeaders(request, Response.json({ status: "unhealthy" }, { status: 503 }));
       }
     }
 
     if (url.pathname.startsWith("/api/almadina/")) {
       try {
-        return await handleAlmadinaApi(request, resolveDatabase(env), passwordResetDeliveryConfig(env, ctx));
+        return withSecurityHeaders(request, await handleAlmadinaApi(request, resolveDatabase(env), passwordResetDeliveryConfig(env, ctx)));
       } catch (error) {
         console.error("Almadina API could not reach PostgreSQL.", error);
-        return unavailableDatabaseResponse();
+        return withSecurityHeaders(request, unavailableDatabaseResponse());
       }
     }
 
-    return handler.fetch(request, env ?? {}, ctx);
+    return withSecurityHeaders(request, await handler.fetch(request, env ?? {}, ctx));
   },
 };
 

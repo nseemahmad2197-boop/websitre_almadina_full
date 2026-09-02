@@ -26,7 +26,7 @@ export function AdminDashboard() {
   const [editingAccount, setEditingAccount] = useState<AccountEditor | null>(null);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", phone: "", store: "", password: "User@123", role: "merchant" as "merchant" | "courier", membership: "standard" as Membership });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", store: "", password: "", role: "merchant" as "merchant" | "courier", membership: "standard" as Membership });
   const [announcement, setAnnouncement] = useState({ title: "", message: "", audience: "all" as NoticeAudience, recipientUserId: "" });
   const merchants = database.users.filter((user) => user.role === "merchant");
   const couriers = database.users.filter((user) => user.role === "courier");
@@ -85,7 +85,7 @@ export function AdminDashboard() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return showToast("أدخل بريدًا إلكترونيًا صحيحًا.", "error");
     if (database.users.some((user) => user.email.toLowerCase() === form.email.toLowerCase())) return showToast("هذا البريد الإلكتروني مسجل مسبقًا.", "error");
     const user: User = { id: uid(form.role), name: form.name.trim(), email: form.email.trim().toLowerCase(), phone: form.phone, store: form.store.trim(), password: form.password || "User@123", role: form.role, ...(form.role === "merchant" ? { membership: form.membership } : {}), joinedAt: new Date().toISOString(), avatarColor: form.role === "courier" ? "#6655a6" : "#187a50" };
-    updateDatabase((current) => ({ ...current, users: [...current.users, user] })); setAddUserOpen(false); setForm({ name: "", email: "", phone: "", store: "", password: "User@123", role: "merchant", membership: "standard" }); showToast(`تمت إضافة ${user.role === "courier" ? "المندوب" : "المستخدم"} بنجاح.`);
+    updateDatabase((current) => ({ ...current, users: [...current.users, user] })); setAddUserOpen(false); setForm({ name: "", email: "", phone: "", store: "", password: "", role: "merchant", membership: "standard" }); showToast(`تمت إضافة ${user.role === "courier" ? "المندوب" : "المستخدم"} بنجاح.`);
   }
 
   function openAccountEditor(account: User) {

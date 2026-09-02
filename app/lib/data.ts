@@ -100,6 +100,9 @@ export type Order = {
   deleted: boolean;
 };
 
+export type TrackableOrder = Pick<Order, "id" | "trackingNumber" | "status" | "createdAt" | "updatedAt">
+  & Partial<Pick<Order, "trackingEvents" | "merchantName" | "merchantStore" | "courierName">>;
+
 export type CollectionInvoice = {
   id: string;
   merchantId: string;
@@ -413,20 +416,8 @@ const legacyDemoAccountIds = new Set([
 ]);
 
 export function createSeedDatabase(): Database {
-  const admin: User = {
-    id: "admin-almadina",
-    name: "إدارة المدينة إكسبرس",
-    email: "admin@almadinaexpress.com",
-    password: "Admin@123",
-    phone: "0599000000",
-    store: "المدينة إكسبرس",
-    role: "admin",
-    joinedAt: new Date().toISOString(),
-    avatarColor: "#087c45",
-  };
-
   return {
-    users: [admin],
+    users: [],
     orders: [],
     recipients: [],
     collections: [],
@@ -485,7 +476,10 @@ export function removeLegacyDemoData(database: Database & { compensations?: unkn
 }
 
 export function uid(prefix = "item"): string {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const randomPart = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `${prefix}-${randomPart}`;
 }
 
 export function formatDate(value: string): string {
@@ -538,7 +532,7 @@ export function createTrackingEvent(status: OrderStatus, actor: string, options:
   };
 }
 
-export function getOrderTrackingEvents(order: Order): TrackingEvent[] {
+export function getOrderTrackingEvents(order: TrackableOrder): TrackingEvent[] {
   const stored = Array.isArray(order.trackingEvents)
     ? order.trackingEvents.filter((event) => event && typeof event.id === "string" && typeof event.createdAt === "string")
     : [];

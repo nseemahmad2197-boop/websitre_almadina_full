@@ -2,7 +2,10 @@ import type { Order } from "./data";
 import { getStatus } from "./data";
 
 function escapeCsv(value: string | number): string {
-  const text = String(value ?? "");
+  const raw = String(value ?? "");
+  // Spreadsheet applications may execute untrusted cells that begin like a formula.
+  // A leading apostrophe keeps exported user text inert when opened in Excel/Sheets.
+  const text = typeof value === "string" && /^\s*[=+\-@]/.test(raw) ? `'${raw}` : raw;
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

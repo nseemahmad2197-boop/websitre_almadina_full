@@ -273,12 +273,12 @@ test("uses a five-step reference-style registration with map, legal disclosures,
   assert.match(readme, /تعرض خطوة المراجعة زرًا واضحًا لفتح شروط الاستخدام وسياسة الخصوصية والأذونات/);
   assert.match(readme, /خريطة تفاعلية من OpenStreetMap/);
   assert.match(readme, /GEOAPIFY_API_KEY/);
-  assert.match(readme, /إكمال العنوان يدويًا/);
+  assert.match(readme, /الإدخال اليدوي لا يفرض دبوسًا أو إذن موقع/);
   assert.match(readme, /لا يُنشأ الحساب ولا تبدأ الجلسة قبل نجاح التحقق/);
   assert.doesNotMatch(`${cloudflareWorker}\n${renderWorker}\n${blueprint}\n${readme}`, /GEOAPIFY_API_KEY\s*[:=]\s*[A-Za-z0-9_-]{20,}/);
 });
 
-test("starts with only the administrator and removes all persisted demonstration accounts and records", async () => {
+test("starts without hard-coded accounts and securely bootstraps the administrator from secrets", async () => {
   const [data, server, auth, readme] = await Promise.all([
     readFile(new URL("../app/lib/data.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
@@ -286,7 +286,7 @@ test("starts with only the administrator and removes all persisted demonstration
     readFile(new URL("../README.md", import.meta.url), "utf8"),
   ]);
 
-  assert.match(data, /users:\s*\[admin\]/);
+  assert.match(data, /users:\s*\[\]/);
   assert.match(data, /orders:\s*\[\]/);
   assert.match(data, /recipients:\s*\[\]/);
   assert.match(data, /collections:\s*\[\]/);
@@ -294,6 +294,10 @@ test("starts with only the administrator and removes all persisted demonstration
   assert.match(data, /notices:\s*\[\]/);
   assert.match(data, /export function removeLegacyDemoData\(database: Database & \{ compensations\?: unknown\[\] \}\)/);
   assert.match(server, /removeLegacyDemoData\(JSON\.parse\(row\.payload\) as Database\)/);
+  assert.match(server, /configuredBootstrapAdministrator/);
+  assert.match(server, /bootstrapAdminPassword/);
+  assert.match(server, /BOOTSTRAP_LOCKED_PASSWORD/);
+  assert.doesNotMatch(data, /Admin@123/);
   assert.doesNotMatch(data, /amir@example\.com|naseem@example\.com|courier@example\.com/);
   assert.doesNotMatch(auth, /الدخول التجريبي|الحسابات المسجلة|loginAs/);
   assert.doesNotMatch(readme, /amir@example\.com|naseem@example\.com/);
@@ -344,7 +348,7 @@ test("stores accounts centrally in D1 and authenticates devices using encrypted 
   assert.match(schema, /sqliteTable\("almadina_sessions"/);
   assert.match(worker, /handleAlmadinaApi\(request, env\.DB, passwordResetDeliveryConfig\(env, ctx\)\)/);
   assert.match(server, /PBKDF2/);
-  assert.match(server, /HttpOnly; SameSite=Lax/);
+  assert.match(server, /HttpOnly; SameSite=Strict/);
   assert.match(server, /orders: database\.orders\.filter\(\(order\) => order\.merchantId === account\.id\)/);
   assert.match(application, /sharedRequest\("session"\)/);
   assert.match(application, /fetch\("\/api\/almadina\/register\/request"/);

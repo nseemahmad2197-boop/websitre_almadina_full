@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, FormEvent } from "react";
-import { getOrderTrackingEvents, getStatus, type Order, type OrderStatus } from "../lib/data";
+import { getOrderTrackingEvents, getStatus, type OrderStatus, type TrackableOrder } from "../lib/data";
 import { Icon } from "./icon";
 import { Button, StatusPill } from "./ui";
 
@@ -52,7 +52,7 @@ export function TrackingNoteComposer({ status, value, onChange, onSubmit, submit
   );
 }
 
-export function TrackingHistory({ order, compact = false }: { order: Order; compact?: boolean }) {
+export function TrackingHistory({ order, compact = false }: { order: TrackableOrder; compact?: boolean }) {
   const events = getOrderTrackingEvents(order).reverse();
 
   return (
