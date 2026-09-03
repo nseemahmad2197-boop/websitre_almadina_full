@@ -200,7 +200,7 @@ function BulkShippingLabelsModal({ orders, onClose }: { orders: Order[]; onClose
 }
 
 export function OrderDetail() {
-  const { database, user, selectedOrderId, setView, updateDatabase, showToast, confirm, notify } = useApp();
+  const { database, user, selectedOrderId, setView, updateDatabase, showToast, confirm } = useApp();
   const [labelOpen, setLabelOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<"tracking" | "details">("tracking");
   const [trackingNote, setTrackingNote] = useState("");
@@ -246,7 +246,6 @@ export function OrderDetail() {
     const nextStatus = statusUpdate.status;
     const writtenNote = statusUpdate.note.trim();
     updateDatabase((current) => ({ ...current, orders: current.orders.map((item) => item.id === currentOrder.id ? appendOrderTrackingEvent(item, nextStatus, user?.name ?? "إدارة المدينة إكسبرس", writtenNote || `تم تغيير حالة الطرد من «${getStatus(item.status).label}» إلى «${getStatus(nextStatus).label}».`) : item) }));
-    notify({ userId: currentOrder.merchantId, title: "تحديث حالة الطرد", message: `أصبح الطرد ${currentOrder.trackingNumber} ${getStatus(nextStatus).label}.`, icon: "package" });
     setStatusUpdate(null);
     showToast(`تم تحديث حالة الطرد إلى: ${getStatus(nextStatus).label}`);
   }

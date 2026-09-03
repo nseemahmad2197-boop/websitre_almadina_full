@@ -69,6 +69,7 @@ export type AppContextValue = {
   listLinkedDevices: () => Promise<LinkedDevice[] | null>;
   revokeLinkedDevice: (deviceId: string) => Promise<LinkedDevice[] | null>;
   deleteAccount: (password: string, confirmation: string) => Promise<boolean>;
+  prepareCollectionInvoice: (invoiceId: string) => Promise<boolean>;
   verifyCollectionCode: (invoiceId: string, verificationCode: string) => Promise<boolean>;
   shipScannedOrder: (trackingNumber: string) => Promise<boolean>;
   showToast: (message: string, kind?: ToastKind) => void;

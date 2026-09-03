@@ -8,7 +8,7 @@ import {
   type Base64URLString,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type Preferences, type Recipient, type User } from "./data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getStatus, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
 
@@ -1671,7 +1671,7 @@ function scopeDatabase(database: Database, account: User): Database {
         .map(orderForCourier),
       recipients: [],
       collections: database.collections
-        .filter((invoice) => invoice.status === "ready" || (invoice.status === "paid" && invoice.verifiedById === account.id))
+        .filter((invoice) => invoice.status === "pending" || invoice.status === "ready" || (invoice.status === "paid" && invoice.verifiedById === account.id))
         .map(collectionForCourier),
       notices: database.notices.filter((notice) => notice.userId === account.id),
       preferences: database.preferences[account.id] ? { [account.id]: database.preferences[account.id] } : {},
@@ -1824,15 +1824,27 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
   const accountsById = new Map(users.map((entry) => [entry.id, entry]));
   const existingOrders = new Map(current.orders.map((order) => [order.id, order]));
   const addedTrackingNotes: Array<{ orderId: string; trackingNumber: string; merchantId: string; note: string }> = [];
+  const addedStatusUpdates: Array<{ orderId: string; trackingNumber: string; merchantId: string; status: OrderStatus; note: string }> = [];
   const orders = submitted.orders.map((candidate) => {
     const existing = existingOrders.get(candidate.id);
     const merchant = accountsById.get(candidate.merchantId);
     const courier = candidate.courierId ? accountsById.get(candidate.courierId) : undefined;
     if (existing) {
       const savedEventIds = new Set(getOrderTrackingEvents(existing).map((event) => event.id));
-      const requestedNote = getOrderTrackingEvents(candidate).find((event) => event.kind === "note" && !savedEventIds.has(event.id));
+      const requestedEvents = getOrderTrackingEvents(candidate).filter((event) => !savedEventIds.has(event.id));
+      const requestedNote = requestedEvents.find((event) => event.kind === "note");
       const note = requestedNote?.note.trim().slice(0, 500) ?? "";
       if (note) addedTrackingNotes.push({ orderId: existing.id, trackingNumber: existing.trackingNumber, merchantId: existing.merchantId, note });
+      const requestedStatusUpdate = requestedEvents.find((event) => event.kind !== "note" && event.status === candidate.status);
+      if (existing.status !== candidate.status && requestedStatusUpdate) {
+        addedStatusUpdates.push({
+          orderId: existing.id,
+          trackingNumber: existing.trackingNumber,
+          merchantId: existing.merchantId,
+          status: candidate.status,
+          note: requestedStatusUpdate.note.trim().slice(0, 500),
+        });
+      }
     }
     const protectedOrder = existing ? { ...candidate, notes: existing.notes, privateNotes: existing.privateNotes } : { ...candidate, notes: "", privateNotes: "" };
     return {
@@ -1856,13 +1868,23 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     read: false,
     createdAt: new Date().toISOString(),
   }));
+  const statusUpdateNotices = addedStatusUpdates.map((entry): Notice => ({
+    id: uid("notice"),
+    userId: entry.merchantId,
+    orderId: entry.orderId,
+    title: "تحديث حالة الطرد",
+    message: `تم تحديث الطرد ${entry.trackingNumber} إلى «${getStatus(entry.status).label}».${entry.note ? ` ملاحظة الإدارة: ${entry.note}` : ""}`,
+    icon: "truck",
+    read: false,
+    createdAt: new Date().toISOString(),
+  }));
 
   return removeLegacyDemoData({
     ...submitted,
     users,
     orders,
     collections,
-    notices: [...trackingNoteNotices, ...submitted.notices],
+    notices: [...statusUpdateNotices, ...trackingNoteNotices, ...submitted.notices],
     nextOrder: Math.max(current.nextOrder, submitted.nextOrder || current.nextOrder),
     nextCollection: Math.max(current.nextCollection, submitted.nextCollection || current.nextCollection),
   });
@@ -3024,6 +3046,7 @@ async function shipScannedOrder(database: D1Database, request: Request, session:
     const scanNotices: Notice[] = [{
       id: uid("notice"),
       userId: order.merchantId,
+      orderId: order.id,
       title: "تم شحن الطرد",
       message: `قرأ الموظف كود الطرد ${order.trackingNumber} وأصبحت حالته «مشحون».`,
       icon: "truck",
@@ -3052,6 +3075,52 @@ async function shipScannedOrder(database: D1Database, request: Request, session:
   }
 
   return json({ error: "تم تحديث الطرد من جهاز آخر. امسح الكود مجددًا." }, 409);
+}
+
+async function prepareCollection(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  if (session.account.role !== "admin" && session.account.role !== "courier") {
+    return json({ error: "هذه العملية متاحة للمسؤول أو الموظف فقط." }, 403);
+  }
+
+  const payload = await request.json() as { invoiceId?: unknown };
+  const invoiceId = typeof payload.invoiceId === "string" ? payload.invoiceId.trim() : "";
+  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(invoiceId)) {
+    return json({ error: "معرّف فاتورة التحصيل غير صالح." }, 400);
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const state = attempt === 0 ? session.state : await readState(database);
+    const employee = state.database.users.find((account) => account.id === session.account.id);
+    if (!employee || (employee.role !== "admin" && employee.role !== "courier")) {
+      return json({ error: "لم تعد صلاحية تجهيز الفواتير متاحة لهذا الحساب." }, 403);
+    }
+
+    const invoice = state.database.collections.find((entry) => entry.id === invoiceId);
+    if (!invoice) return json({ error: "لم نعثر على فاتورة تحصيل قابلة للتجهيز." }, 422);
+    if (invoice.status === "ready") return json({ ...snapshot(state, employee), prepared: false });
+    if (invoice.status !== "pending") return json({ error: "لا يمكن تجهيز فاتورة تم تسليمها مسبقًا." }, 409);
+
+    const now = new Date().toISOString();
+    const notice: Notice = {
+      id: uid("notice"),
+      userId: invoice.merchantId,
+      title: "فاتورة التحصيل جاهزة",
+      message: `جهّز ${employee.role === "admin" ? "المسؤول" : "الموظف"} الفاتورة ${invoice.invoiceNumber}. افتحها لعرض رمز التحقق للموظف.`,
+      icon: "receipt",
+      read: false,
+      createdAt: now,
+    };
+    const next: Database = {
+      ...state.database,
+      collections: state.database.collections.map((entry) => entry.id === invoice.id ? { ...entry, status: "ready", updatedAt: now } : entry),
+      notices: [notice, ...state.database.notices],
+    };
+
+    if (!await saveState(database, next, state.revision)) continue;
+    return json({ ...snapshot({ database: next, revision: state.revision + 1 }, employee), prepared: true });
+  }
+
+  return json({ error: "تم تحديث الفاتورة من جهاز آخر. أعد محاولة تجهيزها." }, 409);
 }
 
 async function verifyCollection(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
@@ -3218,6 +3287,10 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
 
     if (url.pathname === "/api/almadina/collections/verify" && request.method === "POST") {
       return await verifyCollection(database, request, session);
+    }
+
+    if (url.pathname === "/api/almadina/collections/prepare" && request.method === "POST") {
+      return await prepareCollection(database, request, session);
     }
 
     if (url.pathname === "/api/almadina/orders/scan" && request.method === "POST") {

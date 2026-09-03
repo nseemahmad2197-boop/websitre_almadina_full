@@ -1985,6 +1985,12 @@ test("shares accounts and orders across devices while isolating customers and pr
   const merchantAfterInstructionNotice = await call(worker, database, "database", { cookie: secondCookie });
   assert.equal(merchantAfterInstructionNotice.status, 200);
   assert.equal(merchantAfterInstructionNotice.body.database.notices.some((notice) => notice.title === "تعليمات جديدة للطرد"), false);
+  const shippedNotice = merchantAfterInstructionNotice.body.database.notices.find((notice) => notice.title === "تم شحن الطرد");
+  assert.ok(shippedNotice);
+  assert.equal(shippedNotice.userId, firstDevice.body.userId);
+  assert.equal(shippedNotice.orderId, order.id);
+  assert.equal(shippedNotice.read, false);
+  assert.ok(shippedNotice.message.includes(order.trackingNumber));
 
   const adminAfterParcelScan = await call(worker, database, "database", { cookie: adminCookie });
   assert.equal(adminAfterParcelScan.status, 200);
@@ -2133,26 +2139,45 @@ test("shares accounts and orders across devices while isolating customers and pr
   });
   assert.equal(pendingCollectionVerificationByCourier.status, 409);
 
+  const pendingCollectionsForCourier = await call(worker, database, "database", { cookie: employeeCookie });
+  const pendingCollectionForCourier = pendingCollectionsForCourier.body.database.collections.find((invoice) => invoice.id === pendingVerificationUpdate.body.database.collections[0].id);
+  assert.ok(pendingCollectionForCourier);
+  assert.equal(pendingCollectionForCourier.status, "pending");
+  assert.equal(pendingCollectionForCourier.merchantId, "");
+  assert.equal(pendingCollectionForCourier.verificationCode, "");
+
+  const merchantCannotPrepareCollection = await call(worker, database, "collections/prepare", {
+    method: "POST",
+    cookie: secondCookie,
+    payload: { invoiceId: pendingCollectionForCourier.id },
+  });
+  assert.equal(merchantCannotPrepareCollection.status, 403);
+
+  const employeeCannotPrepareUnknownCollection = await call(worker, database, "collections/prepare", {
+    method: "POST",
+    cookie: employeeCookie,
+    payload: { invoiceId: "collection-does-not-exist" },
+  });
+  assert.equal(employeeCannotPrepareUnknownCollection.status, 422);
+
   const isolatedCollections = await call(worker, database, "database", { cookie: otherCookie });
   assert.deepEqual(isolatedCollections.body.database.collections, []);
 
-  const adminAfterCollection = await call(worker, database, "database", { cookie: adminCookie });
-  assert.equal(adminAfterCollection.body.database.collections.length, 1);
-  const readyCollection = await call(worker, database, "database", {
-    method: "PUT",
-    cookie: adminCookie,
-    payload: {
-      revision: adminAfterCollection.body.revision,
-      database: {
-        ...adminAfterCollection.body.database,
-        collections: adminAfterCollection.body.database.collections.map((invoice) => ({ ...invoice, status: "ready", updatedAt: new Date().toISOString() })),
-      },
-    },
+  const preparedCollection = await call(worker, database, "collections/prepare", {
+    method: "POST",
+    cookie: employeeCookie,
+    payload: { invoiceId: pendingCollectionForCourier.id },
   });
-  assert.equal(readyCollection.status, 200);
+  assert.equal(preparedCollection.status, 200);
+  assert.equal(preparedCollection.body.prepared, true);
+  assert.equal(preparedCollection.body.database.collections.find((invoice) => invoice.id === pendingCollectionForCourier.id).status, "ready");
 
   const readyForMerchant = await call(worker, database, "database", { cookie: firstCookie });
   assert.equal(readyForMerchant.body.database.collections[0].status, "ready");
+  const preparedNotice = readyForMerchant.body.database.notices.find((notice) => notice.title === "فاتورة التحصيل جاهزة" && notice.message.includes(readyForMerchant.body.database.collections[0].invoiceNumber));
+  assert.ok(preparedNotice);
+  assert.equal(preparedNotice.userId, firstDevice.body.userId);
+  assert.equal(preparedNotice.read, false);
   const securedMerchantUpdate = await call(worker, database, "database", {
     method: "PUT",
     cookie: firstCookie,
@@ -2329,6 +2354,45 @@ test("shares accounts and orders across devices while isolating customers and pr
   const otherMerchantAfterAdminNote = await call(worker, database, "database", { cookie: otherCookie });
   assert.equal(otherMerchantAfterAdminNote.body.database.notices.some((notice) => notice.orderId === order.id), false);
 
+  const adminStatusNoteText = "تمت مراجعة الطرد وتحويله إلى راجع بناءً على نتيجة المعالجة.";
+  const adminStatusUpdate = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: adminNote.body.revision,
+      database: {
+        ...adminNote.body.database,
+        orders: adminNote.body.database.orders.map((item) => item.id === order.id ? {
+          ...item,
+          status: "returned",
+          updatedAt: new Date().toISOString(),
+          trackingEvents: [...(item.trackingEvents ?? []), {
+            id: "admin-status-note-request",
+            kind: "status",
+            status: "returned",
+            title: "راجع",
+            location: "مع الإدارة",
+            actor: "الإدارة",
+            note: adminStatusNoteText,
+            createdAt: new Date().toISOString(),
+          }],
+        } : item),
+      },
+    },
+  });
+  assert.equal(adminStatusUpdate.status, 200);
+
+  const merchantAfterAdminStatusUpdate = await call(worker, database, "database", { cookie: secondCookie });
+  const statusUpdateNotice = merchantAfterAdminStatusUpdate.body.database.notices.find((notice) => notice.title === "تحديث حالة الطرد" && notice.message.includes(adminStatusNoteText));
+  assert.ok(statusUpdateNotice);
+  assert.equal(statusUpdateNotice.userId, firstDevice.body.userId);
+  assert.equal(statusUpdateNotice.orderId, order.id);
+  assert.equal(statusUpdateNotice.read, false);
+  assert.ok(statusUpdateNotice.message.includes("راجع"));
+
+  const otherMerchantAfterAdminStatusUpdate = await call(worker, database, "database", { cookie: otherCookie });
+  assert.equal(otherMerchantAfterAdminStatusUpdate.body.database.notices.some((notice) => notice.message.includes(adminStatusNoteText)), false);
+
   const courierDoesNotSeeMerchantNote = await call(worker, database, "database", { cookie: employeeCookie });
   assert.equal(courierDoesNotSeeMerchantNote.status, 200);
   const courierOrderAfterNote = courierDoesNotSeeMerchantNote.body.database.orders.find((item) => item.id === order.id);
@@ -2351,7 +2415,7 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(tracked.body.order.id, "public-ALX-20200001");
   assert.equal(tracked.body.order.recipientName, undefined);
   assert.ok(tracked.body.order.trackingEvents.length >= 2);
-  assert.equal(tracked.body.order.trackingEvents.at(-1).status, "delivered");
+  assert.equal(tracked.body.order.trackingEvents.at(-1).status, "returned");
   assert.ok(tracked.body.order.trackingEvents.every((event) => event.actor === "فريق المدينة إكسبرس"));
   assert.ok(tracked.body.order.trackingEvents.every((event) => event.kind !== "note"));
   assert.ok(tracked.body.order.trackingEvents.every((event) => event.note !== merchantNoteText));

@@ -682,7 +682,7 @@ test("replaces compensation requests with responsive collection invoices and ver
   assert.doesNotMatch(`${shell}\n${management}\n${settings}`, /التعويضات|طلب تعويض/);
 });
 
-test("lets courier employees deliver a ready collection invoice with the customer's code", async () => {
+test("lets courier employees prepare and deliver a collection invoice with the customer's code", async () => {
   const [employee, server, context, application, styles] = await Promise.all([
     readFile(new URL("../app/components/employee.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
@@ -693,6 +693,8 @@ test("lets courier employees deliver a ready collection invoice with the custome
   const verificationHandler = server.split("async function verifyCollection")[1]?.split("export async function handleAlmadinaApi")[0] ?? "";
 
   assert.match(employee, /database\.collections/);
+  assert.match(employee, /prepareCollectionInvoice/);
+  assert.match(employee, />تجهيز للتحويل<\/Button>/);
   assert.match(employee, /invoice\.status === "ready"|status === "ready"/);
   assert.match(employee, /verifyCollectionCode/);
   assert.match(employee, /قراءة كود التحقق/);
@@ -704,7 +706,15 @@ test("lets courier employees deliver a ready collection invoice with the custome
   assert.match(employee, /href=\{`sms:\$\{order\.recipientPhone\}`\}/);
   assert.match(employee, /إشعار العميل/);
   assert.match(context, /verifyCollectionCode:\s*\(invoiceId: string, verificationCode: string\) => Promise<boolean>/);
+  assert.match(context, /prepareCollectionInvoice:\s*\(invoiceId: string\) => Promise<boolean>/);
+  assert.match(application, /sharedRequest\("collections\/prepare"/);
+  assert.match(application, /body:\s*JSON\.stringify\(\{ invoiceId \}\)/);
   assert.match(application, /sharedRequest\("collections\/verify"/);
+  assert.match(server, /url\.pathname === ["']\/api\/almadina\/collections\/prepare["']/);
+  assert.match(server, /async function prepareCollection\(/);
+  assert.match(server, /invoice\.status === "ready"/);
+  assert.match(server, /status:\s*"ready"/);
+  assert.match(server, /title:\s*"فاتورة التحصيل جاهزة"/);
   assert.match(verificationHandler, /"admin"/);
   assert.match(verificationHandler, /"courier"/);
   assert.match(verificationHandler, /status !== "ready"/);
@@ -763,6 +773,7 @@ test("lets courier employees scan a ready parcel with the camera and mark it shi
   assert.match(server, /courierName:\s*(?:employee|account)\.name/);
   assert.match(server, /appendOrderTrackingEvent|createTrackingEvent/);
   assert.match(server, /notices:/);
+  assert.match(server, /userId:\s*order\.merchantId,[\s\S]*orderId:\s*order\.id,[\s\S]*title:\s*"تم شحن الطرد"/);
   assert.match(server, /order\.courierId === account\.id/);
   assert.doesNotMatch(server, /courierName === account\.name/);
   assert.match(server, /function orderForCourier\(order: Order\)/);
@@ -1242,7 +1253,10 @@ test("opens every newly created parcel on a persistent responsive tracking histo
   assert.match(server, /event\?\.kind === "note" && !savedEventIds\.has\(event\.id\)/);
   assert.match(server, /appendOrderTrackingNote\(existing, account\.name, note\)/);
   assert.match(server, /addedTrackingNotes/);
+  assert.match(server, /addedStatusUpdates/);
+  assert.match(server, /statusUpdateNotices/);
   assert.match(server, /orderId: entry\.orderId/);
+  assert.match(server, /ملاحظة الإدارة: \$\{entry\.note\}/);
   assert.match(server, /أضافت الإدارة ملاحظة على الطرد/);
   assert.match(server, /أضاف \$\{savedAccount\.name\} ملاحظة على الطرد/);
   assert.doesNotMatch(server, /trackingEvents: candidate\.trackingEvents/);

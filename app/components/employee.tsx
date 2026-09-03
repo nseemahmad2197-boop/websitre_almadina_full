@@ -7,17 +7,19 @@ import { Icon } from "./icon";
 import { Button, EmptyState, Field, Modal, PageHeader, StatusPill } from "./ui";
 
 export function EmployeeDashboard() {
-  const { database, user, openScanner, verifyCollectionCode } = useApp();
+  const { database, user, openScanner, prepareCollectionInvoice, verifyCollectionCode } = useApp();
   const [collectionVerification, setCollectionVerification] = useState<{ invoiceId: string; invoiceNumber: string; code: string } | null>(null);
   const [verifyingCollection, setVerifyingCollection] = useState(false);
+  const [preparingCollectionId, setPreparingCollectionId] = useState<string | null>(null);
   const assignedOrders = useMemo(
     () => database.orders.filter((order) => !order.deleted && order.courierId === user?.id),
     [database.orders, user?.id],
   );
   const collectionInvoices = useMemo(
-    () => database.collections.filter((invoice) => invoice.status === "ready" || (invoice.status === "paid" && invoice.verifiedById === user?.id)),
-    [database.collections, user?.id],
+    () => database.collections,
+    [database.collections],
   );
+  const pendingCollections = collectionInvoices.filter((invoice) => invoice.status === "pending");
   const readyCollections = collectionInvoices.filter((invoice) => invoice.status === "ready");
   const activeOrders = assignedOrders.filter((order) => order.status !== "delivered" && order.status !== "returned");
   const completedOrders = assignedOrders.filter((order) => order.status === "delivered").length;
@@ -29,6 +31,13 @@ export function EmployeeDashboard() {
     const verified = await verifyCollectionCode(collectionVerification.invoiceId, collectionVerification.code);
     setVerifyingCollection(false);
     if (verified) setCollectionVerification(null);
+  }
+
+  async function prepareCollection(invoiceId: string) {
+    if (preparingCollectionId) return;
+    setPreparingCollectionId(invoiceId);
+    await prepareCollectionInvoice(invoiceId);
+    setPreparingCollectionId(null);
   }
 
   return (
@@ -50,22 +59,25 @@ export function EmployeeDashboard() {
         <div className="employee-scan-card__rule"><Icon name="shield" size={16} /><span>لا يستطيع حساب المستخدم العادي تنفيذ هذا التحديث.</span></div>
       </section>
 
-      <section className="employee-collections" aria-label="فواتير التحصيل الجاهزة">
-        <header><div><h2>تحصيل الفواتير</h2><p>أدخل كود المستخدم المكوّن من 4 أرقام لتصبح الفاتورة «تم التسليم» وتسجّل باسمك.</p></div><span>{readyCollections.length.toLocaleString("ar-EG")}</span></header>
+      <section className="employee-collections" aria-label="تجهيز فواتير التحصيل والتحقق منها">
+        <header><div><h2>تحصيل الفواتير</h2><p>جهّز الفاتورة أولًا، ثم أدخل كود المستخدم المكوّن من 4 أرقام لتصبح «تم التسليم» وتسجّل باسمك.</p></div><span>{(pendingCollections.length + readyCollections.length).toLocaleString("ar-EG")}</span></header>
         {collectionInvoices.length ? <div className="employee-collection-list">{collectionInvoices.map((invoice) => <article className="employee-collection-card" key={invoice.id}>
-          <span className="employee-collection-card__icon"><Icon name={invoice.status === "ready" ? "key" : "check"} size={21} /></span>
-          <div><strong dir="ltr">{invoice.invoiceNumber}</strong><span>{invoice.merchantName}</span><small>تحقق من الكود المعروض في حساب المستخدم.</small></div>
-          <span className={`collection-status collection-status--${invoice.status}`}>{invoice.status === "ready" ? "جاهزة للتحويل" : "تم التسليم"}</span>
-          <footer>{invoice.status === "ready"
-            ? <Button icon="key" onClick={() => setCollectionVerification({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, code: "" })}>قراءة كود التحقق</Button>
-            : <span><Icon name="check" size={15} />تم التسليم في {formatDate(invoice.verifiedAt ?? invoice.paidAt ?? invoice.updatedAt)}</span>}
+          <span className="employee-collection-card__icon"><Icon name={invoice.status === "pending" ? "receipt" : invoice.status === "ready" ? "key" : "check"} size={21} /></span>
+          <div><strong dir="ltr">{invoice.invoiceNumber}</strong><span>{invoice.merchantName}</span><small>{invoice.status === "pending" ? "يمكنك تجهيز هذه الفاتورة للمستخدم." : "تحقق من الكود المعروض في حساب المستخدم."}</small></div>
+          <span className={`collection-status collection-status--${invoice.status}`}>{invoice.status === "pending" ? "قيد التجهيز" : invoice.status === "ready" ? "جاهزة للتحويل" : "تم التسليم"}</span>
+          <footer>{invoice.status === "pending"
+            ? <Button icon="receipt" loading={preparingCollectionId === invoice.id} disabled={preparingCollectionId !== null} onClick={() => { void prepareCollection(invoice.id); }}>تجهيز للتحويل</Button>
+            : invoice.status === "ready"
+              ? <Button icon="key" onClick={() => setCollectionVerification({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, code: "" })}>قراءة كود التحقق</Button>
+              : <span><Icon name="check" size={15} />تم التسليم في {formatDate(invoice.verifiedAt ?? invoice.paidAt ?? invoice.updatedAt)}</span>}
           </footer>
-        </article>)}</div> : <EmptyState icon="receipt" title="لا توجد فواتير جاهزة" description="ستظهر هنا فواتير المستخدمين بعد أن تجهزها الإدارة للتحويل." />}
+        </article>)}</div> : <EmptyState icon="receipt" title="لا توجد فواتير تحصيل" description="ستظهر هنا فواتير المستخدمين الجديدة لتجهيزها والتحقق من كودها." />}
       </section>
 
       <section className="employee-permissions" aria-label="صلاحيات حساب الموظف">
         <article><span><Icon name="camera" size={20} /></span><div><strong>مسح الطرود</strong><small>تحديث آمن من جاهز للإرسال إلى مشحون</small></div></article>
         <article><span><Icon name="user" size={20} /></span><div><strong>إسناد تلقائي</strong><small>يُربط الطرد بحساب الموظف الذي مسحه</small></div></article>
+        <article><span><Icon name="receipt" size={20} /></span><div><strong>تجهيز الفواتير</strong><small>تحويل فاتورة المستخدم من قيد التجهيز إلى جاهزة للتحويل</small></div></article>
         <article><span><Icon name="clipboard" size={20} /></span><div><strong>تحقق موثّق</strong><small>يحفظ اسم الموظف ووقت شحن الطرد أو تسليم التحصيل</small></div></article>
       </section>
 

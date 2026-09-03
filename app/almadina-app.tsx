@@ -13,7 +13,7 @@ import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiomet
 import { createSeedDatabase, defaultPreferences, uid, type Database, type LinkedDevice, type Notice, type NoticeAudience, type Preferences } from "./lib/data";
 
 type Toast = { id: string; message: string; kind: ToastKind };
-type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number; removedCount?: number };
+type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number; removedCount?: number; prepared?: boolean };
 type DatabaseUpdater = (current: Database) => Database;
 type ThemePreference = Preferences["theme"];
 type WebkitAudioWindow = Window & { webkitAudioContext?: typeof AudioContext };
@@ -134,6 +134,7 @@ async function sharedRequest(path: string, options: RequestInit = {}): Promise<S
     userId: payload.userId,
     ...(typeof payload.recipientCount === "number" ? { recipientCount: payload.recipientCount } : {}),
     ...(typeof payload.removedCount === "number" ? { removedCount: payload.removedCount } : {}),
+    ...(typeof payload.prepared === "boolean" ? { prepared: payload.prepared } : {}),
   };
 }
 
@@ -602,6 +603,42 @@ export default function AlmadinaApplication() {
       }
       showToast("تعذّر التحقق من الكود. حاول مجددًا.", "error");
       return false;
+    }
+  }
+
+  async function prepareCollectionInvoice(invoiceId: string): Promise<boolean> {
+    if (!await waitForPendingUpdates()) {
+      showToast("انتظر اكتمال حفظ التغييرات ثم أعد تجهيز الفاتورة.", "error");
+      return false;
+    }
+
+    const operationEpoch = sessionEpoch.current;
+    remoteMutationInFlight.current = true;
+    try {
+      const snapshot = await sharedRequest("collections/prepare", {
+        method: "POST",
+        body: JSON.stringify({ invoiceId }),
+      });
+      if (operationEpoch !== sessionEpoch.current) return false;
+      authoritativeDatabase.current = snapshot.database;
+      visibleDatabase.current = snapshot.database;
+      serverRevision.current = snapshot.revision;
+      pendingUpdates.current = [];
+      setDatabase(snapshot.database);
+      showToast(snapshot.prepared === false ? "الفاتورة مجهزة بالفعل." : "تم تجهيز فاتورة التحصيل للمستخدم.");
+      return true;
+    } catch (error) {
+      if (operationEpoch !== sessionEpoch.current) return false;
+      if (error instanceof SharedApiError) {
+        if (error.status === 401) clearLocalSession();
+        showToast(error.message, "error");
+        return false;
+      }
+      showToast("تعذّر تجهيز الفاتورة. حاول مجددًا.", "error");
+      return false;
+    } finally {
+      remoteMutationInFlight.current = false;
+      if (pendingUpdates.current.length) void savePendingUpdates();
     }
   }
 
@@ -1131,7 +1168,7 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

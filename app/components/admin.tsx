@@ -15,7 +15,7 @@ function membershipLabel(membership: Membership): string {
 }
 
 export function AdminDashboard() {
-  const { database, user, updateDatabase, verifyCollectionCode, broadcastNotice, confirm, showToast, notify, setView, setSelectedOrderId } = useApp();
+  const { database, user, updateDatabase, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, confirm, showToast, notify, setView, setSelectedOrderId } = useApp();
   const [tab, setTab] = useState<AdminTab>("orders");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -23,6 +23,7 @@ export function AdminDashboard() {
   const [statusUpdate, setStatusUpdate] = useState<{ orderId: string; status: OrderStatus; note: string } | null>(null);
   const [collectionVerification, setCollectionVerification] = useState<{ invoiceId: string; invoiceNumber: string; code: string } | null>(null);
   const [verifyingCollection, setVerifyingCollection] = useState(false);
+  const [preparingCollectionId, setPreparingCollectionId] = useState<string | null>(null);
   const [editingAccount, setEditingAccount] = useState<AccountEditor | null>(null);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
@@ -55,7 +56,6 @@ export function AdminDashboard() {
     const nextStatus = statusUpdate.status;
     const writtenNote = statusUpdate.note.trim();
     updateDatabase((current) => ({ ...current, orders: current.orders.map((entry) => entry.id === order.id ? appendOrderTrackingEvent(entry, nextStatus, user?.name ?? "إدارة المدينة إكسبرس", writtenNote || `تم تغيير حالة الطرد من «${getStatus(entry.status).label}» إلى «${getStatus(nextStatus).label}».`) : entry) }));
-    notify({ userId: order.merchantId, title: "تحديث حالة الطرد", message: `تم تحديث الطرد ${order.trackingNumber} إلى ${getStatus(nextStatus).label}.`, icon: "truck" });
     setStatusUpdate(null);
     showToast(`تم تغيير الحالة إلى ${getStatus(nextStatus).label}.`);
   }
@@ -116,13 +116,11 @@ export function AdminDashboard() {
     showToast("تم تحديث بيانات الحساب بواسطة المسؤول.");
   }
 
-  function prepareCollection(id: string) {
-    const invoice = database.collections.find((entry) => entry.id === id);
-    if (!invoice || invoice.status !== "pending") return;
-    const now = new Date().toISOString();
-    updateDatabase((current) => ({ ...current, collections: current.collections.map((entry) => entry.id === id ? { ...entry, status: "ready", updatedAt: now } : entry) }));
-    notify({ userId: invoice.merchantId, title: "فاتورة التحصيل جاهزة", message: `أصبحت الفاتورة ${invoice.invoiceNumber} جاهزة. افتحها لعرض رمز التحقق للموظف.`, icon: "receipt" });
-    showToast("تم تجهيز فاتورة التحصيل.");
+  async function prepareCollection(id: string) {
+    if (preparingCollectionId) return;
+    setPreparingCollectionId(id);
+    await prepareCollectionInvoice(id);
+    setPreparingCollectionId(null);
   }
 
   async function submitCollectionVerification(event: FormEvent) {
@@ -251,7 +249,7 @@ export function AdminDashboard() {
             <p>{invoice.deliveredCount} طرد واصل · {invoice.returnedCount} راجع · أُنشئت {relativeDate(invoice.createdAt)}</p>
             <footer>
               <strong>{money(invoice.netAmount)} ₪</strong>
-              {invoice.status === "pending" ? <Button onClick={() => prepareCollection(invoice.id)}>تجهيز للتحويل</Button> : invoice.status === "ready" ? <Button icon="key" onClick={() => setCollectionVerification({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, code: "" })}>قراءة كود التحقق</Button> : <span>تم التسليم في {formatDate(completedAt)}</span>}
+              {invoice.status === "pending" ? <Button loading={preparingCollectionId === invoice.id} disabled={preparingCollectionId !== null} onClick={() => { void prepareCollection(invoice.id); }}>تجهيز للتحويل</Button> : invoice.status === "ready" ? <Button icon="key" onClick={() => setCollectionVerification({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, code: "" })}>قراءة كود التحقق</Button> : <span>تم التسليم في {formatDate(completedAt)}</span>}
             </footer>
           </article>
         );
