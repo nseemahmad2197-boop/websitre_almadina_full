@@ -1012,7 +1012,7 @@ test("adds an independent secondary administrator without replacing the primary 
   assert.equal(storedUsers.find((account) => account.id === "admin-almadina").email, "admin@almadinaexpress.com");
 });
 
-test("does not let an unchanged legacy administrator phone collision block unrelated admin changes", async () => {
+test("allows several active accounts to share one phone number while keeping emails unique", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
   const environment = {
@@ -1075,12 +1075,12 @@ test("does not let an unchanged legacy administrator phone collision block unrel
       },
     },
   });
-  assert.equal(duplicateNewAccount.status, 409);
-  assert.match(duplicateNewAccount.body.error, /رقم الجوال مسجل لحساب آخر/);
+  assert.equal(duplicateNewAccount.status, 200);
 
-  const unchanged = await rawCall(worker, database, "database", { cookie: adminCookie, environment });
-  assert.equal(unchanged.body.revision, preferencesUpdated.body.revision);
-  assert.equal(unchanged.body.database.users.some((account) => account.id === "merchant-new-duplicate-phone"), false);
+  const current = await rawCall(worker, database, "database", { cookie: adminCookie, environment });
+  assert.equal(current.body.revision, duplicateNewAccount.body.revision);
+  assert.equal(current.body.database.users.some((account) => account.id === "merchant-new-duplicate-phone"), true);
+  assert.equal(current.body.database.users.filter((account) => account.phone === "0599000000").length, 3);
 });
 
 test("reverse-geocodes a registration pin with a safe manual fallback", async () => {
@@ -1262,7 +1262,24 @@ test("creates an account only after the six-digit email verification code succee
 
   const duplicate = await rawCall(worker, database, "register/request", { method: "POST", payload, environment });
   assert.equal(duplicate.status, 409);
-  assert.equal(delivered.length, 1);
+  assert.match(duplicate.body.error, /هذا الحساب موجود بالفعل بهذا البريد الإلكتروني/);
+  const sharedPhoneRequest = await rawCall(worker, database, "register/request", {
+    method: "POST",
+    payload: { ...payload, email: "different-email@example.test" },
+    environment,
+  });
+  assert.equal(sharedPhoneRequest.status, 202);
+  assert.equal(delivered.length, 2);
+  const sharedPhoneVerified = await rawCall(worker, database, "register/verify", {
+    method: "POST",
+    cookie: namedCookieFrom(sharedPhoneRequest, "almadina_registration"),
+    payload: { code: delivered[1].code },
+    environment,
+  });
+  assert.equal(sharedPhoneVerified.status, 201);
+  assert.notEqual(sharedPhoneVerified.body.userId, verified.body.userId);
+  assert.equal(sharedPhoneVerified.body.database.users[0].phone, payload.phone);
+  assert.equal(JSON.parse(database.state.payload).users.filter((account) => account.phone === payload.phone).length, 2);
 
   const login = await rawCall(worker, database, "login", {
     method: "POST",
@@ -1303,7 +1320,54 @@ test("creates an account only after the six-digit email verification code succee
   });
   assert.equal(outsideMap.status, 400);
   assert.match(outsideMap.body.error, /نطاق التوصيل على الخريطة/);
-  assert.equal(delivered.length, 1);
+  assert.equal(delivered.length, 2);
+});
+
+test("keeps simultaneous registrations with one shared phone number independent", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const delivered = [];
+  const environment = {
+    PASSWORD_RESET_SENDER: async (message) => { delivered.push(structuredClone(message)); },
+  };
+  const sharedPhone = "0591234567";
+
+  const firstRequest = await rawCall(worker, database, "register/request", {
+    method: "POST",
+    payload: accountPayload("الحساب المشترك الأول", "shared-phone-one@example.test", sharedPhone),
+    environment,
+  });
+  const secondRequest = await rawCall(worker, database, "register/request", {
+    method: "POST",
+    payload: accountPayload("الحساب المشترك الثاني", "shared-phone-two@example.test", sharedPhone),
+    environment,
+  });
+
+  assert.equal(firstRequest.status, 202);
+  assert.equal(secondRequest.status, 202);
+  assert.equal(database.registrationRequests.size, 2);
+  assert.equal(database.registrationLocations.size, 2);
+  assert.equal(delivered.length, 2);
+
+  const firstVerified = await rawCall(worker, database, "register/verify", {
+    method: "POST",
+    cookie: namedCookieFrom(firstRequest, "almadina_registration"),
+    payload: { code: delivered[0].code },
+    environment,
+  });
+  const secondVerified = await rawCall(worker, database, "register/verify", {
+    method: "POST",
+    cookie: namedCookieFrom(secondRequest, "almadina_registration"),
+    payload: { code: delivered[1].code },
+    environment,
+  });
+
+  assert.equal(firstVerified.status, 201);
+  assert.equal(secondVerified.status, 201);
+  assert.notEqual(firstVerified.body.userId, secondVerified.body.userId);
+  assert.equal(JSON.parse(database.state.payload).users.filter((account) => account.phone === sharedPhone).length, 2);
+  assert.equal(database.registrationRequests.size, 0);
+  assert.equal(database.registrationLocations.size, 0);
 });
 
 test("accepts a complete manual address without requiring or trusting map coordinates", async () => {
@@ -3524,7 +3588,10 @@ test("deletes only the authenticated eligible account and preserves every other 
         orders: [ownedOrder],
         recipients: [{ id: "recipient-account-deletion", merchantId: merchant.body.userId, name: "مستلم الحذف", phone: "0593333333", city: "الخليل", address: "عنوان الاختبار", favorite: true }],
         collections: [ownedCollection],
-        notices: [{ id: "notice-account-deletion", userId: merchant.body.userId, title: "إشعار خاص", message: "يجب حذف هذا الإشعار فقط.", icon: "bell", read: false, createdAt: now }],
+        notices: [
+          { id: "notice-account-deletion", userId: merchant.body.userId, title: "إشعار خاص", message: "يجب حذف هذا الإشعار فقط.", icon: "bell", read: false, createdAt: now, orderId: ownedOrder.id },
+          { id: "notice-admin-account-deletion", userId: administrator.body.userId, title: "ملاحظة عن طرد الحساب", message: "يجب حذف الإشعار المرتبط بالطرد من حساب المسؤول أيضًا.", icon: "bell", read: false, createdAt: now, orderId: ownedOrder.id },
+        ],
         preferences: { ...administrator.body.database.preferences, [merchant.body.userId]: { theme: "dark", notifications: true, sounds: false, orderUpdates: true, biometric: false, pin: "", rating: 0, compact: false } },
       },
     },
@@ -3603,6 +3670,7 @@ test("deletes only the authenticated eligible account and preserves every other 
   assert.equal(afterDeletion.body.database.recipients.some((recipient) => recipient.merchantId === merchant.body.userId), false);
   assert.equal(afterDeletion.body.database.collections.some((invoice) => invoice.merchantId === merchant.body.userId), false);
   assert.equal(afterDeletion.body.database.notices.some((notice) => notice.userId === merchant.body.userId), false);
+  assert.equal(afterDeletion.body.database.notices.some((notice) => notice.orderId === ownedOrder.id), false);
   assert.equal(Object.hasOwn(afterDeletion.body.database.preferences, merchant.body.userId), false);
 
   const courier = {
@@ -3684,6 +3752,22 @@ test("deletes only the authenticated eligible account and preserves every other 
   assert.equal(preservedOrder.courierId, undefined);
   assert.equal(preservedOrder.courierName, "مندوب سابق");
   assert.equal(preservedOrder.trackingEvents[0].actor, "مندوب سابق");
+
+  const recreatedMerchant = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("حساب جديد بنفس البيانات", "delete-me@example.test", "0591111111"),
+  });
+  assert.equal(recreatedMerchant.status, 201);
+  assert.notEqual(recreatedMerchant.body.userId, merchant.body.userId);
+  assert.equal(recreatedMerchant.body.database.users.length, 1);
+  assert.equal(recreatedMerchant.body.database.users[0].email, "delete-me@example.test");
+  assert.equal(recreatedMerchant.body.database.users[0].phone, "0591111111");
+  assert.equal(recreatedMerchant.body.database.orders.length, 0);
+  assert.equal(recreatedMerchant.body.database.recipients.length, 0);
+  assert.equal(recreatedMerchant.body.database.collections.length, 0);
+  assert.equal(recreatedMerchant.body.database.notices.length, 0);
+  assert.equal(database.registrationRequests.size, 0);
+  assert.equal(database.registrationLocations.size, 0);
 });
 
 test("lists linked device names per account and revokes only a selected non-current session", async () => {

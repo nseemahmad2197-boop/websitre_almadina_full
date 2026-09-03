@@ -1766,23 +1766,6 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     phone: normalizeAccountPhone(candidate.phone) ?? "",
     store: candidate.store.trim(),
   }));
-  const phoneOwners = new Map<string, typeof normalizedCandidates>();
-
-  for (const normalized of normalizedCandidates) {
-    const owners = phoneOwners.get(normalized.phone) ?? [];
-    owners.push(normalized);
-    phoneOwners.set(normalized.phone, owners);
-  }
-
-  for (const [phone, owners] of phoneOwners) {
-    if (!phone || owners.length < 2) continue;
-    const isUnchangedLegacyDuplicate = owners.every(({ existing }) => (
-      Boolean(existing) && normalizeAccountPhone(existing!.phone) === phone
-    ));
-    if (!isUnchangedLegacyDuplicate) {
-      throw new ApiRequestError("رقم الجوال مسجل لحساب آخر.", 409);
-    }
-  }
 
   for (const { candidate, existing, email, name, phone, store } of normalizedCandidates) {
     if (!validEmail(email)) throw new ApiRequestError("البريد الإلكتروني غير صحيح.", 400);
@@ -2404,6 +2387,9 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
     }
 
     const isMerchant = account.role === "merchant";
+    const ownedOrderIds = isMerchant
+      ? new Set(state.database.orders.filter((order) => order.merchantId === account.id).map((order) => order.id))
+      : new Set<string>();
     const next: Database = removeLegacyDemoData({
       ...state.database,
       users: state.database.users.filter((entry) => entry.id !== account.id),
@@ -2417,11 +2403,17 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
         } : order),
       recipients: isMerchant ? state.database.recipients.filter((recipient) => recipient.merchantId !== account.id) : state.database.recipients,
       collections: isMerchant ? state.database.collections.filter((invoice) => invoice.merchantId !== account.id) : state.database.collections,
-      notices: state.database.notices.filter((notice) => notice.userId !== account.id),
+      notices: state.database.notices.filter((notice) => (
+        notice.userId !== account.id && (!isMerchant || !notice.orderId || !ownedOrderIds.has(notice.orderId))
+      )),
       preferences: Object.fromEntries(Object.entries(state.database.preferences).filter(([accountId]) => accountId !== account.id)),
     });
 
     if (!await saveState(database, next, state.revision)) continue;
+
+    const normalizedEmail = account.email.trim().toLowerCase();
+    const registrationCooldownKey = await sha256(`registration:request-cooldown:${normalizedEmail}`);
+    const registrationEmailKey = await sha256(`registration:request-email:${normalizedEmail}`);
 
     await database.batch([
       database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(account.id),
@@ -2431,6 +2423,11 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
       database.prepare("DELETE FROM almadina_webauthn_challenges WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_app_locks WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_password_reset_requests WHERE user_id = ?").bind(account.id),
+      database.prepare(`DELETE FROM almadina_registration_locations WHERE request_hash IN
+        (SELECT request_hash FROM almadina_registration_requests WHERE email = ?)`).bind(normalizedEmail),
+      database.prepare("DELETE FROM almadina_registration_requests WHERE email = ?").bind(normalizedEmail),
+      database.prepare("DELETE FROM almadina_rate_limits WHERE key_hash = ?").bind(registrationCooldownKey),
+      database.prepare("DELETE FROM almadina_rate_limits WHERE key_hash = ?").bind(registrationEmailKey),
     ]);
     return json({ success: true }, 200, { "Set-Cookie": sessionCookie(request, "", 0) });
   }
@@ -2883,10 +2880,7 @@ async function requestRegistration(
 
   const state = await readState(database);
   if (state.database.users.some((entry) => entry.email.trim().toLowerCase() === email)) {
-    return json({ error: "يوجد حساب مسجل بهذا البريد الإلكتروني." }, 409);
-  }
-  if (state.database.users.some((entry) => normalizeAccountPhone(entry.phone) === phone)) {
-    return json({ error: "يوجد حساب مسجل برقم الجوال هذا." }, 409);
+    return json({ error: "هذا الحساب موجود بالفعل بهذا البريد الإلكتروني. سجّل الدخول بدلًا من إنشاء حساب جديد." }, 409);
   }
 
   await enforceRegistrationRequestRateLimits(database, request, email);
@@ -2902,9 +2896,9 @@ async function requestRegistration(
     database.prepare(`DELETE FROM almadina_registration_locations WHERE request_hash IN
       (SELECT request_hash FROM almadina_registration_requests WHERE expires_at <= ?)`).bind(now),
     database.prepare(`DELETE FROM almadina_registration_locations WHERE request_hash IN
-      (SELECT request_hash FROM almadina_registration_requests WHERE email = ? OR phone = ?)`).bind(email, phone),
+      (SELECT request_hash FROM almadina_registration_requests WHERE email = ?)`).bind(email),
     database.prepare("DELETE FROM almadina_registration_requests WHERE expires_at <= ?").bind(now),
-    database.prepare("DELETE FROM almadina_registration_requests WHERE email = ? OR phone = ?").bind(email, phone),
+    database.prepare("DELETE FROM almadina_registration_requests WHERE email = ?").bind(email),
     database.prepare(`INSERT INTO almadina_registration_requests
       (request_hash, email, name, phone, store, password_hash, code_hash, failed_attempts, expires_at, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`)
@@ -3009,16 +3003,13 @@ async function verifyRegistration(database: D1Database, request: Request): Promi
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const state = await readState(database);
-    if (state.database.users.some((entry) => (
-      entry.email.trim().toLowerCase() === row.email
-      || normalizeAccountPhone(entry.phone) === row.phone
-    ))) {
+    if (state.database.users.some((entry) => entry.email.trim().toLowerCase() === row.email)) {
       await database.batch([
         database.prepare("DELETE FROM almadina_registration_locations WHERE request_hash = ?").bind(requestHash),
         database.prepare("DELETE FROM almadina_registration_requests WHERE request_hash = ?").bind(requestHash),
       ]);
       return json(
-        { error: "تم تسجيل حساب بهذه البيانات أثناء التحقق. سجّل الدخول أو استخدم بيانات أخرى." },
+        { error: "هذا الحساب موجود بالفعل. سجّل الدخول بدلًا من إنشاء حساب جديد." },
         409,
         { "Set-Cookie": registrationCookie(request, "", 0) },
       );

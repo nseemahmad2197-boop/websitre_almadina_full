@@ -108,9 +108,9 @@ export function StatusPill({ status }: { status: OrderStatus }) {
   );
 }
 
-export function CollectionAmount({ amount, due, className = "" }: { amount: number; due?: boolean; className?: string }) {
+export function CollectionAmount({ amount, due, dueLabel = "مستحق", className = "" }: { amount: number; due?: boolean; dueLabel?: string; className?: string }) {
   const isDue = due ?? (amount < 0);
-  return <span className={`collection-amount ${isDue ? "collection-amount--due" : ""} ${className}`}><bdi dir="ltr">{money(Math.abs(amount))} ₪</bdi>{isDue && <small className="collection-amount__status">مستحق</small>}</span>;
+  return <span className={`collection-amount ${isDue ? "collection-amount--due" : ""} ${className}`}><bdi dir="ltr">{money(Math.abs(amount))} ₪</bdi>{isDue && <small className="collection-amount__status">{dueLabel}</small>}</span>;
 }
 
 export function Toggle({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; label: string; disabled?: boolean }) {

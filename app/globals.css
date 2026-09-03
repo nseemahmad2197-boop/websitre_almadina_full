@@ -1051,6 +1051,28 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .membership-switch__option--diamond.is-selected { background: #ebf5ff; color: #286aa8; }
 html[data-theme="dark"] .membership-switch__option--premium.is-selected { background: #342b18; color: #edc475; }
 html[data-theme="dark"] .membership-switch__option--diamond.is-selected { background: #172b42; color: #8cc9ff; }
+.admin-collection-accounts { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); }
+.admin-collection-accounts > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-collection-accounts > header > div { display: grid; gap: 3px; }
+.admin-collection-accounts h2 { font-size: 14px; }
+.admin-collection-accounts header p { color: var(--muted); font-size: 9px; }
+.admin-collection-accounts__all { display: inline-flex; min-height: 34px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-muted); color: var(--muted); cursor: pointer; font-size: 9px; font-weight: 750; }
+.admin-collection-accounts__all > span { display: grid; min-width: 20px; height: 20px; place-items: center; border-radius: 7px; background: var(--surface); color: var(--text); }
+.admin-collection-accounts__all.is-selected { border-color: color-mix(in srgb, var(--green), transparent 45%); background: var(--green-pale); color: var(--green); }
+.admin-collection-accounts__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.admin-collection-account { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 7px 9px; padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-muted); color: var(--text); text-align: right; cursor: pointer; transition: border-color .18s, background-color .18s, box-shadow .18s; }
+.admin-collection-account:hover { border-color: color-mix(in srgb, var(--green), transparent 62%); }
+.admin-collection-account.is-selected { border-color: var(--green); background: color-mix(in srgb, var(--green-pale), var(--surface) 64%); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green), transparent 88%); }
+.admin-collection-account > .avatar { grid-row: 1 / span 2; width: 38px; height: 38px; }
+.admin-collection-account__identity { display: grid; min-width: 0; gap: 2px; }
+.admin-collection-account__identity > strong, .admin-collection-account__identity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-collection-account__identity > strong { font-size: 11px; }
+.admin-collection-account__identity > span { color: var(--muted); font-size: 8px; }
+.admin-collection-account__meta { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
+.admin-collection-account__meta > small { color: var(--muted); font-size: 8px; white-space: nowrap; }
+.admin-collection-account__meta .collection-amount { align-items: flex-end; font-size: 10px; }
+.admin-collection-account__meta .collection-amount__status { font-size: 7px; }
+.admin-collection-accounts__empty { padding: 12px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 9px; text-align: center; }
 .admin-collection-card { display: grid; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
 .admin-collection-card > div:first-child { display: flex; align-items: center; gap: 10px; }
 .admin-collection-card > div:first-child > div { display: grid; flex: 1; gap: 4px; }

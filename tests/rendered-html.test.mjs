@@ -235,6 +235,11 @@ test("uses a five-step reference-style registration with map, legal disclosures,
   assert.match(server, /hashPasswordResetCode\(requestToken, verificationCode\)/);
   assert.match(server, /saveVerifiedRegistration/);
   assert.match(server, /أكمل خطوات إنشاء الحساب ثم أكّد بريدك الإلكتروني/);
+  assert.match(server, /هذا الحساب موجود بالفعل بهذا البريد الإلكتروني/);
+  assert.doesNotMatch(server, /هذا الحساب موجود بالفعل برقم الجوال/);
+  assert.doesNotMatch(server, /normalizeAccountPhone\(entry\.phone\) === phone/);
+  assert.doesNotMatch(server, /almadina_registration_requests WHERE email = \? OR phone = \?/);
+  assert.match(server, /هذا الحساب موجود بالفعل\. سجّل الدخول بدلًا من إنشاء حساب جديد/);
   assert.match(server, /HttpOnly; SameSite=Strict/);
   assert.match(server, /REVERSE_GEOCODE_REQUEST_IP_LIMIT = 20/);
   assert.match(cloudflareWorker, /geoapifyApiKey: env\.GEOAPIFY_API_KEY/);
@@ -913,19 +918,39 @@ test("applies the requested return-fee matrix by membership and region", async (
   assert.match(management, /returnFeeForInvoiceOrder\(selectedInvoice, order\)/);
   assert.match(management, /رسوم الرواجع المستحقة لحسابك/);
   assert.match(ui, /money\(Math\.abs\(amount\)\)/);
-  assert.match(ui, /collection-amount__status">مستحق/);
+  assert.match(ui, /dueLabel = "مستحق"/);
+  assert.match(ui, /collection-amount__status">\{dueLabel\}/);
   assert.match(management, /CollectionAmount amount=\{selectedInvoice\.returnFees\} due/);
   assert.match(management, /CollectionAmount amount=\{returnFeeForInvoiceOrder\(selectedInvoice, order\)\} due/);
   assert.doesNotMatch(management, /رسوم الرواجع<\/dt><dd>-\s*\{/);
   assert.doesNotMatch(management, /<b>-\s*\{money\(returnFeeForInvoiceOrder/);
-  assert.match(admin, /CollectionAmount amount=\{invoice\.netAmount\}/);
-  assert.match(employee, /CollectionAmount amount=\{invoice\.netAmount\}/);
+  assert.match(admin, /CollectionAmount amount=\{invoice\.netAmount\} dueLabel="مستحق للشركة"/);
+  assert.match(employee, /CollectionAmount amount=\{invoice\.netAmount\} dueLabel="مستحق للشركة"/);
   assert.match(server, /function calculateCollectionAmounts/);
   assert.match(server, /returnFeeDetails = returned\.map/);
   assert.match(server, /function normalizeCollectionInvoices/);
   assert.match(server, /normalizeCollectionInvoices\(cleaned\)/);
   assert.match(server, /\.\.\.entry, \.\.\.amounts, status: "ready"/);
   assert.match(server, /\.\.\.amounts,[\s\S]*status: "paid"/);
+});
+
+test("shows every merchant account in the administrator collections page and filters its invoices", async () => {
+  const [admin, styles] = await Promise.all([
+    readFile(new URL("../app/components/admin.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(admin, /const \[collectionMerchantId, setCollectionMerchantId\] = useState\("all"\)/);
+  assert.match(admin, /const collectionUsers = merchants\.map/);
+  assert.match(admin, /collectionMerchantId === "all" \|\| invoice\.merchantId === collectionMerchantId/);
+  assert.match(admin, /aria-label="حسابات المستخدمين في التحصيلات"/);
+  assert.match(admin, /<h2>حسابات المستخدمين<\/h2>/);
+  assert.match(admin, /كل الحسابات/);
+  assert.match(admin, /invoiceCount\.toLocaleString\("ar-EG"\)/);
+  assert.match(admin, /admin-collection-account is-selected/);
+  assert.match(styles, /\.admin-collection-accounts\s*\{/);
+  assert.match(styles, /\.admin-collection-accounts__list\s*\{[^}]*repeat\(auto-fit, minmax\(190px, 1fr\)\)/);
+  assert.match(styles, /\.admin-collection-account\.is-selected\s*\{/);
 });
 
 test("allows freely typing the parcel governorate and city while resolving regional delivery prices", async () => {
@@ -1362,8 +1387,8 @@ test("lets only the administrator broadcast app-update notifications to membersh
   assert.match(application, /remoteMutationInFlight\.current = true/);
   assert.match(application, /pendingUpdates\.current\.reduce\(\(current, update\) => update\(current\), snapshot\.database\)/);
   assert.match(application, /<AppContext\.Provider value=\{\{[\s\S]*broadcastNotice/);
-  assert.match(admin, /savedAccount\?\.phone !== phone[\s\S]*رقم الجوال مسجل لحساب آخر/);
-  assert.match(server, /isUnchangedLegacyDuplicate[\s\S]*normalizeAccountPhone\(existing!\.phone\) === phone/);
+  assert.doesNotMatch(admin, /رقم الجوال مسجل لحساب آخر/);
+  assert.doesNotMatch(server, /isUnchangedLegacyDuplicate|phoneOwners/);
   assert.match(application, /knownNoticeIds/);
   assert.match(application, /noticeBaselineUserId/);
   assert.match(data, /notifications:\s*true,[\s\S]*sounds:\s*true/);
@@ -1504,7 +1529,12 @@ test("shows a reference-style account deletion page and performs deletion only t
   assert.match(server, /accountDeletionEligibility\(state\.database, account\)/);
   assert.match(server, /invoice\.status === "paid"/);
   assert.match(server, /order\.status !== "delivered" && order\.status !== "returned"/);
+  assert.match(server, /const ownedOrderIds = isMerchant/);
+  assert.match(server, /!ownedOrderIds\.has\(notice\.orderId\)/);
   assert.match(server, /DELETE FROM almadina_sessions WHERE user_id = \?/);
+  assert.match(server, /DELETE FROM almadina_registration_requests WHERE email = \?/);
+  assert.match(server, /registration:request-cooldown:\$\{normalizedEmail\}/);
+  assert.match(server, /registration:request-email:\$\{normalizedEmail\}/);
   assert.match(server, /url\.pathname === "\/api\/almadina\/account\/delete"/);
 
   assert.match(styles, /\.delete-account-page\s*\{/);
