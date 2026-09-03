@@ -1627,7 +1627,7 @@ test("shows linked device names and safely revokes only another session", async 
 });
 
 test("supports opt-in phone push notifications with sound guidance for every signed-in role", async () => {
-  const [application, context, phoneClient, server, renderWorker, settings, serviceWorker, manifest, layout, legal, readme] = await Promise.all([
+  const [application, context, phoneClient, server, renderWorker, settings, serviceWorker, manifest, layout, legal, readme, appleIcon, pwaIcon192, pwaIcon512] = await Promise.all([
     readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/phone-notifications.ts", import.meta.url), "utf8"),
@@ -1639,6 +1639,9 @@ test("supports opt-in phone push notifications with sound guidance for every sig
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/legal.ts", import.meta.url), "utf8"),
     readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../public/apple-touch-icon.png", import.meta.url)),
+    readFile(new URL("../public/almadina-icon-192.png", import.meta.url)),
+    readFile(new URL("../public/almadina-icon-512.png", import.meta.url)),
   ]);
 
   assert.match(context, /phoneNotifications: PhoneNotificationState/);
@@ -1648,8 +1651,10 @@ test("supports opt-in phone push notifications with sound guidance for every sig
   assert.match(application, /navigator\.vibrate\?\.\(\[120, 70, 120\]\)/);
   assert.match(application, /notificationOrder/);
   assert.match(application, /setViewState\("order-detail"\)/);
-  assert.match(phoneClient, /navigator\.serviceWorker\.register\("\/almadina-sw\.js"/);
+  assert.match(phoneClient, /navigator\.serviceWorker\.register\("\/almadina-sw\.js\?v=31"/);
   assert.match(phoneClient, /Notification\.requestPermission\(\)/);
+  const enableSource = phoneClient.slice(phoneClient.indexOf("export async function enablePhoneNotifications"));
+  assert.ok(enableSource.indexOf("Notification.requestPermission()") < enableSource.indexOf("Promise.all([registration(), configuration()])"));
   assert.match(phoneClient, /worker\.pushManager\.subscribe/);
   assert.match(phoneClient, /api\("push\/subscribe"/);
   assert.match(phoneClient, /api\("push\/unsubscribe"/);
@@ -1659,6 +1664,10 @@ test("supports opt-in phone push notifications with sound guidance for every sig
   assert.match(server, /url\.pathname === "\/api\/almadina\/push\/config"/);
   assert.match(server, /scheduleWebPushNotices\(database, next, newNotices/);
   assert.match(renderWorker, /webPushEnabled: true/);
+  assert.match(renderWorker, /RENDER_PUBLIC_ASSETS/);
+  assert.match(renderWorker, /"text\/javascript; charset=utf-8"/);
+  assert.match(renderWorker, /"application\/manifest\+json; charset=utf-8"/);
+  assert.match(renderWorker, /"Service-Worker-Allowed", "\/"/);
   assert.match(settings, /title="إشعارات الهاتف"/);
   assert.match(settings, /title="اختبار الصوت والإشعار"/);
   assert.match(settings, /على iPhone: أضف الموقع إلى الشاشة الرئيسية/);
@@ -1667,9 +1676,17 @@ test("supports opt-in phone push notifications with sound guidance for every sig
   assert.match(serviceWorker, /vibrate: \[180, 90, 180\]/);
   assert.match(serviceWorker, /self\.addEventListener\("notificationclick"/);
   assert.match(serviceWorker, /openWindow\(destination\)/);
+  assert.match(serviceWorker, /icon: "\/almadina-icon-192\.png"/);
   assert.match(manifest, /"display": "standalone"/);
+  assert.match(manifest, /"src": "\/almadina-icon-192\.png"/);
+  assert.match(manifest, /"src": "\/almadina-icon-512\.png"/);
+  assert.match(manifest, /"src": "\/almadina-icon-maskable-512\.png"/);
   assert.match(layout, /manifest: "\/manifest\.webmanifest"/);
   assert.match(layout, /appleWebApp:/);
+  assert.match(layout, /apple-touch-icon\.png/);
+  assert.deepEqual([appleIcon.readUInt32BE(16), appleIcon.readUInt32BE(20)], [180, 180]);
+  assert.deepEqual([pwaIcon192.readUInt32BE(16), pwaIcon192.readUInt32BE(20)], [192, 192]);
+  assert.deepEqual([pwaIcon512.readUInt32BE(16), pwaIcon512.readUInt32BE(20)], [512, 512]);
   assert.match(legal, /لا يطلب إذن إشعارات الهاتف إلا عندما تضغط زر التفعيل/);
   assert.doesNotMatch(legal, /لا يطلب إذن إشعارات النظام حاليًا/);
   assert.match(readme, /لا تحتاج هذه الميزة إلى متغيرات Render جديدة/);

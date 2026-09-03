@@ -310,6 +310,8 @@ export function NotificationSettings() {
           ? "الإذن مرفوض؛ فعّله من إعدادات الهاتف أو المتصفح"
           : phoneNotifications.subscribed
             ? "مفعّلة على هذا الجهاز وتصل عند إغلاق التطبيق"
+            : phoneNotifications.error
+              ? phoneNotifications.error
             : !phoneNotifications.configured
               ? "اضغط تفعيل لإعادة التحقق من خدمة الإشعارات"
               : "فعّلها لاستلام تنبيه الهاتف عند قفل الشاشة";

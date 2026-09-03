@@ -1,4 +1,6 @@
 /** Render/Node entry point for the Almadina Express application. */
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import handler from "vinext/server/app-router-entry";
 import { getRenderDatabase } from "../app/lib/postgres-d1-adapter";
 import { handleAlmadinaApi, type AlmadinaApiConfig } from "../app/lib/server-database";
@@ -18,6 +20,73 @@ interface Env {
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;
+}
+
+type RenderPublicAsset = {
+  file: string;
+  contentType: string;
+  cacheControl: string;
+  serviceWorker?: boolean;
+};
+
+// vinext's Node adapter can return empty responses for files in public/ on
+// Render. Serve the PWA files explicitly so WebKit receives real bytes and the
+// correct MIME type for the service worker, manifest, and application icons.
+const RENDER_PUBLIC_ASSETS = new Map<string, RenderPublicAsset>([
+  ["/almadina-sw.js", {
+    file: "almadina-sw.js",
+    contentType: "text/javascript; charset=utf-8",
+    cacheControl: "no-cache, no-store, must-revalidate",
+    serviceWorker: true,
+  }],
+  ["/manifest.webmanifest", {
+    file: "manifest.webmanifest",
+    contentType: "application/manifest+json; charset=utf-8",
+    cacheControl: "no-cache, max-age=0",
+  }],
+  ["/almadina-mark.svg", {
+    file: "almadina-mark.svg",
+    contentType: "image/svg+xml; charset=utf-8",
+    cacheControl: "public, max-age=86400",
+  }],
+  ["/almadina-icon-192.png", {
+    file: "almadina-icon-192.png",
+    contentType: "image/png",
+    cacheControl: "public, max-age=31536000, immutable",
+  }],
+  ["/almadina-icon-512.png", {
+    file: "almadina-icon-512.png",
+    contentType: "image/png",
+    cacheControl: "public, max-age=31536000, immutable",
+  }],
+  ["/almadina-icon-maskable-512.png", {
+    file: "almadina-icon-maskable-512.png",
+    contentType: "image/png",
+    cacheControl: "public, max-age=31536000, immutable",
+  }],
+  ["/apple-touch-icon.png", {
+    file: "apple-touch-icon.png",
+    contentType: "image/png",
+    cacheControl: "public, max-age=86400",
+  }],
+]);
+
+async function renderPublicAsset(request: Request, pathname: string): Promise<Response | null> {
+  const asset = RENDER_PUBLIC_ASSETS.get(pathname);
+  if (!asset || (request.method !== "GET" && request.method !== "HEAD")) return null;
+  try {
+    const bytes = new Uint8Array(await readFile(join(process.cwd(), "public", asset.file)));
+    const headers = new Headers({
+      "Cache-Control": asset.cacheControl,
+      "Content-Length": String(bytes.byteLength),
+      "Content-Type": asset.contentType,
+    });
+    if (asset.serviceWorker) headers.set("Service-Worker-Allowed", "/");
+    return new Response(request.method === "HEAD" ? null : bytes, { status: 200, headers });
+  } catch (error) {
+    console.error(`Render could not read public/${asset.file}.`, error);
+    return Response.json({ error: "ملف التطبيق المطلوب غير متاح على الخادم." }, { status: 500 });
+  }
 }
 
 function resolveDatabase(env?: Env): D1Database {
@@ -55,6 +124,9 @@ function unavailableDatabaseResponse(): Response {
 const worker = {
   async fetch(request: Request, env: Env | undefined, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    const publicAsset = await renderPublicAsset(request, url.pathname);
+    if (publicAsset) return withSecurityHeaders(request, publicAsset);
 
     if (url.pathname === "/health") {
       try {

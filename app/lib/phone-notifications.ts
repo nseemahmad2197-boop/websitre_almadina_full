@@ -7,6 +7,7 @@ export type PhoneNotificationState = {
   subscribed: boolean;
   requiresHomeScreen: boolean;
   permission: NotificationPermission | "unsupported";
+  error?: string;
 };
 
 export const initialPhoneNotificationState: PhoneNotificationState = {
@@ -96,23 +97,68 @@ function subscriptionUsesKey(subscription: PushSubscription, publicKey: string):
 }
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api/almadina/${path}`, {
-    ...options,
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { Accept: "application/json", "Content-Type": "application/json", ...options.headers },
+  try {
+    const response = await fetch(`/api/almadina/${path}`, {
+      ...options,
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json", "Content-Type": "application/json", ...options.headers },
+    });
+    let payload: T & { error?: string };
+    try {
+      payload = await response.json() as T & { error?: string };
+    } catch {
+      throw new PhoneNotificationError("failed", "أعاد خادم الإشعارات استجابة غير صالحة. أعد نشر آخر نسخة من الموقع ثم حاول مجددًا.");
+    }
+    if (!response.ok) throw new PhoneNotificationError("failed", payload.error || "تعذّر الاتصال بخدمة إشعارات الهاتف.");
+    return payload;
+  } catch (error) {
+    if (error instanceof PhoneNotificationError) throw error;
+    throw new PhoneNotificationError("failed", "تعذّر الاتصال بخدمة إشعارات الهاتف. تحقق من الإنترنت ثم حاول مجددًا.");
+  }
+}
+
+function notificationFailure(error: unknown, fallback: string): PhoneNotificationError {
+  if (error instanceof PhoneNotificationError) return error;
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError") {
+      return new PhoneNotificationError("denied", "لم يسمح iPhone بالإشعارات. افتح إعدادات الهاتف ← الإشعارات ← المدينة إكسبرس وفعّل السماح بالإشعارات.");
+    }
+    if (error.name === "SecurityError") {
+      return new PhoneNotificationError("unsupported", "لا يمكن تشغيل إشعارات الهاتف إلا من النسخة الآمنة المضافة إلى الشاشة الرئيسية.");
+    }
+    if (error.name === "AbortError" || error.name === "InvalidStateError") {
+      return new PhoneNotificationError("failed", "لم يكتمل تشغيل خدمة الإشعارات على هذا الهاتف. أغلق التطبيق وافتحه من أيقونة الشاشة الرئيسية ثم حاول مجددًا.");
+    }
+  }
+  return new PhoneNotificationError("failed", fallback);
+}
+
+function readyRegistration(timeoutMs = 15_000): Promise<ServiceWorkerRegistration> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new PhoneNotificationError("failed", "استغرق تشغيل خدمة الإشعارات وقتًا طويلًا. أغلق التطبيق وافتحه من أيقونة الشاشة الرئيسية ثم حاول مجددًا."));
+    }, timeoutMs);
+    void navigator.serviceWorker.ready.then((worker) => {
+      window.clearTimeout(timer);
+      resolve(worker);
+    }, (error: unknown) => {
+      window.clearTimeout(timer);
+      reject(error);
+    });
   });
-  const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new PhoneNotificationError("failed", payload.error || "تعذّر الاتصال بخدمة إشعارات الهاتف.");
-  return payload;
 }
 
 async function registration(): Promise<ServiceWorkerRegistration> {
-  await navigator.serviceWorker.register("/almadina-sw.js", {
-    scope: "/",
-    updateViaCache: "none",
-  });
-  return navigator.serviceWorker.ready;
+  try {
+    await navigator.serviceWorker.register("/almadina-sw.js?v=31", {
+      scope: "/",
+      updateViaCache: "none",
+    });
+    return await readyRegistration();
+  } catch (error) {
+    throw notificationFailure(error, "تعذّر تشغيل ملف إشعارات الهاتف. أعد نشر آخر نسخة من الموقع ثم افتح التطبيق من جديد.");
+  }
 }
 
 async function configuration(): Promise<PushConfiguration> {
@@ -157,7 +203,8 @@ export async function inspectPhoneNotifications(syncCurrentAccount = true): Prom
       requiresHomeScreen: false,
       permission: Notification.permission,
     };
-  } catch {
+  } catch (error) {
+    const failure = notificationFailure(error, "تعذّر التحقق من خدمة إشعارات الهاتف.");
     return {
       ready: true,
       supported: true,
@@ -165,31 +212,43 @@ export async function inspectPhoneNotifications(syncCurrentAccount = true): Prom
       subscribed: false,
       requiresHomeScreen: false,
       permission: Notification.permission,
+      error: failure.message,
     };
   }
 }
 
 export async function enablePhoneNotifications(): Promise<PhoneNotificationState> {
   requireCapabilities();
-  const worker = await registration();
-  const config = await configuration();
-  const permission = Notification.permission === "granted"
-    ? "granted"
-    : await Notification.requestPermission();
+  // iOS requires the permission prompt to be opened directly from the user's
+  // tap. Do this before any network or service-worker await so WebKit keeps the
+  // transient user activation for the prompt.
+  let permission: NotificationPermission;
+  try {
+    permission = Notification.permission === "granted"
+      ? "granted"
+      : await Notification.requestPermission();
+  } catch (error) {
+    throw notificationFailure(error, "تعذّر فتح طلب إذن الإشعارات على هذا الهاتف. افتح التطبيق من أيقونة الشاشة الرئيسية ثم حاول مجددًا.");
+  }
   if (permission !== "granted") {
     throw new PhoneNotificationError("denied", "لم يتم السماح بالإشعارات. فعّل الإذن من إعدادات الهاتف أو المتصفح ثم حاول مجددًا.");
   }
 
-  let subscription = await worker.pushManager.getSubscription();
-  if (subscription && !subscriptionUsesKey(subscription, config.publicKey)) {
-    await subscription.unsubscribe();
-    subscription = null;
+  try {
+    const [worker, config] = await Promise.all([registration(), configuration()]);
+    let subscription = await worker.pushManager.getSubscription();
+    if (subscription && !subscriptionUsesKey(subscription, config.publicKey)) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    subscription ??= await worker.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: toArrayBuffer(decodeBase64Url(config.publicKey)),
+    });
+    await api("push/subscribe", { method: "POST", body: JSON.stringify(subscriptionPayload(subscription)) });
+  } catch (error) {
+    throw notificationFailure(error, "تعذّر ربط هذا الهاتف بخدمة الإشعارات. أغلق التطبيق وافتحه من أيقونة الشاشة الرئيسية ثم حاول مجددًا.");
   }
-  subscription ??= await worker.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: toArrayBuffer(decodeBase64Url(config.publicKey)),
-  });
-  await api("push/subscribe", { method: "POST", body: JSON.stringify(subscriptionPayload(subscription)) });
   return {
     ready: true,
     supported: true,

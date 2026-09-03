@@ -16,7 +16,14 @@ export const metadata: Metadata = {
     title: "المدينة إكسبرس",
   },
   keywords: ["المدينة إكسبرس", "توصيل", "شحن", "فلسطين", "تتبع الطرود"],
-  icons: { icon: "/almadina-mark.svg", shortcut: "/almadina-mark.svg" },
+  icons: {
+    icon: [
+      { url: "/almadina-mark.svg", type: "image/svg+xml" },
+      { url: "/almadina-icon-192.png", type: "image/png", sizes: "192x192" },
+    ],
+    shortcut: "/almadina-icon-192.png",
+    apple: [{ url: "/apple-touch-icon.png", type: "image/png", sizes: "180x180" }],
+  },
   openGraph: { title, description, locale: "ar_PS", type: "website" },
   twitter: { card: "summary", title, description },
 };
@@ -30,6 +37,7 @@ export default function RootLayout({
     <html lang="ar" dir="rtl" suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#087c45" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
       </head>
       <body>{children}</body>
     </html>

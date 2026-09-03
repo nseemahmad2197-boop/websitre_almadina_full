@@ -32,8 +32,8 @@ self.addEventListener("push", (event) => {
 
     await self.registration.showNotification(title, {
       body,
-      icon: "/almadina-mark.svg",
-      badge: "/almadina-mark.svg",
+      icon: "/almadina-icon-192.png",
+      badge: "/almadina-icon-192.png",
       tag: noticeId,
       renotify: true,
       dir: "rtl",
