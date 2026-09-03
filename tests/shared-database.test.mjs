@@ -259,6 +259,7 @@ class FakeD1Statement {
 
   async run() {
     if (this.sql.startsWith("CREATE TABLE") || this.sql.startsWith("CREATE INDEX")) return { success: true, meta: { changes: 0 } };
+    if (this.sql.startsWith("DELETE FROM almadina_web_push_subscriptions")) return { success: true, meta: { changes: 0 } };
 
     if (this.sql.startsWith("INSERT INTO almadina_state") && this.sql.includes("ON CONFLICT (id) DO NOTHING")) {
       if (this.database.state) return { success: true, meta: { changes: 0 } };

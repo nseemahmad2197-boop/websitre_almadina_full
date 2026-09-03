@@ -11,6 +11,15 @@ import { AppContext, type ConfirmOptions, type RegistrationChallenge, type Regis
 import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/available-accounts";
 import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiometricAvailability, getAppLockStatus, registerBiometricUnlock, removeAppLock, removeBiometricUnlock, startSignedOutBiometricAuthentication, verifyAppLockPin, verifySignedOutBiometricAuthentication, type AppLockState } from "./lib/app-lock-client";
 import { createSeedDatabase, defaultPreferences, uid, type Database, type LinkedDevice, type Notice, type NoticeAudience, type Preferences } from "./lib/data";
+import {
+  PhoneNotificationError,
+  disablePhoneNotifications as disableSystemNotifications,
+  enablePhoneNotifications as enableSystemNotifications,
+  initialPhoneNotificationState,
+  inspectPhoneNotifications,
+  sendPhoneNotificationTest,
+  type PhoneNotificationState,
+} from "./lib/phone-notifications";
 
 type Toast = { id: string; message: string; kind: ToastKind };
 type SharedSnapshot = { database: Database; revision: number; userId: string; recipientCount?: number; removedCount?: number; prepared?: boolean };
@@ -239,6 +248,7 @@ export default function AlmadinaApplication() {
   const [appLock, setAppLock] = useState<AppLockState>(EMPTY_APP_LOCK);
   const [view, setViewState] = useState<View>("home");
   const [anonymousPreferences, setAnonymousPreferences] = useState<Preferences>(defaultPreferences);
+  const [phoneNotifications, setPhoneNotifications] = useState<PhoneNotificationState>(initialPhoneNotificationState);
   const [activeTheme, setActiveTheme] = useState<ThemePreference>(defaultPreferences.theme);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
@@ -394,6 +404,37 @@ export default function AlmadinaApplication() {
   const currentUserRole = user?.role;
 
   useEffect(() => {
+    if (!userId) {
+      const resetTimer = window.setTimeout(() => setPhoneNotifications(initialPhoneNotificationState), 0);
+      return () => window.clearTimeout(resetTimer);
+    }
+
+    let active = true;
+    void inspectPhoneNotifications(true).then((state) => {
+      if (active) setPhoneNotifications(state);
+    });
+    return () => { active = false; };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const navigationTimer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const notificationOrderId = params.get("notificationOrder")?.trim();
+      if (notificationOrderId) {
+        setSelectedOrderId(notificationOrderId);
+        setViewState("order-detail");
+      } else if (params.get("openNotifications") === "1") {
+        setViewState("notifications");
+      } else {
+        return;
+      }
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+    }, 0);
+    return () => window.clearTimeout(navigationTimer);
+  }, [userId]);
+
+  useEffect(() => {
     notificationSoundEnabled.current = Boolean(userId && preferences.notifications && preferences.sounds);
     if (!notificationSoundEnabled.current) pendingNotificationChime.current = false;
   }, [userId, preferences.notifications, preferences.sounds]);
@@ -453,9 +494,31 @@ export default function AlmadinaApplication() {
       pendingNotificationChime.current = false;
       void playNotificationChime(context).then((played) => {
         if (!played) pendingNotificationChime.current = true;
+        else navigator.vibrate?.([120, 70, 120]);
       });
     }
   }, [database.notices, userId, currentUserRole, preferences.notifications, preferences.sounds]);
+
+  useEffect(() => {
+    if (!userId || !("serviceWorker" in navigator)) return;
+    const receiveForegroundPush = (event: MessageEvent) => {
+      const payload = event.data as { type?: unknown; noticeId?: unknown } | null;
+      if (!payload || payload.type !== "almadina-push-received" || typeof payload.noticeId !== "string") return;
+      knownNoticeIds.current.add(payload.noticeId);
+      if (document.visibilityState !== "visible" || !preferences.notifications || !preferences.sounds) return;
+      const context = notificationAudioContext.current;
+      if (!context) {
+        pendingNotificationChime.current = true;
+        return;
+      }
+      void playNotificationChime(context).then((played) => {
+        if (!played) pendingNotificationChime.current = true;
+        else navigator.vibrate?.([120, 70, 120]);
+      });
+    };
+    navigator.serviceWorker.addEventListener("message", receiveForegroundPush);
+    return () => navigator.serviceWorker.removeEventListener("message", receiveForegroundPush);
+  }, [userId, preferences.notifications, preferences.sounds]);
 
   useEffect(() => {
     if (!userId) return;
@@ -1154,6 +1217,91 @@ export default function AlmadinaApplication() {
     else setAnonymousPreferences((current) => ({ ...current, ...values }));
   }
 
+  function getNotificationAudioContext(): AudioContext | null {
+    try {
+      const AudioContextConstructor = window.AudioContext ?? (window as WebkitAudioWindow).webkitAudioContext;
+      if (!AudioContextConstructor) return null;
+      const context = notificationAudioContext.current?.state === "closed"
+        ? new AudioContextConstructor()
+        : notificationAudioContext.current ?? new AudioContextConstructor();
+      notificationAudioContext.current = context;
+      return context;
+    } catch {
+      return null;
+    }
+  }
+
+  async function playLocalNotificationFeedback(): Promise<boolean> {
+    const context = getNotificationAudioContext();
+    if (!context || !await prepareNotificationAudio(context)) return false;
+    const played = await playNotificationChime(context);
+    if (played) navigator.vibrate?.([120, 70, 120]);
+    return played;
+  }
+
+  async function setNotificationSounds(enabled: boolean): Promise<boolean> {
+    if (!enabled) {
+      updatePreferences({ sounds: false });
+      showToast("تم إيقاف صوت الإشعارات داخل التطبيق.", "info");
+      return true;
+    }
+
+    if (!await playLocalNotificationFeedback()) {
+      showToast("تعذّر تشغيل الصوت. تأكد من إيقاف الوضع الصامت وارفع مستوى صوت الهاتف، ثم حاول مجددًا.", "error");
+      return false;
+    }
+    updatePreferences({ sounds: true });
+    showToast("تم تفعيل صوت الإشعارات داخل التطبيق.");
+    return true;
+  }
+
+  async function enablePhoneNotifications(): Promise<boolean> {
+    try {
+      const state = await enableSystemNotifications();
+      setPhoneNotifications(state);
+      updatePreferences({ notifications: true });
+      showToast("تم تفعيل إشعارات الهاتف لهذا الحساب والجهاز.");
+      return true;
+    } catch (error) {
+      showToast(error instanceof PhoneNotificationError ? error.message : "تعذّر تفعيل إشعارات الهاتف.", "error");
+      return false;
+    }
+  }
+
+  async function disablePhoneNotifications(): Promise<boolean> {
+    try {
+      const state = await disableSystemNotifications();
+      setPhoneNotifications(state);
+      showToast("تم إيقاف إشعارات الهاتف على هذا الجهاز.", "info");
+      return true;
+    } catch (error) {
+      showToast(error instanceof PhoneNotificationError ? error.message : "تعذّر إيقاف إشعارات الهاتف.", "error");
+      return false;
+    }
+  }
+
+  async function testPhoneNotifications(): Promise<boolean> {
+    const localSoundPlayed = await playLocalNotificationFeedback();
+    if (!phoneNotifications.subscribed) {
+      showToast(
+        localSoundPlayed
+          ? "تم تشغيل صوت الاختبار داخل التطبيق. فعّل إشعارات الهاتف لاختبارها عند إغلاق التطبيق."
+          : "تعذّر تشغيل الصوت. أوقف الوضع الصامت وارفع مستوى الصوت ثم حاول مجددًا.",
+        localSoundPlayed ? "info" : "error",
+      );
+      return localSoundPlayed;
+    }
+
+    try {
+      await sendPhoneNotificationTest();
+      showToast("تم إرسال إشعار اختبار إلى هذا الهاتف.");
+      return true;
+    } catch (error) {
+      showToast(error instanceof PhoneNotificationError ? error.message : "تعذّر إرسال إشعار الاختبار.", "error");
+      return false;
+    }
+  }
+
   function notify(values: Omit<Notice, "id" | "read" | "createdAt">) {
     const notice: Notice = { ...values, id: uid("notice"), read: false, createdAt: new Date().toISOString() };
     knownNoticeIds.current.add(notice.id);
@@ -1176,7 +1324,7 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

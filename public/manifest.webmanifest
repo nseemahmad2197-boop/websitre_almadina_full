@@ -1,0 +1,21 @@
+{
+  "name": "المدينة إكسبرس",
+  "short_name": "المدينة إكسبرس",
+  "description": "إدارة الطرود والتحصيلات ومتابعة التوصيل داخل فلسطين.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f7f5",
+  "theme_color": "#087c45",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/almadina-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

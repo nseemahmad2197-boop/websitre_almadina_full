@@ -38,6 +38,7 @@ function passwordResetDeliveryConfig(env: Env | undefined, ctx: ExecutionContext
     secondaryAdminPassword: process.env.ALMADINA_SECOND_ADMIN_PASSWORD,
     secondaryAdminPhone: process.env.ALMADINA_SECOND_ADMIN_PHONE,
     secondaryAdminName: process.env.ALMADINA_SECOND_ADMIN_NAME,
+    webPushEnabled: true,
     reverseGeocoder: env?.REVERSE_GEOCODER,
     sender: env?.PASSWORD_RESET_SENDER,
     defer: (promise) => ctx.waitUntil(promise),

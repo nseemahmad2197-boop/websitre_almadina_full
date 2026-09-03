@@ -287,8 +287,65 @@ export function DeleteAccountPage() {
 }
 
 export function NotificationSettings() {
-  const { preferences, updatePreferences, setView, showToast } = useApp();
-  return <div className="page-content animate-page"><PageHeader title="إعدادات الإشعارات" subtitle="تحكّم بالتنبيهات التي تصلك" onBack={() => setView("settings")} /><div className="settings-group"><SettingsRow icon="bell" title="تفعيل الإشعارات" subtitle="تلقي التحديثات المهمة" action={<Toggle checked={preferences.notifications} onChange={(value) => { updatePreferences({ notifications: value }); showToast(value ? "تم تفعيل الإشعارات." : "تم إيقاف الإشعارات."); }} label="الإشعارات" />} /><SettingsRow icon="truck" title="تحديثات الطرود" subtitle="تنبيه عند تغير حالة أي طرد" action={<Toggle checked={preferences.orderUpdates} onChange={(value) => updatePreferences({ orderUpdates: value })} label="تحديثات الطرود" />} /><SettingsRow icon="bell" title="الأصوات" subtitle="تشغيل صوت عند وصول إشعار" action={<Toggle checked={preferences.sounds} onChange={(value) => updatePreferences({ sounds: value })} label="أصوات الإشعارات" />} /></div></div>;
+  const {
+    preferences,
+    phoneNotifications,
+    updatePreferences,
+    setNotificationSounds,
+    enablePhoneNotifications,
+    disablePhoneNotifications,
+    testPhoneNotifications,
+    setView,
+    showToast,
+  } = useApp();
+  const [phoneBusy, setPhoneBusy] = useState(false);
+
+  const phoneSubtitle = !phoneNotifications.ready
+    ? "جارٍ التحقق من دعم هذا الجهاز..."
+    : phoneNotifications.requiresHomeScreen
+      ? "على iPhone: أضف الموقع إلى الشاشة الرئيسية ثم افتحه من الأيقونة"
+      : !phoneNotifications.supported
+        ? "هذا المتصفح لا يدعم إشعارات الهاتف"
+        : phoneNotifications.permission === "denied"
+          ? "الإذن مرفوض؛ فعّله من إعدادات الهاتف أو المتصفح"
+          : phoneNotifications.subscribed
+            ? "مفعّلة على هذا الجهاز وتصل عند إغلاق التطبيق"
+            : !phoneNotifications.configured
+              ? "اضغط تفعيل لإعادة التحقق من خدمة الإشعارات"
+              : "فعّلها لاستلام تنبيه الهاتف عند قفل الشاشة";
+
+  async function togglePhoneNotifications() {
+    if (phoneBusy) return;
+    setPhoneBusy(true);
+    try {
+      if (phoneNotifications.subscribed) await disablePhoneNotifications();
+      else await enablePhoneNotifications();
+    } finally {
+      setPhoneBusy(false);
+    }
+  }
+
+  async function runNotificationTest() {
+    if (phoneBusy) return;
+    setPhoneBusy(true);
+    try {
+      await testPhoneNotifications();
+    } finally {
+      setPhoneBusy(false);
+    }
+  }
+
+  return <div className="page-content animate-page">
+    <PageHeader title="إعدادات الإشعارات" subtitle="تحكّم بالتنبيهات التي تصلك" onBack={() => setView("settings")} />
+    <div className="settings-group">
+      <SettingsRow icon="bell" title="تفعيل الإشعارات" subtitle="تلقي التحديثات المهمة" action={<Toggle checked={preferences.notifications} onChange={(value) => { updatePreferences({ notifications: value }); showToast(value ? "تم تفعيل الإشعارات." : "تم إيقاف الإشعارات."); }} label="الإشعارات" />} />
+      <SettingsRow icon="truck" title="تحديثات الطرود" subtitle="تنبيه عند تغير حالة أي طرد" action={<Toggle checked={preferences.orderUpdates} onChange={(value) => updatePreferences({ orderUpdates: value })} label="تحديثات الطرود" />} />
+      <SettingsRow icon="bell" title="الأصوات داخل التطبيق" subtitle="تشغيل نغمة واهتزاز عندما يكون التطبيق مفتوحًا" action={<Toggle checked={preferences.sounds} onChange={(value) => { void setNotificationSounds(value); }} label="أصوات الإشعارات" />} />
+      <SettingsRow icon="phone" title="إشعارات الهاتف" subtitle={phoneSubtitle} action={<Button type="button" variant={phoneNotifications.subscribed ? "outline" : "primary"} className="notification-setting-button" loading={phoneBusy} disabled={!phoneNotifications.ready || (!phoneNotifications.supported && !phoneNotifications.requiresHomeScreen)} onClick={() => { void togglePhoneNotifications(); }}>{phoneNotifications.subscribed ? "إيقاف" : "تفعيل"}</Button>} />
+      <SettingsRow icon="check" title="اختبار الصوت والإشعار" subtitle="شغّل نغمة فورية وأرسل إشعار اختبار إلى هذا الهاتف" action={<Button type="button" variant="secondary" className="notification-setting-button" loading={phoneBusy} onClick={() => { void runNotificationTest(); }}>اختبار</Button>} />
+    </div>
+    <SectionCard className="phone-notification-help"><p><strong>مهم:</strong> صوت إشعار النظام يتبع مستوى الصوت والوضع الصامت وعدم الإزعاج في الهاتف. على iPhone يجب فتح الموقع من أيقونته بعد إضافته إلى الشاشة الرئيسية.</p></SectionCard>
+  </div>;
 }
 
 export function PreferencesPage() {

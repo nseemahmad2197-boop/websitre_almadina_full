@@ -198,7 +198,7 @@ test("uses a five-step reference-style registration with map, legal disclosures,
   assert.match(legal, /export const privacyPolicySections/);
   assert.match(legal, /export const applicationPermissionDisclosures/);
   assert.match(legal, /export const LEGAL_FINAL_NOTICE = "يجب أن يكون الطرد مطابقًا للوصف المكتوب\."/);
-  for (const permission of ["الكاميرا — اختياري", "الموقع — اختياري", "الرسائل القصيرة — للمندوب فقط", "حماية الجهاز — اختياري", "التخزين والصوت داخل التطبيق"]) assert.match(legal, new RegExp(permission));
+  for (const permission of ["الكاميرا — اختياري", "الموقع — اختياري", "الرسائل القصيرة — للمندوب فقط", "حماية الجهاز — اختياري", "إشعارات الهاتف والتخزين — اختياري"]) assert.match(legal, new RegExp(permission));
   assert.match(legal, /يمكنك رفضها وإدخال الكود أو رقم التتبع يدويًا/);
   assert.match(legal, /يمكنك رفضه وتحريك الدبوس/);
   assert.match(legal, /لا يقرأ الموقع الرسائل الواردة ولا يرسل أي رسالة تلقائيًا/);
@@ -1624,4 +1624,53 @@ test("shows linked device names and safely revokes only another session", async 
   assert.match(styles, /\.linked-devices-page\s*\{/);
   assert.match(styles, /\.linked-device-card\s*\{/);
   assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.linked-device-card/);
+});
+
+test("supports opt-in phone push notifications with sound guidance for every signed-in role", async () => {
+  const [application, context, phoneClient, server, renderWorker, settings, serviceWorker, manifest, layout, legal, readme] = await Promise.all([
+    readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/phone-notifications.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/render.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../public/almadina-sw.js", import.meta.url), "utf8"),
+    readFile(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/legal.ts", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(context, /phoneNotifications: PhoneNotificationState/);
+  assert.match(context, /enablePhoneNotifications:\s*\(\) => Promise<boolean>/);
+  assert.match(application, /inspectPhoneNotifications\(true\)/);
+  assert.match(application, /navigator\.serviceWorker\.addEventListener\("message", receiveForegroundPush\)/);
+  assert.match(application, /navigator\.vibrate\?\.\(\[120, 70, 120\]\)/);
+  assert.match(application, /notificationOrder/);
+  assert.match(application, /setViewState\("order-detail"\)/);
+  assert.match(phoneClient, /navigator\.serviceWorker\.register\("\/almadina-sw\.js"/);
+  assert.match(phoneClient, /Notification\.requestPermission\(\)/);
+  assert.match(phoneClient, /worker\.pushManager\.subscribe/);
+  assert.match(phoneClient, /api\("push\/subscribe"/);
+  assert.match(phoneClient, /api\("push\/unsubscribe"/);
+  assert.match(phoneClient, /api\("push\/test"/);
+  assert.match(server, /CREATE TABLE IF NOT EXISTS almadina_web_push_keys/);
+  assert.match(server, /CREATE TABLE IF NOT EXISTS almadina_web_push_subscriptions/);
+  assert.match(server, /url\.pathname === "\/api\/almadina\/push\/config"/);
+  assert.match(server, /scheduleWebPushNotices\(database, next, newNotices/);
+  assert.match(renderWorker, /webPushEnabled: true/);
+  assert.match(settings, /title="إشعارات الهاتف"/);
+  assert.match(settings, /title="اختبار الصوت والإشعار"/);
+  assert.match(settings, /على iPhone: أضف الموقع إلى الشاشة الرئيسية/);
+  assert.match(serviceWorker, /self\.addEventListener\("push"/);
+  assert.match(serviceWorker, /showNotification/);
+  assert.match(serviceWorker, /vibrate: \[180, 90, 180\]/);
+  assert.match(serviceWorker, /self\.addEventListener\("notificationclick"/);
+  assert.match(serviceWorker, /openWindow\(destination\)/);
+  assert.match(manifest, /"display": "standalone"/);
+  assert.match(layout, /manifest: "\/manifest\.webmanifest"/);
+  assert.match(layout, /appleWebApp:/);
+  assert.match(legal, /لا يطلب إذن إشعارات الهاتف إلا عندما تضغط زر التفعيل/);
+  assert.doesNotMatch(legal, /لا يطلب إذن إشعارات النظام حاليًا/);
+  assert.match(readme, /لا تحتاج هذه الميزة إلى متغيرات Render جديدة/);
 });

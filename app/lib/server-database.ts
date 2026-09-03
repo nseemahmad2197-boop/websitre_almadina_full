@@ -11,6 +11,7 @@ import {
 import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, RETURN_PRICING_VERSION, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
+import { generateVapidKeyPair, sendWebPushNotification, WebPushDeliveryError, type VapidKeyPair, type WebPushMessage, type WebPushSubscriptionRecord } from "./web-push";
 
 const SESSION_COOKIE = "almadina_session";
 const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
@@ -57,12 +58,16 @@ const ACCOUNT_DELETE_RATE_LIMIT_WINDOW = 10 * 60;
 const ACCOUNT_DELETE_ATTEMPT_LIMIT = 6;
 const COURIER_SCAN_RATE_LIMIT_WINDOW = 10 * 60;
 const COURIER_SCAN_ATTEMPT_LIMIT = 120;
+const WEB_PUSH_TEST_RATE_LIMIT_WINDOW = 10 * 60;
+const WEB_PUSH_TEST_RATE_LIMIT = 6;
 const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
 const BOOTSTRAP_ADMIN_ID = "admin-almadina";
 const SECONDARY_ADMIN_ID = "admin-owner";
 const LEGACY_DEFAULT_ADMIN_PASSWORD = "Admin@123";
 const BOOTSTRAP_LOCKED_PASSWORD = "disabled:bootstrap-password-required";
 const DEVICE_ACTIVITY_UPDATE_INTERVAL = 5 * 60 * 1000;
+const MAX_PUSH_ENDPOINT_LENGTH = 2_048;
+const MAX_PUSH_KEY_LENGTH = 256;
 const initializedDatabases = new WeakMap<D1Database, Promise<void>>();
 
 type StateRow = { payload: string; revision: number };
@@ -141,6 +146,16 @@ type RegistrationLocationRow = {
   longitude: number;
   created_at: string;
 };
+type WebPushKeyRow = {
+  public_key: string;
+  private_key: string;
+};
+type WebPushSubscriptionRow = {
+  endpoint_hash: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+};
 
 type BootstrapAdministratorConfig = {
   bootstrapAdminEmail?: string;
@@ -153,7 +168,9 @@ type BootstrapAdministratorConfig = {
   secondaryAdminName?: string;
 };
 
-export type AlmadinaApiConfig = PasswordResetDeliveryConfig & ReverseGeocodingConfig & BootstrapAdministratorConfig;
+export type AlmadinaApiConfig = PasswordResetDeliveryConfig & ReverseGeocodingConfig & BootstrapAdministratorConfig & {
+  webPushEnabled?: boolean;
+};
 
 class ApiRequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -570,6 +587,24 @@ async function initializeDatabase(database: D1Database, config: AlmadinaApiConfi
       reset_at INTEGER NOT NULL
     )`),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_rate_limits_reset_at_idx ON almadina_rate_limits (reset_at)"),
+    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_web_push_keys (
+      id TEXT PRIMARY KEY NOT NULL,
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`),
+    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_web_push_subscriptions (
+      endpoint_hash TEXT PRIMARY KEY NOT NULL,
+      endpoint TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      session_token_hash TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_web_push_subscriptions_user_id_idx ON almadina_web_push_subscriptions (user_id)"),
+    database.prepare("CREATE INDEX IF NOT EXISTS almadina_web_push_subscriptions_session_idx ON almadina_web_push_subscriptions (session_token_hash)"),
     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_password_reset_requests (
       request_hash TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL,
@@ -659,6 +694,221 @@ async function saveState(database: D1Database, state: Database, revision: number
   const result = await database.prepare("UPDATE almadina_state SET payload = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?")
     .bind(JSON.stringify(normalized), new Date().toISOString(), "main", revision).run();
   return (result.meta?.changes ?? 0) === 1;
+}
+
+function normalizeWebPushSubscription(value: unknown): WebPushSubscriptionRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const endpoint = typeof record.endpoint === "string" ? record.endpoint.trim() : "";
+  const keys = record.keys && typeof record.keys === "object" && !Array.isArray(record.keys)
+    ? record.keys as Record<string, unknown>
+    : null;
+  const p256dh = typeof keys?.p256dh === "string" ? keys.p256dh.trim() : "";
+  const auth = typeof keys?.auth === "string" ? keys.auth.trim() : "";
+  if (!endpoint || endpoint.length > MAX_PUSH_ENDPOINT_LENGTH || !p256dh || !auth) return null;
+  if (p256dh.length > MAX_PUSH_KEY_LENGTH || auth.length > MAX_PUSH_KEY_LENGTH) return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(p256dh) || !/^[A-Za-z0-9_-]+$/.test(auth)) return null;
+
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol !== "https:" || url.username || url.password || url.hash) return null;
+  } catch {
+    return null;
+  }
+  return { endpoint, p256dh, auth };
+}
+
+async function getOrCreateVapidKeys(database: D1Database): Promise<VapidKeyPair> {
+  const existing = await database.prepare("SELECT public_key, private_key FROM almadina_web_push_keys WHERE id = ?")
+    .bind("main").first<WebPushKeyRow>();
+  if (existing) return { publicKey: existing.public_key, privateKey: existing.private_key };
+
+  const generated = await generateVapidKeyPair();
+  await database.prepare(`INSERT INTO almadina_web_push_keys (id, public_key, private_key, created_at)
+    VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`)
+    .bind("main", generated.publicKey, generated.privateKey, new Date().toISOString()).run();
+  const stored = await database.prepare("SELECT public_key, private_key FROM almadina_web_push_keys WHERE id = ?")
+    .bind("main").first<WebPushKeyRow>();
+  if (!stored) throw new Error("Could not initialize Web Push keys.");
+  return { publicKey: stored.public_key, privateKey: stored.private_key };
+}
+
+function webPushMessageForNotice(notice: Notice): WebPushMessage {
+  const query = notice.orderId
+    ? `notificationOrder=${encodeURIComponent(notice.orderId)}`
+    : "openNotifications=1";
+  return {
+    noticeId: notice.id,
+    title: notice.title,
+    message: notice.message,
+    url: `/?${query}`,
+    createdAt: notice.createdAt,
+  };
+}
+
+async function deliverWebPushNotices(
+  database: D1Database,
+  state: Database,
+  notices: Notice[],
+  applicationOrigin: string,
+): Promise<void> {
+  const deliverable = notices.filter((notice) => (
+    notice.userId !== "all"
+    && state.users.some((account) => account.id === notice.userId)
+    && state.preferences[notice.userId]?.notifications !== false
+  ));
+  if (!deliverable.length) return;
+
+  const keys = await getOrCreateVapidKeys(database);
+  const noticesByUser = new Map<string, Notice[]>();
+  for (const notice of deliverable) {
+    const userNotices = noticesByUser.get(notice.userId) ?? [];
+    userNotices.push(notice);
+    noticesByUser.set(notice.userId, userNotices);
+  }
+
+  const expiredEndpointHashes = new Set<string>();
+  const now = Math.floor(Date.now() / 1000);
+  for (const [userId, userNotices] of noticesByUser) {
+    const subscriptions = await database.prepare(`SELECT subscriptions.endpoint_hash, subscriptions.endpoint, subscriptions.p256dh, subscriptions.auth
+      FROM almadina_web_push_subscriptions AS subscriptions
+      INNER JOIN almadina_sessions AS sessions ON sessions.token_hash = subscriptions.session_token_hash
+      WHERE subscriptions.user_id = ? AND sessions.user_id = subscriptions.user_id AND sessions.expires_at > ?`)
+      .bind(userId, now).all<WebPushSubscriptionRow>();
+
+    for (const subscription of subscriptions.results ?? []) {
+      for (const notice of userNotices) {
+        try {
+          await sendWebPushNotification(subscription, webPushMessageForNotice(notice), keys, applicationOrigin);
+        } catch (error) {
+          if (error instanceof WebPushDeliveryError && (error.status === 404 || error.status === 410)) {
+            expiredEndpointHashes.add(subscription.endpoint_hash);
+          } else {
+            console.warn("Could not deliver an Almadina Web Push notification.", error);
+          }
+        }
+      }
+    }
+  }
+
+  if (expiredEndpointHashes.size) {
+    await database.batch([...expiredEndpointHashes].map((endpointHash) => (
+      database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE endpoint_hash = ?").bind(endpointHash)
+    )));
+  }
+}
+
+function scheduleWebPushNotices(
+  database: D1Database,
+  state: Database,
+  notices: Notice[],
+  applicationOrigin: string,
+  config: AlmadinaApiConfig,
+): void {
+  if (!config.webPushEnabled || !notices.length) return;
+  const delivery = deliverWebPushNotices(database, state, notices, applicationOrigin)
+    .catch((error) => console.warn("Could not prepare Almadina Web Push notifications.", error));
+  if (config.defer) config.defer(delivery);
+  else void delivery;
+}
+
+async function webPushConfiguration(database: D1Database, config: AlmadinaApiConfig): Promise<Response> {
+  if (!config.webPushEnabled) return json({ configured: false, publicKey: "" });
+  const keys = await getOrCreateVapidKeys(database);
+  return json({ configured: true, publicKey: keys.publicKey });
+}
+
+async function subscribeToWebPush(
+  database: D1Database,
+  request: Request,
+  session: AuthenticatedSession,
+  config: AlmadinaApiConfig,
+): Promise<Response> {
+  if (!config.webPushEnabled) return json({ error: "إشعارات الهاتف غير متاحة على الخادم حاليًا." }, 503);
+  const subscription = normalizeWebPushSubscription(await request.json());
+  if (!subscription) return json({ error: "بيانات ربط إشعارات الهاتف غير صالحة." }, 400);
+  const keys = await getOrCreateVapidKeys(database);
+  const endpointHash = await sha256(subscription.endpoint);
+  const now = new Date().toISOString();
+
+  await database.batch([
+    database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE session_token_hash = ? AND endpoint_hash <> ?")
+      .bind(session.tokenHash, endpointHash),
+    database.prepare(`INSERT INTO almadina_web_push_subscriptions
+      (endpoint_hash, endpoint, user_id, session_token_hash, p256dh, auth, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (endpoint_hash) DO UPDATE SET
+        endpoint = excluded.endpoint,
+        user_id = excluded.user_id,
+        session_token_hash = excluded.session_token_hash,
+        p256dh = excluded.p256dh,
+        auth = excluded.auth,
+        updated_at = excluded.updated_at`)
+      .bind(endpointHash, subscription.endpoint, session.account.id, session.tokenHash, subscription.p256dh, subscription.auth, now, now),
+  ]);
+  return json({ configured: true, subscribed: true, publicKey: keys.publicKey });
+}
+
+async function unsubscribeFromWebPush(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  let endpointHash = "";
+  try {
+    const payload = await request.json() as { endpoint?: unknown };
+    if (typeof payload.endpoint === "string" && payload.endpoint.trim()) endpointHash = await sha256(payload.endpoint.trim());
+  } catch {
+    // An empty body removes every subscription associated with this session.
+  }
+  const statement = endpointHash
+    ? database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE session_token_hash = ? AND user_id = ? AND endpoint_hash = ?")
+      .bind(session.tokenHash, session.account.id, endpointHash)
+    : database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE session_token_hash = ? AND user_id = ?")
+      .bind(session.tokenHash, session.account.id);
+  await statement.run();
+  return json({ subscribed: false });
+}
+
+async function testWebPush(
+  database: D1Database,
+  request: Request,
+  session: AuthenticatedSession,
+  config: AlmadinaApiConfig,
+): Promise<Response> {
+  if (!config.webPushEnabled) return json({ error: "إشعارات الهاتف غير متاحة على الخادم حاليًا." }, 503);
+  await enforceEndpointRateLimit(
+    database,
+    "web-push-test",
+    session.account.id,
+    WEB_PUSH_TEST_RATE_LIMIT,
+    WEB_PUSH_TEST_RATE_LIMIT_WINDOW,
+    "تم إرسال عدة اختبارات. انتظر عشر دقائق ثم حاول مجددًا.",
+  );
+  const subscriptions = await database.prepare(`SELECT endpoint_hash, endpoint, p256dh, auth
+    FROM almadina_web_push_subscriptions WHERE user_id = ? AND session_token_hash = ?`)
+    .bind(session.account.id, session.tokenHash).all<WebPushSubscriptionRow>();
+  if (!subscriptions.results?.length) return json({ error: "فعّل إشعارات الهاتف على هذا الجهاز أولًا." }, 409);
+
+  const keys = await getOrCreateVapidKeys(database);
+  const message: WebPushMessage = {
+    noticeId: uid("push-test"),
+    title: "اختبار إشعارات المدينة إكسبرس",
+    message: "تم تفعيل إشعارات الهاتف والصوت بنجاح على هذا الجهاز.",
+    url: "/?openNotifications=1",
+    createdAt: new Date().toISOString(),
+  };
+  let delivered = 0;
+  for (const subscription of subscriptions.results) {
+    try {
+      await sendWebPushNotification(subscription, message, keys, new URL(request.url).origin);
+      delivered += 1;
+    } catch (error) {
+      if (error instanceof WebPushDeliveryError && (error.status === 404 || error.status === 410)) {
+        await database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE endpoint_hash = ?")
+          .bind(subscription.endpoint_hash).run();
+      }
+    }
+  }
+  return delivered
+    ? json({ delivered })
+    : json({ error: "تعذّر إرسال إشعار الاختبار إلى هذا الهاتف. أعد تفعيل الإشعارات." }, 502);
 }
 
 async function savePasswordChange(
@@ -2210,7 +2460,7 @@ function mergeCourierDatabase(current: Database, submitted: Database, account: U
   });
 }
 
-async function broadcastNotice(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+async function broadcastNotice(database: D1Database, request: Request, session: AuthenticatedSession, config: AlmadinaApiConfig): Promise<Response> {
   if (session.account.role !== "admin") return json({ error: "هذه الميزة متاحة للمسؤول فقط." }, 403);
 
   const submitted = await request.json() as unknown;
@@ -2279,6 +2529,7 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
 
     const next: Database = { ...state.database, notices: [...missingNotices, ...state.database.notices] };
     if (await saveState(database, next, state.revision)) {
+      scheduleWebPushNotices(database, next, missingNotices, new URL(request.url).origin, config);
       return json({ ...snapshot({ database: next, revision: state.revision + 1 }, administrator), recipientCount: recipients.length });
     }
   }
@@ -2416,6 +2667,7 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
     const registrationEmailKey = await sha256(`registration:request-email:${normalizedEmail}`);
 
     await database.batch([
+      database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_webauthn_credentials WHERE user_id = ?").bind(account.id),
@@ -3059,7 +3311,7 @@ async function publicTracking(database: D1Database, request: Request): Promise<R
   return json({ order: { id: `public-${order.trackingNumber}`, trackingNumber: order.trackingNumber, status, createdAt, updatedAt, trackingEvents } });
 }
 
-async function shipScannedOrder(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+async function shipScannedOrder(database: D1Database, request: Request, session: AuthenticatedSession, config: AlmadinaApiConfig): Promise<Response> {
   if (session.account.role !== "courier") {
     return json({ error: "هذه العملية متاحة لحساب المندوب الموظف فقط." }, 403);
   }
@@ -3130,13 +3382,14 @@ async function shipScannedOrder(database: D1Database, request: Request, session:
     };
 
     if (!await saveState(database, next, state.revision)) continue;
+    scheduleWebPushNotices(database, next, scanNotices, new URL(request.url).origin, config);
     return json(snapshot({ database: next, revision: state.revision + 1 }, employee));
   }
 
   return json({ error: "تم تحديث الطرد من جهاز آخر. امسح الكود مجددًا." }, 409);
 }
 
-async function prepareCollection(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+async function prepareCollection(database: D1Database, request: Request, session: AuthenticatedSession, config: AlmadinaApiConfig): Promise<Response> {
   if (session.account.role !== "admin" && session.account.role !== "courier") {
     return json({ error: "هذه العملية متاحة للمسؤول أو الموظف فقط." }, 403);
   }
@@ -3181,13 +3434,14 @@ async function prepareCollection(database: D1Database, request: Request, session
     };
 
     if (!await saveState(database, next, state.revision)) continue;
+    scheduleWebPushNotices(database, next, [notice], new URL(request.url).origin, config);
     return json({ ...snapshot({ database: next, revision: state.revision + 1 }, employee), prepared: true });
   }
 
   return json({ error: "تم تحديث الفاتورة من جهاز آخر. أعد محاولة تجهيزها." }, 409);
 }
 
-async function verifyCollection(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+async function verifyCollection(database: D1Database, request: Request, session: AuthenticatedSession, config: AlmadinaApiConfig): Promise<Response> {
   if (session.account.role !== "admin" && session.account.role !== "courier") {
     return json({ error: "هذه العملية متاحة للمسؤول أو الموظف فقط." }, 403);
   }
@@ -3225,6 +3479,15 @@ async function verifyCollection(database: D1Database, request: Request, session:
     const amounts = calculateCollectionAmounts(invoiceOrders, merchant.membership);
 
     const now = new Date().toISOString();
+    const notice: Notice = {
+      id: uid("notice"),
+      userId: invoice.merchantId,
+      title: "تم تسليم التحصيل",
+      message: `تحقق الموظف من كود الفاتورة ${invoice.invoiceNumber} وأصبحت حالة الفاتورة «تم التسليم».`,
+      icon: "check",
+      read: false,
+      createdAt: now,
+    };
     const next: Database = {
       ...state.database,
       collections: state.database.collections.map((entry) => entry.id === invoice.id ? {
@@ -3237,18 +3500,11 @@ async function verifyCollection(database: D1Database, request: Request, session:
         verifiedByName: employee.name,
         updatedAt: now,
       } : entry),
-      notices: [{
-        id: uid("notice"),
-        userId: invoice.merchantId,
-        title: "تم تسليم التحصيل",
-        message: `تحقق الموظف من كود الفاتورة ${invoice.invoiceNumber} وأصبحت حالة الفاتورة «تم التسليم».`,
-        icon: "check",
-        read: false,
-        createdAt: now,
-      }, ...state.database.notices],
+      notices: [notice, ...state.database.notices],
     };
 
     if (!await saveState(database, next, state.revision)) continue;
+    scheduleWebPushNotices(database, next, [notice], new URL(request.url).origin, config);
     return json(snapshot({ database: next, revision: state.revision + 1 }, employee));
   }
 
@@ -3283,6 +3539,7 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     if (url.pathname === "/api/almadina/logout" && request.method === "POST") {
       if (session) {
         await database.batch([
+          database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE session_token_hash = ?").bind(session.tokenHash),
           database.prepare("DELETE FROM almadina_session_devices WHERE token_hash = ?").bind(session.tokenHash),
           database.prepare("DELETE FROM almadina_sessions WHERE token_hash = ?").bind(session.tokenHash),
         ]);
@@ -3294,6 +3551,22 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     }
 
     if (!session) return json({ error: "يجب تسجيل الدخول أولًا." }, 401, { "Set-Cookie": sessionCookie(request, "", 0) });
+
+    if (url.pathname === "/api/almadina/push/config" && request.method === "GET") {
+      return await webPushConfiguration(database, config);
+    }
+
+    if (url.pathname === "/api/almadina/push/subscribe" && request.method === "POST") {
+      return await subscribeToWebPush(database, request, session, config);
+    }
+
+    if (url.pathname === "/api/almadina/push/unsubscribe" && request.method === "POST") {
+      return await unsubscribeFromWebPush(database, request, session);
+    }
+
+    if (url.pathname === "/api/almadina/push/test" && request.method === "POST") {
+      return await testWebPush(database, request, session, config);
+    }
 
     if (url.pathname === "/api/almadina/security/devices" && request.method === "GET") {
       return await linkedDevicesResponse(database, session);
@@ -3340,7 +3613,7 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     }
 
     if (url.pathname === "/api/almadina/notices/broadcast" && request.method === "POST") {
-      return await broadcastNotice(database, request, session);
+      return await broadcastNotice(database, request, session, config);
     }
 
     if (url.pathname === "/api/almadina/notices/clear" && request.method === "POST") {
@@ -3356,15 +3629,15 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     }
 
     if (url.pathname === "/api/almadina/collections/verify" && request.method === "POST") {
-      return await verifyCollection(database, request, session);
+      return await verifyCollection(database, request, session, config);
     }
 
     if (url.pathname === "/api/almadina/collections/prepare" && request.method === "POST") {
-      return await prepareCollection(database, request, session);
+      return await prepareCollection(database, request, session, config);
     }
 
     if (url.pathname === "/api/almadina/orders/scan" && request.method === "POST") {
-      return await shipScannedOrder(database, request, session);
+      return await shipScannedOrder(database, request, session, config);
     }
 
     if ((url.pathname === "/api/almadina/session" || url.pathname === "/api/almadina/database") && request.method === "GET") {
@@ -3385,6 +3658,8 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
         : session.account.role === "merchant"
           ? mergeMerchantDatabase(session.state.database, payload.database, session.account)
           : mergeCourierDatabase(session.state.database, payload.database, session.account);
+      const existingNoticeIds = new Set(session.state.database.notices.map((notice) => notice.id));
+      const newNotices = next.notices.filter((notice) => !existingNoticeIds.has(notice.id));
 
       if (!await saveState(database, next, session.state.revision)) {
         const latest = await readState(database);
@@ -3394,6 +3669,7 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
 
       const account = next.users.find((entry) => entry.id === session.account.id);
       if (!account) return json({ error: "لم يعد الحساب متاحًا." }, 401);
+      scheduleWebPushNotices(database, next, newNotices, url.origin, config);
       return json(snapshot({ database: next, revision: session.state.revision + 1 }, account));
     }
 

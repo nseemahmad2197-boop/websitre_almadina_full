@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 import type { Database, LinkedDevice, Notice, NoticeAudience, Preferences, User } from "./data";
 import type { AppLockState } from "./app-lock-client";
+import type { PhoneNotificationState } from "./phone-notifications";
 
 export type View =
   | "home"
@@ -47,12 +48,17 @@ export type AppContextValue = {
   user: User | null;
   view: View;
   preferences: Preferences;
+  phoneNotifications: PhoneNotificationState;
   appLock: AppLockState;
   selectedOrderId: string | null;
   setSelectedOrderId: (id: string | null) => void;
   setView: (view: View) => void;
   updateDatabase: (updater: (current: Database) => Database) => void;
   updatePreferences: (values: Partial<Preferences>) => void;
+  setNotificationSounds: (enabled: boolean) => Promise<boolean>;
+  enablePhoneNotifications: () => Promise<boolean>;
+  disablePhoneNotifications: () => Promise<boolean>;
+  testPhoneNotifications: () => Promise<boolean>;
   enableAppLock: (pin: string) => Promise<boolean>;
   disableAppLock: (pin: string) => Promise<boolean>;
   enableBiometricUnlock: (pin: string) => Promise<boolean>;

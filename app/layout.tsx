@@ -9,6 +9,12 @@ export const metadata: Metadata = {
   title,
   description,
   applicationName: "المدينة إكسبرس",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "المدينة إكسبرس",
+  },
   keywords: ["المدينة إكسبرس", "توصيل", "شحن", "فلسطين", "تتبع الطرود"],
   icons: { icon: "/almadina-mark.svg", shortcut: "/almadina-mark.svg" },
   openGraph: { title, description, locale: "ar_PS", type: "website" },

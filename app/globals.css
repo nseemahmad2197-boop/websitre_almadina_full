@@ -836,6 +836,10 @@ html[data-theme="dark"] .collection-status--paid { background: #163328; color: #
 .settings-row > svg:last-child { color: var(--muted); }
 .settings-row--danger { color: var(--danger); }
 .settings-row--danger .settings-row__icon { background: var(--danger-soft); color: var(--danger); }
+.notification-setting-button { min-width: 72px; min-height: 36px; flex: 0 0 auto; padding: 7px 11px; font-size: 10px; }
+.phone-notification-help { padding: 13px; }
+.phone-notification-help p { color: var(--muted); font-size: 10px; line-height: 1.9; }
+.phone-notification-help strong { color: var(--text); }
 .application--security-flow { padding-bottom: 34px; }
 .change-password-page { width: min(calc(100% - clamp(30px, 8vw, 120px)), 680px); min-height: calc(100svh - 104px); grid-template-rows: auto minmax(0, 1fr); }
 .change-password-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow); }
