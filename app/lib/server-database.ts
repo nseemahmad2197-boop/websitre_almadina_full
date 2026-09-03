@@ -8,7 +8,7 @@ import {
   type Base64URLString,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, RETURN_PRICING_VERSION, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
 
@@ -650,12 +650,14 @@ async function ensureDatabase(database: D1Database, config: AlmadinaApiConfig): 
 async function readState(database: D1Database): Promise<StoredState> {
   const row = await database.prepare("SELECT payload, revision FROM almadina_state WHERE id = ?").bind("main").first<StateRow>();
   if (!row) throw new Error("The shared application state was not initialized.");
-  return { database: removeLegacyDemoData(JSON.parse(row.payload) as Database), revision: row.revision };
+  const cleaned = removeLegacyDemoData(JSON.parse(row.payload) as Database);
+  return { database: normalizeCollectionInvoices(cleaned), revision: row.revision };
 }
 
 async function saveState(database: D1Database, state: Database, revision: number): Promise<boolean> {
+  const normalized = normalizeCollectionInvoices(removeLegacyDemoData(state));
   const result = await database.prepare("UPDATE almadina_state SET payload = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?")
-    .bind(JSON.stringify(removeLegacyDemoData(state)), new Date().toISOString(), "main", revision).run();
+    .bind(JSON.stringify(normalized), new Date().toISOString(), "main", revision).run();
   return (result.meta?.changes ?? 0) === 1;
 }
 
@@ -1943,15 +1945,17 @@ function collectionVerificationCode(): string {
 }
 
 function calculateCollectionAmounts(orders: Order[], membership: User["membership"]) {
+  const returnPricingMembership = normalizeMembership(membership);
   const delivered = orders.filter((order) => order.status === "delivered");
   const returned = orders.filter((order) => order.status === "returned");
   const grossAmount = delivered.reduce((sum, order) => sum + order.amount, 0);
   const deliveryFees = delivered.reduce((sum, order) => sum + order.deliveryFee, 0);
-  const returnFees = returned.reduce((sum, order) => {
+  const returnFeeDetails = returned.map((order) => {
     const region = resolveDeliveryRegion(order.governorate ?? "", order.city);
     if (!region) throw new ApiRequestError(`تعذّر احتساب رسوم راجع الطرد ${order.trackingNumber} بسبب عنوانه.`, 400);
-    return sum + getReturnFee(region, membership);
-  }, 0);
+    return { orderId: order.id, fee: getReturnFee(region, returnPricingMembership) };
+  });
+  const returnFees = returnFeeDetails.reduce((sum, item) => sum + item.fee, 0);
 
   return {
     grossAmount,
@@ -1960,7 +1964,59 @@ function calculateCollectionAmounts(orders: Order[], membership: User["membershi
     netAmount: grossAmount - deliveryFees - returnFees,
     deliveredCount: delivered.length,
     returnedCount: returned.length,
+    returnFeeDetails,
+    returnPricingMembership,
+    returnPricingVersion: RETURN_PRICING_VERSION,
   };
+}
+
+function collectionAmountsMatch(invoice: CollectionInvoice, amounts: ReturnType<typeof calculateCollectionAmounts>): boolean {
+  if (invoice.grossAmount !== amounts.grossAmount
+    || invoice.deliveryFees !== amounts.deliveryFees
+    || invoice.returnFees !== amounts.returnFees
+    || invoice.netAmount !== amounts.netAmount
+    || invoice.deliveredCount !== amounts.deliveredCount
+    || invoice.returnedCount !== amounts.returnedCount
+    || invoice.returnPricingVersion !== RETURN_PRICING_VERSION
+    || invoice.returnPricingMembership !== amounts.returnPricingMembership
+    || !Array.isArray(invoice.returnFeeDetails)
+    || invoice.returnFeeDetails.length !== amounts.returnFeeDetails.length) return false;
+
+  const savedFees = new Map(invoice.returnFeeDetails.map((item) => [item.orderId, item.fee]));
+  return amounts.returnFeeDetails.every((item) => savedFees.get(item.orderId) === item.fee);
+}
+
+function normalizeCollectionInvoices(database: Database): Database {
+  if (!database.collections.length) return database;
+
+  const merchants = new Map(database.users.filter((account) => account.role === "merchant").map((account) => [account.id, account]));
+  const orders = new Map(database.orders.filter((order) => !order.deleted).map((order) => [order.id, order]));
+  const collections = database.collections.map((invoice) => {
+    const merchant = merchants.get(invoice.merchantId);
+    if (!merchant) return invoice;
+
+    const invoiceOrders = invoice.orderIds
+      .map((orderId) => orders.get(orderId))
+      .filter((order): order is Order => Boolean(order && order.merchantId === merchant.id));
+    if (invoiceOrders.length !== invoice.orderIds.length) return invoice;
+
+    try {
+      const membership = invoice.status === "paid" && invoice.returnPricingVersion === RETURN_PRICING_VERSION
+        ? invoice.returnPricingMembership
+        : merchant.membership;
+      const amounts = calculateCollectionAmounts(invoiceOrders, membership);
+
+      // الفاتورة المسلّمة تحتفظ بسعرها الموثّق، بينما الفواتير المفتوحة تتبع نوع الحساب الحالي.
+      if (invoice.status === "paid" && collectionAmountsMatch(invoice, amounts)) return invoice;
+      if (collectionAmountsMatch(invoice, amounts)) return invoice;
+      return { ...invoice, ...amounts };
+    } catch {
+      // لا نمنع الدخول بسبب عنوان قديم غير قابل للتصنيف؛ يبقى المبلغ المحفوظ حتى يُراجع العنوان.
+      return invoice;
+    }
+  });
+
+  return { ...database, collections };
 }
 
 function mergeMerchantCollections(current: CollectionInvoice[], submitted: CollectionInvoice[], orders: Order[], account: User, startingNumber: number) {

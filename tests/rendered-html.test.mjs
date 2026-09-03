@@ -896,9 +896,12 @@ test("applies the requested return-fee matrix by membership and region", async (
   assert.equal(getReturnFee({ name: "القدس" }, "diamond"), 15);
   assert.equal(getReturnFee({ name: "الداخل" }, "diamond"), 25);
   assert.match(management, /returnFeeForOrder = \(order: Order\) => getReturnFee\(resolveDeliveryRegion/);
+  assert.match(management, /returnFeeForInvoiceOrder\(selectedInvoice, order\)/);
   assert.match(management, /رسوم الرواجع لحسابك/);
   assert.match(server, /function calculateCollectionAmounts/);
-  assert.match(server, /return sum \+ getReturnFee\(region, membership\)/);
+  assert.match(server, /returnFeeDetails = returned\.map/);
+  assert.match(server, /function normalizeCollectionInvoices/);
+  assert.match(server, /normalizeCollectionInvoices\(cleaned\)/);
   assert.match(server, /\.\.\.entry, \.\.\.amounts, status: "ready"/);
   assert.match(server, /\.\.\.amounts,[\s\S]*status: "paid"/);
 });

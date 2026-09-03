@@ -91,6 +91,11 @@ export function CollectionsPage() {
     return database.orders.filter((order) => ids.has(order.id));
   }
 
+  function returnFeeForInvoiceOrder(invoice: CollectionInvoice, order: Order) {
+    const savedFee = invoice.returnFeeDetails?.find((item) => item.orderId === order.id)?.fee;
+    return typeof savedFee === "number" && Number.isFinite(savedFee) ? savedFee : returnFeeForOrder(order);
+  }
+
   function downloadInvoice(invoice: CollectionInvoice) {
     downloadDocument(`فاتورة-تحصيل-${invoice.invoiceNumber.replace("#", "")}.csv`, ordersCsv(invoiceOrders(invoice)));
     showToast("تم تنزيل تفاصيل فاتورة التحصيل.");
@@ -164,7 +169,7 @@ export function CollectionsPage() {
         <div className="collection-detail__scroll">
           <section className="collection-detail__summary"><div><strong dir="ltr">{selectedInvoice.invoiceNumber}</strong><span className={`collection-status collection-status--${selectedInvoice.status}`}>{collectionStatus[selectedInvoice.status].label}</span></div><dl><div><dt>إجمالي التحصيل</dt><dd>{money(selectedInvoice.grossAmount)} ₪</dd></div><div><dt>رسوم التوصيل</dt><dd>- {money(selectedInvoice.deliveryFees)} ₪</dd></div>{selectedInvoice.returnFees > 0 && <div><dt>رسوم الرواجع</dt><dd>- {money(selectedInvoice.returnFees)} ₪</dd></div>}<div className="is-total"><dt>صافي الفاتورة</dt><dd>{money(selectedInvoice.netAmount)} ₪</dd></div></dl></section>
           <section className="collection-detail__section"><h3>طرود الفاتورة <span>{selectedOrders.length}</span></h3><div className="collection-table"><div className="collection-table__head"><span>المنطقة</span><span>واصل</span><span>راجع</span></div>{Object.entries(regions).map(([region, counts]) => <div className="collection-table__row" key={region}><strong>{region}</strong><span>{counts.delivered}</span><span>{counts.returned}</span></div>)}</div></section>
-          <section className="collection-detail__section"><h3>استثناءات الفاتورة</h3>{selectedOrders.some((order) => order.status === "returned") ? <div className="collection-exceptions">{selectedOrders.filter((order) => order.status === "returned").map((order) => <div key={order.id}><Icon name="return" size={17} /><span><strong dir="ltr">{order.trackingNumber}</strong><small>{order.recipientName} · {order.city}</small></span><b>- {money(returnFeeForOrder(order))} ₪</b></div>)}</div> : <p className="collection-detail__empty"><Icon name="check" size={17} />هذه الفاتورة لا تحتوي على استثناءات.</p>}</section>
+          <section className="collection-detail__section"><h3>استثناءات الفاتورة</h3>{selectedOrders.some((order) => order.status === "returned") ? <div className="collection-exceptions">{selectedOrders.filter((order) => order.status === "returned").map((order) => <div key={order.id}><Icon name="return" size={17} /><span><strong dir="ltr">{order.trackingNumber}</strong><small>{order.recipientName} · {order.city}</small></span><b>- {money(returnFeeForInvoiceOrder(selectedInvoice, order))} ₪</b></div>)}</div> : <p className="collection-detail__empty"><Icon name="check" size={17} />هذه الفاتورة لا تحتوي على استثناءات.</p>}</section>
         </div>
         <div className="collection-detail__action"><Button icon="key" full onClick={() => openVerification(selectedInvoice)}>كود التحقق</Button></div>
       </Modal>}

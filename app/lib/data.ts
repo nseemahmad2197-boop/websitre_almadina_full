@@ -103,6 +103,11 @@ export type Order = {
 export type TrackableOrder = Pick<Order, "id" | "trackingNumber" | "status" | "createdAt" | "updatedAt">
   & Partial<Pick<Order, "trackingEvents" | "merchantName" | "merchantStore" | "courierName">>;
 
+export type CollectionReturnFee = {
+  orderId: string;
+  fee: number;
+};
+
 export type CollectionInvoice = {
   id: string;
   merchantId: string;
@@ -115,6 +120,12 @@ export type CollectionInvoice = {
   netAmount: number;
   deliveredCount: number;
   returnedCount: number;
+  /** تفصيل الرسوم المعتمد من الخادم لضمان تطابق الإجمالي مع كل طرد راجع. */
+  returnFeeDetails?: CollectionReturnFee[];
+  /** نوع الحساب الذي احتُسبت عليه رسوم الرواجع في هذه الفاتورة. */
+  returnPricingMembership?: Membership;
+  /** إصدار جدول الرسوم؛ يُستخدم لترقية الفواتير القديمة تلقائيًا. */
+  returnPricingVersion?: number;
   status: "pending" | "ready" | "paid";
   verificationCode: string;
   authorizedRecipient: string;
@@ -330,6 +341,8 @@ export const returnPricing = {
   premium: { westBank: 15, jerusalem: 25, interior: 40 },
   diamond: { westBank: 10, jerusalem: 15, interior: 25 },
 } as const;
+
+export const RETURN_PRICING_VERSION = 1;
 
 export function normalizeMembership(membership?: string): Membership {
   if (membership === "diamond") return "diamond";

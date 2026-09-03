@@ -3140,9 +3140,9 @@ test("persists diamond membership and enforces its 15/25/55 regional prices on t
 test("recalculates return fees on the server for standard, premium, and diamond invoices", async () => {
   const worker = await loadWorker();
   const memberships = [
-    { membership: "standard", email: "returns-standard@example.test", phone: "0594400011", expected: 100 },
-    { membership: "premium", email: "returns-premium@example.test", phone: "0594400022", expected: 80 },
-    { membership: "diamond", email: "returns-diamond@example.test", phone: "0594400033", expected: 50 },
+    { membership: "standard", email: "returns-standard@example.test", phone: "0594400011", expected: 100, fees: [20, 30, 50] },
+    { membership: "premium", email: "returns-premium@example.test", phone: "0594400022", expected: 80, fees: [15, 25, 40] },
+    { membership: "diamond", email: "returns-diamond@example.test", phone: "0594400033", expected: 50, fees: [10, 15, 25] },
   ];
   const destinations = [
     { governorate: "الخليل", city: "الخليل" },
@@ -3285,6 +3285,33 @@ test("recalculates return fees on the server for standard, premium, and diamond 
     assert.equal(invoice.deliveryFees, 0);
     assert.equal(invoice.deliveredCount, 0);
     assert.equal(invoice.returnedCount, 3);
+    assert.equal(invoice.returnPricingMembership, pricing.membership);
+    assert.equal(invoice.returnPricingVersion, 1);
+    assert.deepEqual(invoice.returnFeeDetails.map((item) => item.fee), pricing.fees);
+
+    if (pricing.membership === "diamond") {
+      const legacyState = JSON.parse(database.state.payload);
+      const legacyInvoice = legacyState.collections.find((entry) => entry.id === collectionDraft.id);
+      legacyInvoice.status = "ready";
+      legacyInvoice.returnFees = 95;
+      legacyInvoice.netAmount = -95;
+      delete legacyInvoice.returnFeeDetails;
+      delete legacyInvoice.returnPricingMembership;
+      delete legacyInvoice.returnPricingVersion;
+      database.state.payload = JSON.stringify(legacyState);
+
+      const correctedMerchantView = await call(worker, database, "database", { cookie: merchantCookie });
+      const merchantInvoice = correctedMerchantView.body.database.collections.find((entry) => entry.id === collectionDraft.id);
+      assert.equal(merchantInvoice.returnFees, 50);
+      assert.equal(merchantInvoice.netAmount, -50);
+      assert.deepEqual(merchantInvoice.returnFeeDetails.map((item) => item.fee), [10, 15, 25]);
+
+      const correctedAdminView = await call(worker, database, "database", { cookie: adminCookie });
+      const adminInvoice = correctedAdminView.body.database.collections.find((entry) => entry.id === collectionDraft.id);
+      assert.equal(adminInvoice.returnFees, merchantInvoice.returnFees);
+      assert.equal(adminInvoice.netAmount, merchantInvoice.netAmount);
+      assert.deepEqual(adminInvoice.returnFeeDetails, merchantInvoice.returnFeeDetails);
+    }
   }
 });
 
