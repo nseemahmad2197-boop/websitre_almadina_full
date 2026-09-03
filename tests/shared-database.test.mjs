@@ -1468,6 +1468,12 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.ok(!JSON.stringify(administrator.body).includes(courierInstructions));
   assert.ok(JSON.stringify(administrator.body).includes(adminOnlyNote));
   assert.ok(administrator.body.database.users.every((account) => account.password === ""));
+  const adminPrivateNoteNotice = administrator.body.database.notices.find((notice) => notice.title === "ملاحظة خاصة جديدة");
+  assert.ok(adminPrivateNoteNotice);
+  assert.equal(adminPrivateNoteNotice.userId, administrator.body.userId);
+  assert.equal(adminPrivateNoteNotice.read, false);
+  assert.ok(adminPrivateNoteNotice.message.includes(order.trackingNumber));
+  assert.ok(adminPrivateNoteNotice.message.includes(adminOnlyNote));
   const adminCookie = sessionFrom(administrator);
 
   const upgraded = await call(worker, database, "database", {
@@ -1962,12 +1968,23 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(scannedParcel.body.database.orders[0].privateNotes, "");
   assert.ok(JSON.stringify(scannedParcel.body).includes(courierInstructions));
   assert.ok(!JSON.stringify(scannedParcel.body).includes(adminOnlyNote));
+  const employeeInstructionNotice = scannedParcel.body.database.notices.find((notice) => notice.title === "تعليمات جديدة للطرد");
+  assert.ok(employeeInstructionNotice);
+  assert.equal(employeeInstructionNotice.userId, employeeAccount.id);
+  assert.equal(employeeInstructionNotice.read, false);
+  assert.ok(employeeInstructionNotice.message.includes(order.trackingNumber));
+  assert.ok(employeeInstructionNotice.message.includes(courierInstructions));
   assert.deepEqual(scannedParcel.body.database.recipients, []);
   assert.deepEqual(scannedParcel.body.database.collections, []);
 
   const sameNameAfterScan = await call(worker, database, "database", { cookie: sameNameEmployeeCookie });
   assert.equal(sameNameAfterScan.status, 200);
   assert.deepEqual(sameNameAfterScan.body.database.orders, []);
+  assert.equal(sameNameAfterScan.body.database.notices.some((notice) => notice.title === "تعليمات جديدة للطرد"), false);
+
+  const merchantAfterInstructionNotice = await call(worker, database, "database", { cookie: secondCookie });
+  assert.equal(merchantAfterInstructionNotice.status, 200);
+  assert.equal(merchantAfterInstructionNotice.body.database.notices.some((notice) => notice.title === "تعليمات جديدة للطرد"), false);
 
   const adminAfterParcelScan = await call(worker, database, "database", { cookie: adminCookie });
   assert.equal(adminAfterParcelScan.status, 200);

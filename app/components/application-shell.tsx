@@ -18,6 +18,7 @@ function NavigationDrawer({ onClose }: { onClose: () => void }) {
   const employee = user.role === "courier";
   const links: { icon: IconName; label: string; view: View }[] = admin ? [
     { icon: "home", label: "لوحة التحكم", view: "admin" },
+    { icon: "bell", label: "الإشعارات", view: "notifications" },
     { icon: "trash", label: "الطرود المحذوفة", view: "trash" },
     { icon: "settings", label: "الإعدادات", view: "settings" },
   ] : employee ? [
@@ -47,7 +48,7 @@ function TopBar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
   const { database, user, setView, openScanner } = useApp();
   const unread = database.notices.filter((notice) => notice.userId === user?.id && !notice.read).length;
   const employee = user?.role === "courier";
-  return <header className="topbar"><div className="topbar__inner"><IconButton name="menu" label="فتح القائمة" onClick={onMenu} /><button className="topbar__brand" onClick={() => setView(user?.role === "admin" ? "admin" : "home")}><Brand compact /></button><div className="topbar__actions">{user?.role === "merchant" && <button className="topbar__import" type="button" onClick={() => setView("import")}><Icon name="spreadsheet" size={18} /><span>استيراد Excel</span></button>}{!employee && <IconButton name="search" label="بحث" onClick={onSearch} />}<IconButton name="camera" label={employee ? "مسح كود الطرد بالكاميرا" : "مسح رمز الطرد"} onClick={() => openScanner()} />{!employee && <IconButton name="trash" label="المحذوفات" onClick={() => setView("trash")} />}{user?.role !== "admin" && <IconButton name="bell" label="الإشعارات" badge={unread} onClick={() => setView("notifications")} />}</div></div></header>;
+  return <header className="topbar"><div className="topbar__inner"><IconButton name="menu" label="فتح القائمة" onClick={onMenu} /><button className="topbar__brand" onClick={() => setView(user?.role === "admin" ? "admin" : "home")}><Brand compact /></button><div className="topbar__actions">{user?.role === "merchant" && <button className="topbar__import" type="button" onClick={() => setView("import")}><Icon name="spreadsheet" size={18} /><span>استيراد Excel</span></button>}{!employee && <IconButton name="search" label="بحث" onClick={onSearch} />}<IconButton name="camera" label={employee ? "مسح كود الطرد بالكاميرا" : "مسح رمز الطرد"} onClick={() => openScanner()} />{!employee && <IconButton name="trash" label="المحذوفات" onClick={() => setView("trash")} />}<IconButton name="bell" label="الإشعارات" badge={unread} onClick={() => setView("notifications")} /></div></div></header>;
 }
 
 function BottomNavigation() {

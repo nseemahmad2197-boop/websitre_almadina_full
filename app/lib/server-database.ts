@@ -1961,6 +1961,7 @@ function mergeMerchantCollections(current: CollectionInvoice[], submitted: Colle
 
 function mergeMerchantDatabase(current: Database, submitted: Database, account: User): Database {
   const savedAccount = account;
+  const createdOrders: Order[] = [];
 
   let nextOrder = current.nextOrder;
 
@@ -1993,7 +1994,7 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     const deliveryFee = getDeliveryFee(region, savedAccount.membership) + weightFee + oversizeFee;
     const notes = typeof candidate.notes === "string" ? candidate.notes.trim().slice(0, 500) : "";
     const privateNotes = typeof candidate.privateNotes === "string" ? candidate.privateNotes.trim().slice(0, 1000) : "";
-    return {
+    const createdOrder: Order = {
       ...candidate,
       merchantId: account.id,
       merchantName: savedAccount.name,
@@ -2031,6 +2032,8 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
       createdAt: now,
       updatedAt: now,
     };
+    createdOrders.push(createdOrder);
+    return createdOrder;
   }, (entry) => entry.status !== "draft");
 
   const recipients = mergeMerchantRecords<Recipient>(current.recipients, submitted.recipients, account.id, (candidate, existing) => {
@@ -2054,6 +2057,18 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
 
   const otherNotices = current.notices.filter((notice) => notice.userId !== account.id);
   const myNotices = submitted.notices.filter((notice) => notice.userId === account.id).map((notice): Notice => ({ ...notice, userId: account.id }));
+  const administrators = current.users.filter((entry) => entry.role === "admin");
+  const privateNoteNotices = createdOrders.flatMap((order) => order.privateNotes
+    ? administrators.map((administrator): Notice => ({
+      id: uid("notice"),
+      userId: administrator.id,
+      title: "ملاحظة خاصة جديدة",
+      message: `أضاف ${savedAccount.name} ملاحظة خاصة للطرد ${order.trackingNumber}: ${order.privateNotes}`,
+      icon: "lock",
+      read: false,
+      createdAt: order.createdAt,
+    }))
+    : []);
 
   const preferences: Record<string, Preferences> = { ...current.preferences };
   if (submitted.preferences[account.id]) preferences[account.id] = submitted.preferences[account.id];
@@ -2064,7 +2079,7 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     orders,
     recipients,
     collections,
-    notices: [...myNotices, ...otherNotices],
+    notices: [...privateNoteNotices, ...myNotices, ...otherNotices],
     preferences,
     nextOrder,
     nextCollection,
@@ -2972,18 +2987,31 @@ async function shipScannedOrder(database: D1Database, request: Request, session:
       courierName: employee.name,
       shippedAt: now,
     };
+    const instructions = order.notes.trim();
+    const scanNotices: Notice[] = [{
+      id: uid("notice"),
+      userId: order.merchantId,
+      title: "تم شحن الطرد",
+      message: `قرأ الموظف كود الطرد ${order.trackingNumber} وأصبحت حالته «مشحون».`,
+      icon: "truck",
+      read: false,
+      createdAt: now,
+    }];
+    if (instructions) {
+      scanNotices.unshift({
+        id: uid("notice"),
+        userId: employee.id,
+        title: "تعليمات جديدة للطرد",
+        message: `تعليمات الطرد ${order.trackingNumber}: ${instructions}`,
+        icon: "message",
+        read: false,
+        createdAt: now,
+      });
+    }
     const next: Database = {
       ...state.database,
       orders: state.database.orders.map((entry) => entry.id === order.id ? shippedOrder : entry),
-      notices: [{
-        id: uid("notice"),
-        userId: order.merchantId,
-        title: "تم شحن الطرد",
-        message: `قرأ الموظف كود الطرد ${order.trackingNumber} وأصبحت حالته «مشحون».`,
-        icon: "truck",
-        read: false,
-        createdAt: now,
-      }, ...state.database.notices],
+      notices: [...scanNotices, ...state.database.notices],
     };
 
     if (!await saveState(database, next, state.revision)) continue;

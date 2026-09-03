@@ -591,12 +591,33 @@ test("keeps Excel importing in the desktop toolbar instead of the navigation dra
   assert.match(styles, /\.bottom-nav\s*\{[^}]*width:\s*100%/);
 });
 
-test("hides the notification bell from the administrator while keeping it for users", async () => {
+test("shows the notification bell for the administrator, employees, and users", async () => {
   const shell = await readFile(new URL("../app/components/application-shell.tsx", import.meta.url), "utf8");
+  const drawer = shell.split("function NavigationDrawer")[1].split("function GlobalSearch")[0];
   const topbar = shell.split("function TopBar")[1].split("function BottomNavigation")[0];
 
   assert.equal((topbar.match(/name="bell"/g) ?? []).length, 1);
-  assert.match(topbar, /\{user\?\.role !== "admin"\s*&&\s*<IconButton name="bell" label="الإشعارات" badge=\{unread\} onClick=\{\(\) => setView\("notifications"\)\} \/>\}/);
+  assert.match(topbar, /<IconButton name="bell" label="الإشعارات" badge=\{unread\} onClick=\{\(\) => setView\("notifications"\)\} \/>/);
+  assert.doesNotMatch(topbar, /user\?\.role !== "admin"[\s\S]{0,120}name="bell"/);
+  assert.match(drawer, /admin \? \[[\s\S]*\{ icon: "bell", label: "الإشعارات", view: "notifications" \}/);
+});
+
+test("routes private notes only to administrators and courier instructions to the employee who receives the parcel", async () => {
+  const [form, management, server] = await Promise.all([
+    readFile(new URL("../app/components/order-form.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/management-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(form, /سيصل بها إشعار إلى المندوب الموظف الذي يستلم الطرد بعد مسح الكود/);
+  assert.match(form, /سيصل بها إشعار للمسؤولين فقط/);
+  assert.match(management, /setView\(user\?\.role === "admin" \? "admin" : "home"\)/);
+  assert.match(server, /const administrators = current\.users\.filter\(\(entry\) => entry\.role === "admin"\)/);
+  assert.match(server, /const privateNoteNotices = createdOrders\.flatMap/);
+  assert.match(server, /userId: administrator\.id,[\s\S]*title: "ملاحظة خاصة جديدة"/);
+  assert.match(server, /const instructions = order\.notes\.trim\(\)/);
+  assert.match(server, /userId: employee\.id,[\s\S]*title: "تعليمات جديدة للطرد"/);
+  assert.match(server, /notices: \[\.\.\.scanNotices, \.\.\.state\.database\.notices\]/);
 });
 
 test("replaces compensation requests with responsive collection invoices and verification codes", async () => {
