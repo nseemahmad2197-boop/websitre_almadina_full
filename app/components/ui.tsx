@@ -3,7 +3,7 @@
 import { useEffect, useRef, type CSSProperties, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icon";
-import { getStatus, type OrderStatus } from "../lib/data";
+import { getStatus, money, type OrderStatus } from "../lib/data";
 
 export function Brand({ compact = false, inverse = false }: { compact?: boolean; inverse?: boolean }) {
   return (
@@ -106,6 +106,11 @@ export function StatusPill({ status }: { status: OrderStatus }) {
       <Icon name={entry.icon} size={14} />{entry.label}
     </span>
   );
+}
+
+export function CollectionAmount({ amount, due, className = "" }: { amount: number; due?: boolean; className?: string }) {
+  const isDue = due ?? (amount < 0);
+  return <span className={`collection-amount ${isDue ? "collection-amount--due" : ""} ${className}`}><bdi dir="ltr">{money(Math.abs(amount))} ₪</bdi>{isDue && <small className="collection-amount__status">مستحق</small>}</span>;
 }
 
 export function Toggle({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; label: string; disabled?: boolean }) {

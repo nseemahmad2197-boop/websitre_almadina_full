@@ -887,10 +887,13 @@ test("applies exactly ₪15 West Bank, ₪25 Jerusalem, and ₪55 interior diamo
 });
 
 test("applies the requested return-fee matrix by membership and region", async () => {
-  const [{ returnPricing, getReturnFee, getReturnMembershipPrices }, management, server] = await Promise.all([
+  const [{ returnPricing, getReturnFee, getReturnMembershipPrices }, management, server, ui, admin, employee] = await Promise.all([
     import(new URL("../app/lib/data.ts", import.meta.url)),
     readFile(new URL("../app/components/management-pages.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/server-database.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ui.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/admin.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/employee.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.deepEqual(returnPricing.standard, { westBank: 20, jerusalem: 30, interior: 50 });
@@ -908,7 +911,15 @@ test("applies the requested return-fee matrix by membership and region", async (
   assert.equal(getReturnFee({ name: "الداخل" }, "diamond"), 25);
   assert.match(management, /returnFeeForOrder = \(order: Order\) => getReturnFee\(resolveDeliveryRegion/);
   assert.match(management, /returnFeeForInvoiceOrder\(selectedInvoice, order\)/);
-  assert.match(management, /رسوم الرواجع لحسابك/);
+  assert.match(management, /رسوم الرواجع المستحقة لحسابك/);
+  assert.match(ui, /money\(Math\.abs\(amount\)\)/);
+  assert.match(ui, /collection-amount__status">مستحق/);
+  assert.match(management, /CollectionAmount amount=\{selectedInvoice\.returnFees\} due/);
+  assert.match(management, /CollectionAmount amount=\{returnFeeForInvoiceOrder\(selectedInvoice, order\)\} due/);
+  assert.doesNotMatch(management, /رسوم الرواجع<\/dt><dd>-\s*\{/);
+  assert.doesNotMatch(management, /<b>-\s*\{money\(returnFeeForInvoiceOrder/);
+  assert.match(admin, /CollectionAmount amount=\{invoice\.netAmount\}/);
+  assert.match(employee, /CollectionAmount amount=\{invoice\.netAmount\}/);
   assert.match(server, /function calculateCollectionAmounts/);
   assert.match(server, /returnFeeDetails = returned\.map/);
   assert.match(server, /function normalizeCollectionInvoices/);

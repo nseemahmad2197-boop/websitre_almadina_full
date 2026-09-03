@@ -706,6 +706,10 @@ html[data-theme="dark"] .alert-banner { background: #30271a; }
 .collection-card__numbers > strong small { font-size: 9px; }
 .collection-card__numbers > span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
 .collection-card__numbers > span > svg { color: var(--green); }
+.collection-amount { display: inline-flex; max-width: 100%; align-items: center; gap: 5px; direction: rtl; vertical-align: middle; }
+.collection-amount > bdi { overflow: hidden; color: inherit; font: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.collection-amount--due > bdi { color: #c35a52; }
+.collection-amount__status { display: inline-flex; min-height: 19px; align-items: center; padding: 2px 6px; border-radius: 999px; background: color-mix(in srgb, #fff0ed, var(--surface) 36%); color: #b84d46; font-size: 8px; font-weight: 800; line-height: 1; white-space: nowrap; }
 .collection-status { display: inline-flex; min-height: 27px; align-items: center; gap: 5px; padding: 5px 9px; border-radius: 999px; font-size: 9px; font-weight: 750; white-space: nowrap; }
 .collection-status--pending { background: #fff4df; color: #a16c1f; }
 .collection-status--ready { background: #e7f1ff; color: #356aa5; }
@@ -1090,8 +1094,9 @@ html[data-theme="dark"] .membership-switch__option--diamond.is-selected { backgr
 .employee-collection-card > div { display: grid; min-width: 0; gap: 3px; }
 .employee-collection-card > div > strong { font-size: 11px; }
 .employee-collection-card > div > span, .employee-collection-card > div > small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.employee-collection-card > footer { display: flex; min-width: 0; grid-column: 1 / -1; align-items: center; justify-content: flex-end; padding-top: 9px; border-top: 1px solid var(--line); }
+.employee-collection-card > footer { display: flex; min-width: 0; grid-column: 1 / -1; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 9px; border-top: 1px solid var(--line); }
 .employee-collection-card > footer > span { display: flex; align-items: center; gap: 5px; color: var(--green); font-size: 9px; }
+.employee-collection-card > footer > .collection-amount { font-size: 11px; font-weight: 800; }
 .employee-collection-card > footer > .button { min-height: 35px; }
 .employee-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .employee-stats > article { display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 17px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }

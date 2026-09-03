@@ -4,7 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { formatDate, getStatus } from "../lib/data";
 import { Icon } from "./icon";
-import { Button, EmptyState, Field, Modal, PageHeader, StatusPill } from "./ui";
+import { Button, CollectionAmount, EmptyState, Field, Modal, PageHeader, StatusPill } from "./ui";
 
 export function EmployeeDashboard() {
   const { database, user, openScanner, prepareCollectionInvoice, verifyCollectionCode } = useApp();
@@ -65,7 +65,7 @@ export function EmployeeDashboard() {
           <span className="employee-collection-card__icon"><Icon name={invoice.status === "pending" ? "receipt" : invoice.status === "ready" ? "key" : "check"} size={21} /></span>
           <div><strong dir="ltr">{invoice.invoiceNumber}</strong><span>{invoice.merchantName}</span><small>{invoice.status === "pending" ? "يمكنك تجهيز هذه الفاتورة للمستخدم." : "تحقق من الكود المعروض في حساب المستخدم."}</small></div>
           <span className={`collection-status collection-status--${invoice.status}`}>{invoice.status === "pending" ? "قيد التجهيز" : invoice.status === "ready" ? "جاهزة للتحويل" : "تم التسليم"}</span>
-          <footer>{invoice.status === "pending"
+          <footer><CollectionAmount amount={invoice.netAmount} />{invoice.status === "pending"
             ? <Button icon="receipt" loading={preparingCollectionId === invoice.id} disabled={preparingCollectionId !== null} onClick={() => { void prepareCollection(invoice.id); }}>تجهيز للتحويل</Button>
             : invoice.status === "ready"
               ? <Button icon="key" onClick={() => setCollectionVerification({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, code: "" })}>قراءة كود التحقق</Button>
