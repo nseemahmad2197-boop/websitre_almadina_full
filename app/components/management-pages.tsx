@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { downloadDocument, importTemplate, ordersCsv } from "../lib/download";
-import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getWeightFee, governorates, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Notice, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getReturnFee, getReturnMembershipPrices, getWeightFee, governorates, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Notice, type Order } from "../lib/data";
 import { parseParcelImportCsv, type ParcelImportCsvLayout, type ParcelImportRow } from "../lib/import-csv";
 import { OrderCard } from "./dashboard";
 import { Icon } from "./icon";
@@ -15,6 +15,7 @@ export function ReturnsPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const returns = database.orders.filter((order) => order.merchantId === user?.id && order.status === "returned" && !order.deleted);
   const total = returns.reduce((sum, order) => sum + order.amount, 0);
+  const returnPrices = getReturnMembershipPrices(user?.membership);
 
   function exportReturns(kind: "csv" | "xls") {
     downloadDocument(`رواجع-المدينة-إكسبرس.${kind}`, ordersCsv(returns), kind === "xls" ? "application/vnd.ms-excel;charset=utf-8" : undefined);
@@ -22,7 +23,7 @@ export function ReturnsPage() {
     showToast("تم تنزيل تقرير الرواجع.");
   }
 
-  return <div className="page-content animate-page"><PageHeader title="الرواجع" subtitle="الطرود الراجعة إلى المرسل" action={<Button icon="download" onClick={() => setExportOpen(true)}>تنزيل</Button>} /><div className="alert-banner"><Icon name="info" size={20} /><span><strong>ملاحظة:</strong> تنتهي مسؤولية الشركة عن أي طرد راجع خلال مدة 5 أيام من تاريخ تغيير حالة الطرد إلى «راجع».</span></div><div className="metrics-row"><div className="metric-card metric-card--red"><strong>{returns.length}</strong><span>عدد الرواجع</span></div><div className="metric-card metric-card--red"><strong>{money(total)}</strong><span>إجمالي المبالغ (₪)</span></div></div><div className="filter-scroll"><Icon name="calendar" size={18} />{[{ id: "all", label: "الكل" }, { id: "today", label: "اليوم" }, { id: "yesterday", label: "أمس" }, { id: "week", label: "آخر 7 أيام" }, { id: "month", label: "آخر 30 يومًا" }].map((item) => <button key={item.id} className={period === item.id ? "filter-chip is-active" : "filter-chip"} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>{returns.length ? <div className="order-list">{returns.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <EmptyState icon="return" title="لا توجد رواجع" description="لا توجد طرود راجعة خلال الفترة المحددة." action="إنشاء طرد" onAction={() => setView("new-order")} />}{exportOpen && <Modal title="تنزيل الرواجع" onClose={() => setExportOpen(false)} sheet><p className="modal-description">اختر صيغة الملف — سيتم تصدير السجل حسب الفترة المحددة.</p><div className="export-options"><button onClick={() => exportReturns("xls")}><Icon name="spreadsheet" size={32} /><strong>Excel</strong><span>.xls</span></button><button onClick={() => exportReturns("csv")}><Icon name="file" size={32} /><strong>CSV</strong><span>.csv</span></button></div></Modal>}</div>;
+  return <div className="page-content animate-page"><PageHeader title="الرواجع" subtitle="الطرود الراجعة إلى المرسل" action={<Button icon="download" onClick={() => setExportOpen(true)}>تنزيل</Button>} /><div className="alert-banner"><Icon name="info" size={20} /><span><strong>ملاحظة:</strong> تنتهي مسؤولية الشركة عن أي طرد راجع خلال مدة 5 أيام من تاريخ تغيير حالة الطرد إلى «راجع».</span></div><div className="alert-banner"><Icon name="receipt" size={20} /><span><strong>رسوم الرواجع لحسابك:</strong> الضفة الغربية {money(returnPrices.westBank)} ₪ · القدس {money(returnPrices.jerusalem)} ₪ · الداخل {money(returnPrices.interior)} ₪.</span></div><div className="metrics-row"><div className="metric-card metric-card--red"><strong>{returns.length}</strong><span>عدد الرواجع</span></div><div className="metric-card metric-card--red"><strong>{money(total)}</strong><span>إجمالي المبالغ (₪)</span></div></div><div className="filter-scroll"><Icon name="calendar" size={18} />{[{ id: "all", label: "الكل" }, { id: "today", label: "اليوم" }, { id: "yesterday", label: "أمس" }, { id: "week", label: "آخر 7 أيام" }, { id: "month", label: "آخر 30 يومًا" }].map((item) => <button key={item.id} className={period === item.id ? "filter-chip is-active" : "filter-chip"} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>{returns.length ? <div className="order-list">{returns.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <EmptyState icon="return" title="لا توجد رواجع" description="لا توجد طرود راجعة خلال الفترة المحددة." action="إنشاء طرد" onAction={() => setView("new-order")} />}{exportOpen && <Modal title="تنزيل الرواجع" onClose={() => setExportOpen(false)} sheet><p className="modal-description">اختر صيغة الملف — سيتم تصدير السجل حسب الفترة المحددة.</p><div className="export-options"><button onClick={() => exportReturns("xls")}><Icon name="spreadsheet" size={32} /><strong>Excel</strong><span>.xls</span></button><button onClick={() => exportReturns("csv")}><Icon name="file" size={32} /><strong>CSV</strong><span>.csv</span></button></div></Modal>}</div>;
 }
 
 const collectionStatus = {
@@ -44,9 +45,10 @@ export function CollectionsPage() {
   const invoices = database.collections.filter((invoice) => invoice.merchantId === user?.id);
   const invoicedOrders = new Set(invoices.flatMap((invoice) => invoice.orderIds));
   const eligibleOrders = database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && (order.status === "delivered" || order.status === "returned") && !invoicedOrders.has(order.id));
+  const returnFeeForOrder = (order: Order) => getReturnFee(resolveDeliveryRegion(order.governorate ?? "", order.city), user?.membership);
   const selectedInvoice = invoices.find((invoice) => invoice.id === selectedId) ?? null;
   const codeInvoice = invoices.find((invoice) => invoice.id === codeInvoiceId) ?? null;
-  const availableAmount = eligibleOrders.reduce((sum, order) => sum + (order.status === "delivered" ? order.amount - order.deliveryFee : -order.deliveryFee), 0);
+  const availableAmount = eligibleOrders.reduce((sum, order) => sum + (order.status === "delivered" ? order.amount - order.deliveryFee : -returnFeeForOrder(order)), 0);
   const pendingAmount = invoices.filter((invoice) => invoice.status === "pending").reduce((sum, invoice) => sum + invoice.netAmount, 0);
   const readyAmount = invoices.filter((invoice) => invoice.status === "ready").reduce((sum, invoice) => sum + invoice.netAmount, 0);
   const deliveredAmount = invoices.filter((invoice) => invoice.status === "paid").reduce((sum, invoice) => sum + invoice.netAmount, 0);
@@ -57,7 +59,7 @@ export function CollectionsPage() {
     const returned = eligibleOrders.filter((order) => order.status === "returned");
     const grossAmount = delivered.reduce((sum, order) => sum + order.amount, 0);
     const deliveryFees = delivered.reduce((sum, order) => sum + order.deliveryFee, 0);
-    const returnFees = returned.reduce((sum, order) => sum + order.deliveryFee, 0);
+    const returnFees = returned.reduce((sum, order) => sum + returnFeeForOrder(order), 0);
     const now = new Date();
     const scheduledAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const invoice: CollectionInvoice = {
@@ -162,7 +164,7 @@ export function CollectionsPage() {
         <div className="collection-detail__scroll">
           <section className="collection-detail__summary"><div><strong dir="ltr">{selectedInvoice.invoiceNumber}</strong><span className={`collection-status collection-status--${selectedInvoice.status}`}>{collectionStatus[selectedInvoice.status].label}</span></div><dl><div><dt>إجمالي التحصيل</dt><dd>{money(selectedInvoice.grossAmount)} ₪</dd></div><div><dt>رسوم التوصيل</dt><dd>- {money(selectedInvoice.deliveryFees)} ₪</dd></div>{selectedInvoice.returnFees > 0 && <div><dt>رسوم الرواجع</dt><dd>- {money(selectedInvoice.returnFees)} ₪</dd></div>}<div className="is-total"><dt>صافي الفاتورة</dt><dd>{money(selectedInvoice.netAmount)} ₪</dd></div></dl></section>
           <section className="collection-detail__section"><h3>طرود الفاتورة <span>{selectedOrders.length}</span></h3><div className="collection-table"><div className="collection-table__head"><span>المنطقة</span><span>واصل</span><span>راجع</span></div>{Object.entries(regions).map(([region, counts]) => <div className="collection-table__row" key={region}><strong>{region}</strong><span>{counts.delivered}</span><span>{counts.returned}</span></div>)}</div></section>
-          <section className="collection-detail__section"><h3>استثناءات الفاتورة</h3>{selectedOrders.some((order) => order.status === "returned") ? <div className="collection-exceptions">{selectedOrders.filter((order) => order.status === "returned").map((order) => <div key={order.id}><Icon name="return" size={17} /><span><strong dir="ltr">{order.trackingNumber}</strong><small>{order.recipientName} · {order.city}</small></span><b>- {money(order.deliveryFee)} ₪</b></div>)}</div> : <p className="collection-detail__empty"><Icon name="check" size={17} />هذه الفاتورة لا تحتوي على استثناءات.</p>}</section>
+          <section className="collection-detail__section"><h3>استثناءات الفاتورة</h3>{selectedOrders.some((order) => order.status === "returned") ? <div className="collection-exceptions">{selectedOrders.filter((order) => order.status === "returned").map((order) => <div key={order.id}><Icon name="return" size={17} /><span><strong dir="ltr">{order.trackingNumber}</strong><small>{order.recipientName} · {order.city}</small></span><b>- {money(returnFeeForOrder(order))} ₪</b></div>)}</div> : <p className="collection-detail__empty"><Icon name="check" size={17} />هذه الفاتورة لا تحتوي على استثناءات.</p>}</section>
         </div>
         <div className="collection-detail__action"><Button icon="key" full onClick={() => openVerification(selectedInvoice)}>كود التحقق</Button></div>
       </Modal>}

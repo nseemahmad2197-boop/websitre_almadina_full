@@ -8,7 +8,7 @@ import {
   type Base64URLString,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getStatus, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
 
@@ -1942,6 +1942,27 @@ function collectionVerificationCode(): string {
   return String(1000 + (values[0] % 9000));
 }
 
+function calculateCollectionAmounts(orders: Order[], membership: User["membership"]) {
+  const delivered = orders.filter((order) => order.status === "delivered");
+  const returned = orders.filter((order) => order.status === "returned");
+  const grossAmount = delivered.reduce((sum, order) => sum + order.amount, 0);
+  const deliveryFees = delivered.reduce((sum, order) => sum + order.deliveryFee, 0);
+  const returnFees = returned.reduce((sum, order) => {
+    const region = resolveDeliveryRegion(order.governorate ?? "", order.city);
+    if (!region) throw new ApiRequestError(`تعذّر احتساب رسوم راجع الطرد ${order.trackingNumber} بسبب عنوانه.`, 400);
+    return sum + getReturnFee(region, membership);
+  }, 0);
+
+  return {
+    grossAmount,
+    deliveryFees,
+    returnFees,
+    netAmount: grossAmount - deliveryFees - returnFees,
+    deliveredCount: delivered.length,
+    returnedCount: returned.length,
+  };
+}
+
 function mergeMerchantCollections(current: CollectionInvoice[], submitted: CollectionInvoice[], orders: Order[], account: User, startingNumber: number) {
   const mine = current.filter((invoice) => invoice.merchantId === account.id);
   const others = current.filter((invoice) => invoice.merchantId !== account.id);
@@ -1966,11 +1987,7 @@ function mergeMerchantCollections(current: CollectionInvoice[], submitted: Colle
     const eligible = orders.filter((order) => order.merchantId === account.id && !order.deleted && (order.status === "delivered" || order.status === "returned") && requestedOrderIds.has(order.id) && !usedOrderIds.has(order.id));
     if (!eligible.length) throw new Error("لا توجد طرود جديدة صالحة لفاتورة التحصيل.");
 
-    const delivered = eligible.filter((order) => order.status === "delivered");
-    const returned = eligible.filter((order) => order.status === "returned");
-    const grossAmount = delivered.reduce((sum, order) => sum + order.amount, 0);
-    const deliveryFees = delivered.reduce((sum, order) => sum + order.deliveryFee, 0);
-    const returnFees = returned.reduce((sum, order) => sum + order.deliveryFee, 0);
+    const amounts = calculateCollectionAmounts(eligible, account.membership);
     const now = new Date();
     const invoice: CollectionInvoice = {
       id: candidate.id || uid("collection"),
@@ -1978,12 +1995,7 @@ function mergeMerchantCollections(current: CollectionInvoice[], submitted: Colle
       merchantName: account.name,
       invoiceNumber: `#${nextCollection++}`,
       orderIds: eligible.map((order) => order.id),
-      grossAmount,
-      deliveryFees,
-      returnFees,
-      netAmount: grossAmount - deliveryFees - returnFees,
-      deliveredCount: delivered.length,
-      returnedCount: returned.length,
+      ...amounts,
       status: "pending",
       verificationCode: collectionVerificationCode(),
       authorizedRecipient: "",
@@ -3099,6 +3111,11 @@ async function prepareCollection(database: D1Database, request: Request, session
     if (!invoice) return json({ error: "لم نعثر على فاتورة تحصيل قابلة للتجهيز." }, 422);
     if (invoice.status === "ready") return json({ ...snapshot(state, employee), prepared: false });
     if (invoice.status !== "pending") return json({ error: "لا يمكن تجهيز فاتورة تم تسليمها مسبقًا." }, 409);
+    const merchant = state.database.users.find((account) => account.id === invoice.merchantId && account.role === "merchant");
+    if (!merchant) return json({ error: "حساب صاحب فاتورة التحصيل غير متاح." }, 422);
+    const invoiceOrderIds = new Set(invoice.orderIds);
+    const invoiceOrders = state.database.orders.filter((order) => invoiceOrderIds.has(order.id) && order.merchantId === merchant.id && !order.deleted);
+    const amounts = calculateCollectionAmounts(invoiceOrders, merchant.membership);
 
     const now = new Date().toISOString();
     const notice: Notice = {
@@ -3112,7 +3129,7 @@ async function prepareCollection(database: D1Database, request: Request, session
     };
     const next: Database = {
       ...state.database,
-      collections: state.database.collections.map((entry) => entry.id === invoice.id ? { ...entry, status: "ready", updatedAt: now } : entry),
+      collections: state.database.collections.map((entry) => entry.id === invoice.id ? { ...entry, ...amounts, status: "ready", updatedAt: now } : entry),
       notices: [notice, ...state.database.notices],
     };
 
@@ -3154,12 +3171,18 @@ async function verifyCollection(database: D1Database, request: Request, session:
     if (employee.role === "admin" && invoice.verificationCode !== verificationCode) {
       return json({ error: "كود التحقق غير صحيح." }, 422);
     }
+    const merchant = state.database.users.find((account) => account.id === invoice.merchantId && account.role === "merchant");
+    if (!merchant) return json({ error: "حساب صاحب فاتورة التحصيل غير متاح." }, 422);
+    const invoiceOrderIds = new Set(invoice.orderIds);
+    const invoiceOrders = state.database.orders.filter((order) => invoiceOrderIds.has(order.id) && order.merchantId === merchant.id && !order.deleted);
+    const amounts = calculateCollectionAmounts(invoiceOrders, merchant.membership);
 
     const now = new Date().toISOString();
     const next: Database = {
       ...state.database,
       collections: state.database.collections.map((entry) => entry.id === invoice.id ? {
         ...entry,
+        ...amounts,
         status: "paid",
         paidAt: now,
         verifiedAt: now,

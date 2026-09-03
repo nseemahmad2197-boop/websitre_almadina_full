@@ -3137,6 +3137,157 @@ test("persists diamond membership and enforces its 15/25/55 regional prices on t
   }
 });
 
+test("recalculates return fees on the server for standard, premium, and diamond invoices", async () => {
+  const worker = await loadWorker();
+  const memberships = [
+    { membership: "standard", email: "returns-standard@example.test", phone: "0594400011", expected: 100 },
+    { membership: "premium", email: "returns-premium@example.test", phone: "0594400022", expected: 80 },
+    { membership: "diamond", email: "returns-diamond@example.test", phone: "0594400033", expected: 50 },
+  ];
+  const destinations = [
+    { governorate: "الخليل", city: "الخليل" },
+    { governorate: "القدس", city: "القدس" },
+    { governorate: "الداخل", city: "حيفا" },
+  ];
+
+  for (const [membershipIndex, pricing] of memberships.entries()) {
+    const database = new FakeD1Database();
+    const registration = await call(worker, database, "register", {
+      method: "POST",
+      payload: accountPayload(`تاجر رواجع ${pricing.membership}`, pricing.email, pricing.phone),
+    });
+    assert.equal(registration.status, 201);
+    const merchantCookie = sessionFrom(registration);
+
+    const administrator = await call(worker, database, "login", {
+      method: "POST",
+      payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
+    });
+    assert.equal(administrator.status, 200);
+    const adminCookie = sessionFrom(administrator);
+    const membershipUpdate = await call(worker, database, "database", {
+      method: "PUT",
+      cookie: adminCookie,
+      payload: {
+        revision: administrator.body.revision,
+        database: {
+          ...administrator.body.database,
+          users: administrator.body.database.users.map((account) => account.id === registration.body.userId
+            ? { ...account, membership: pricing.membership }
+            : account),
+        },
+      },
+    });
+    assert.equal(membershipUpdate.status, 200);
+
+    const merchant = await call(worker, database, "database", { cookie: merchantCookie });
+    const now = new Date().toISOString();
+    const orderIds = destinations.map((_, index) => `return-${membershipIndex}-${index}`);
+    const candidates = destinations.map((destination, index) => ({
+      id: orderIds[index],
+      trackingNumber: `FORGED-RETURN-${membershipIndex}-${index}`,
+      merchantId: registration.body.userId,
+      merchantName: "قيمة غير موثوقة",
+      merchantStore: "قيمة غير موثوقة",
+      recipientName: `مستلم راجع ${index + 1}`,
+      recipientPhone: "0597654321",
+      governorate: destination.governorate,
+      city: destination.city,
+      address: "عنوان اختبار الرواجع",
+      pickupAddress: "الخليل",
+      amount: 100,
+      deliveryFee: 999,
+      content: "اختبار رسوم الرواجع",
+      weight: "0 - 5 كغم",
+      dimensions: "20 × 20 × 20 سم",
+      lengthCm: 20,
+      widthCm: 20,
+      heightCm: 20,
+      weightFee: 999,
+      oversizeFee: 999,
+      notes: "",
+      privateNotes: "",
+      reference: "",
+      type: "طرد عادي",
+      status: "returned",
+      courierName: "بانتظار تعيين المندوب",
+      createdAt: now,
+      updatedAt: now,
+      deleted: false,
+    }));
+    const created = await call(worker, database, "database", {
+      method: "PUT",
+      cookie: merchantCookie,
+      payload: {
+        revision: merchant.body.revision,
+        database: {
+          ...merchant.body.database,
+          orders: [...candidates, ...merchant.body.database.orders],
+          nextOrder: merchant.body.database.nextOrder + candidates.length,
+        },
+      },
+    });
+    assert.equal(created.status, 200);
+
+    const adminWithOrders = await call(worker, database, "database", { cookie: adminCookie });
+    const returned = await call(worker, database, "database", {
+      method: "PUT",
+      cookie: adminCookie,
+      payload: {
+        revision: adminWithOrders.body.revision,
+        database: {
+          ...adminWithOrders.body.database,
+          orders: adminWithOrders.body.database.orders.map((order) => orderIds.includes(order.id)
+            ? { ...order, status: "returned", updatedAt: new Date().toISOString() }
+            : order),
+        },
+      },
+    });
+    assert.equal(returned.status, 200);
+
+    const merchantWithReturns = await call(worker, database, "database", { cookie: merchantCookie });
+    const collectionDraft = {
+      id: `return-invoice-${membershipIndex}`,
+      merchantId: registration.body.userId,
+      merchantName: "قيمة غير موثوقة",
+      invoiceNumber: "#FORGED",
+      orderIds,
+      grossAmount: 999,
+      deliveryFees: 999,
+      returnFees: 999,
+      netAmount: 999,
+      deliveredCount: 999,
+      returnedCount: 999,
+      status: "pending",
+      verificationCode: "0000",
+      authorizedRecipient: "",
+      createdAt: now,
+      updatedAt: now,
+      scheduledAt: now,
+    };
+    const invoiced = await call(worker, database, "database", {
+      method: "PUT",
+      cookie: merchantCookie,
+      payload: {
+        revision: merchantWithReturns.body.revision,
+        database: {
+          ...merchantWithReturns.body.database,
+          collections: [collectionDraft, ...merchantWithReturns.body.database.collections],
+          nextCollection: merchantWithReturns.body.database.nextCollection + 1,
+        },
+      },
+    });
+    assert.equal(invoiced.status, 200, invoiced.body?.error);
+    const invoice = invoiced.body.database.collections.find((entry) => entry.id === collectionDraft.id);
+    assert.equal(invoice.returnFees, pricing.expected);
+    assert.equal(invoice.netAmount, -pricing.expected);
+    assert.equal(invoice.grossAmount, 0);
+    assert.equal(invoice.deliveryFees, 0);
+    assert.equal(invoice.deliveredCount, 0);
+    assert.equal(invoice.returnedCount, 3);
+  }
+});
+
 test("stores the app-lock PIN only as a server hash and gates device biometrics behind it", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();

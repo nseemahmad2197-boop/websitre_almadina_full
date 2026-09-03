@@ -38,15 +38,15 @@ function isThemePreference(value: unknown): value is ThemePreference {
   return value === "light" || value === "dark" || value === "system";
 }
 
-function noticeIdsForUser(notices: Notice[], userId: string): Set<string> {
-  return new Set(notices.filter((notice) => notice.userId === userId).map((notice) => notice.id));
+function acknowledgedNoticeIdsForUser(notices: Notice[], userId: string): Set<string> {
+  return new Set(notices.filter((notice) => notice.userId === userId && notice.read).map((notice) => notice.id));
 }
 
 async function prepareNotificationAudio(context: AudioContext): Promise<boolean> {
   if (context.state === "closed") return false;
 
   try {
-    if (context.state === "suspended") await context.resume();
+    if (context.state !== "running") await context.resume();
     if (context.state !== "running") return false;
 
     // Safari on iPhone requires an audio source to start inside a user gesture,
@@ -66,7 +66,7 @@ async function playNotificationChime(context: AudioContext | null): Promise<bool
   if (!context || context.state === "closed") return false;
 
   try {
-    if (context.state === "suspended") await context.resume();
+    if (context.state !== "running") await context.resume();
     if (context.state !== "running") return false;
 
     const now = context.currentTime;
@@ -74,7 +74,7 @@ async function playNotificationChime(context: AudioContext | null): Promise<bool
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       const start = now + offset;
-      oscillator.type = "sine";
+      oscillator.type = "triangle";
       oscillator.frequency.setValueAtTime(frequency, start);
       gain.gain.setValueAtTime(0.0001, start);
       gain.gain.exponentialRampToValueAtTime(volume, start + 0.018);
@@ -84,8 +84,8 @@ async function playNotificationChime(context: AudioContext | null): Promise<bool
       oscillator.stop(start + duration + 0.02);
     };
 
-    playTone(720, 0, 0.2, 0.18);
-    playTone(960, 0.16, 0.28, 0.14);
+    playTone(720, 0, 0.2, 0.24);
+    playTone(960, 0.16, 0.28, 0.2);
     return true;
   } catch {
     return false;
@@ -301,10 +301,17 @@ export default function AlmadinaApplication() {
     document.addEventListener("pointerdown", unlock, { passive: true });
     document.addEventListener("touchend", unlock, { passive: true });
     document.addEventListener("keydown", unlock);
+    const recoverPendingSound = () => {
+      if (document.visibilityState === "visible" && pendingNotificationChime.current) unlock();
+    };
+    document.addEventListener("visibilitychange", recoverPendingSound);
+    window.addEventListener("pageshow", recoverPendingSound);
     return () => {
       document.removeEventListener("pointerdown", unlock);
       document.removeEventListener("touchend", unlock);
       document.removeEventListener("keydown", unlock);
+      document.removeEventListener("visibilitychange", recoverPendingSound);
+      window.removeEventListener("pageshow", recoverPendingSound);
     };
   }, []);
 
@@ -365,7 +372,7 @@ export default function AlmadinaApplication() {
         visibleDatabase.current = snapshot.database;
         serverRevision.current = snapshot.revision;
         noticeBaselineUserId.current = account.id;
-        knownNoticeIds.current = noticeIdsForUser(snapshot.database.notices, account.id);
+        knownNoticeIds.current = acknowledgedNoticeIdsForUser(snapshot.database.notices, account.id);
         setDatabase(snapshot.database);
         setUserId(account.id);
         setAppLock(restoredLock);
@@ -428,7 +435,7 @@ export default function AlmadinaApplication() {
 
     if (noticeBaselineUserId.current !== userId) {
       noticeBaselineUserId.current = userId;
-      knownNoticeIds.current = noticeIdsForUser(database.notices, userId);
+      knownNoticeIds.current = acknowledgedNoticeIdsForUser(database.notices, userId);
       return;
     }
 
@@ -443,6 +450,7 @@ export default function AlmadinaApplication() {
         return;
       }
 
+      pendingNotificationChime.current = false;
       void playNotificationChime(context).then((played) => {
         if (!played) pendingNotificationChime.current = true;
       });
@@ -877,7 +885,7 @@ export default function AlmadinaApplication() {
     serverRevision.current = snapshot.revision;
     pendingUpdates.current = [];
     noticeBaselineUserId.current = account.id;
-    knownNoticeIds.current = noticeIdsForUser(snapshot.database.notices, account.id);
+    knownNoticeIds.current = acknowledgedNoticeIdsForUser(snapshot.database.notices, account.id);
     setDatabase(snapshot.database);
     setUserId(account.id);
     setSessionReady(true);

@@ -325,6 +325,12 @@ export const deliveryPricing = {
   diamond: { westBank: 15, jerusalem: 25, interior: 55 },
 } as const;
 
+export const returnPricing = {
+  standard: { westBank: 20, jerusalem: 30, interior: 50 },
+  premium: { westBank: 15, jerusalem: 25, interior: 40 },
+  diamond: { westBank: 10, jerusalem: 15, interior: 25 },
+} as const;
+
 export function normalizeMembership(membership?: string): Membership {
   if (membership === "diamond") return "diamond";
   if (membership === "premium") return "premium";
@@ -335,13 +341,23 @@ export function getMembershipPrices(membership?: Membership) {
   return deliveryPricing[normalizeMembership(membership)];
 }
 
-export function getDeliveryFee(region: { name: string } | undefined, membership?: Membership): number {
-  if (!region) return 0;
+export function getReturnMembershipPrices(membership?: Membership) {
+  return returnPricing[normalizeMembership(membership)];
+}
 
-  const prices = getMembershipPrices(membership);
+function getRegionalPrice(region: { name: string } | undefined, prices: { westBank: number; jerusalem: number; interior: number }): number {
+  if (!region) return 0;
   if (region.name === "القدس") return prices.jerusalem;
   if (region.name === "الداخل") return prices.interior;
   return prices.westBank;
+}
+
+export function getDeliveryFee(region: { name: string } | undefined, membership?: Membership): number {
+  return getRegionalPrice(region, getMembershipPrices(membership));
+}
+
+export function getReturnFee(region: { name: string } | undefined, membership?: Membership): number {
+  return getRegionalPrice(region, getReturnMembershipPrices(membership));
 }
 
 export const OVERSIZE_DIMENSION_LIMIT_CM = 40;
