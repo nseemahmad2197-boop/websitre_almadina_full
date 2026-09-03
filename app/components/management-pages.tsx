@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { downloadDocument, importTemplate, ordersCsv } from "../lib/download";
-import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getWeightFee, governorates, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getWeightFee, governorates, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Notice, type Order } from "../lib/data";
 import { parseParcelImportCsv, type ParcelImportCsvLayout, type ParcelImportRow } from "../lib/import-csv";
 import { OrderCard } from "./dashboard";
 import { Icon } from "./icon";
@@ -198,7 +198,7 @@ export function RecipientsPage() {
 }
 
 export function NotificationsPage() {
-  const { database, user, updateDatabase, clearNotices, setView, confirm, showToast } = useApp();
+  const { database, user, updateDatabase, clearNotices, setSelectedOrderId, setView, confirm, showToast } = useApp();
   const [clearingTarget, setClearingTarget] = useState<string | null>(null);
   const clearingNotices = clearingTarget !== null;
   const notices = database.notices.filter((notice) => notice.userId === user?.id);
@@ -206,6 +206,21 @@ export function NotificationsPage() {
   function markAllRead() {
     updateDatabase((current) => ({ ...current, notices: current.notices.map((notice) => notice.userId === user?.id ? { ...notice, read: true } : notice) }));
     showToast("تم تحديد جميع الإشعارات كمقروءة.");
+  }
+
+  function openNotice(notice: Notice) {
+    updateDatabase((current) => ({ ...current, notices: current.notices.map((entry) => entry.id === notice.id && entry.userId === user?.id ? { ...entry, read: true } : entry) }));
+    if (!notice.orderId) return;
+
+    const linkedOrder = database.orders.find((order) => order.id === notice.orderId && (user?.role === "admin" || order.merchantId === user?.id));
+    if (!linkedOrder) {
+      showToast("الطرد المرتبط بهذا الإشعار غير متاح.", "error");
+      return;
+    }
+
+    try { sessionStorage.setItem("almadina-order-note-target", linkedOrder.id); } catch { /* Navigation still works without browser storage. */ }
+    setSelectedOrderId(linkedOrder.id);
+    setView("order-detail");
   }
 
   async function performClearNotices(noticeIds: string[], target: string) {
@@ -245,7 +260,7 @@ export function NotificationsPage() {
 
   const notificationActions = notices.length ? <div className="notification-page-actions">{notices.some((notice) => !notice.read) && <Button variant="ghost" icon="check" disabled={clearingNotices} onClick={markAllRead}>قراءة الكل</Button>}<Button variant="ghost" icon="trash" className="notification-clear-button" loading={clearingTarget === "all"} disabled={clearingNotices} onClick={requestClearNotices}>{clearingTarget === "all" ? "جارٍ المسح…" : "مسح الكل"}</Button></div> : undefined;
 
-  return <div className="page-content animate-page"><PageHeader title="الإشعارات" subtitle="آخر التحديثات المتعلقة بحسابك وطرودك" onBack={() => setView(user?.role === "admin" ? "admin" : "home")} action={notificationActions} />{notices.length ? <div className="notification-list">{notices.map((notice) => <article className={`notification-card ${notice.read ? "" : "is-unread"}`} key={notice.id}><button type="button" className="notification-card__content" aria-label={`تحديد إشعار ${notice.title} كمقروء`} onClick={() => updateDatabase((current) => ({ ...current, notices: current.notices.map((entry) => entry.id === notice.id && entry.userId === user?.id ? { ...entry, read: true } : entry) }))}><span><Icon name={notice.icon} size={21} /></span><div><strong>{notice.title}</strong><p>{notice.message}</p><small>{relativeDate(notice.createdAt)}</small></div>{!notice.read && <i />}</button><IconButton name="trash" label={`حذف الإشعار: ${notice.title}`} className="notification-card__delete is-danger" disabled={clearingNotices} aria-busy={clearingTarget === notice.id} onClick={() => requestClearNotice(notice.id, notice.title)} /></article>)}</div> : <EmptyState icon="bell" title="لا توجد إشعارات" description="ستظهر هنا التحديثات المتعلقة بحسابك وطرودك." />}</div>;
+  return <div className="page-content animate-page"><PageHeader title="الإشعارات" subtitle="آخر التحديثات المتعلقة بحسابك وطرودك" onBack={() => setView(user?.role === "admin" ? "admin" : "home")} action={notificationActions} />{notices.length ? <div className="notification-list">{notices.map((notice) => <article className={`notification-card ${notice.read ? "" : "is-unread"}`} key={notice.id}><button type="button" className="notification-card__content" aria-label={notice.orderId ? `فتح إشعار ${notice.title} والانتقال إلى الطرد` : `تحديد إشعار ${notice.title} كمقروء`} onClick={() => openNotice(notice)}><span><Icon name={notice.icon} size={21} /></span><div><strong>{notice.title}</strong><p>{notice.message}</p><small>{relativeDate(notice.createdAt)}</small></div>{!notice.read && <i />}</button><IconButton name="trash" label={`حذف الإشعار: ${notice.title}`} className="notification-card__delete is-danger" disabled={clearingNotices} aria-busy={clearingTarget === notice.id} onClick={() => requestClearNotice(notice.id, notice.title)} /></article>)}</div> : <EmptyState icon="bell" title="لا توجد إشعارات" description="ستظهر هنا التحديثات المتعلقة بحسابك وطرودك." />}</div>;
 }
 
 export function TrashPage() {

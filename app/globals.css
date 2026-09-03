@@ -518,6 +518,8 @@ html[data-theme="dark"] .oversize-fee-notice.is-active strong { color: #f2d38e; 
 .tracking-note-form__field > textarea::placeholder { color: var(--muted); opacity: .76; }
 .tracking-note-form__field > textarea:focus { border-color: rgb(8 124 69 / 65%); box-shadow: 0 0 0 3px rgb(8 124 69 / 9%); }
 .tracking-note-form > .button { min-height: 45px; }
+.tracking-note-target { scroll-margin-block: 110px; border-radius: 20px; }
+.tracking-note-target.is-highlighted > .section-card { animation: tracking-note-target 2.1s ease; }
 .tracking-status-modal { width: min(100%, 500px); }
 .status-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .status-action { display: flex; min-height: 32px; align-items: center; gap: 4px; padding: 0 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--status-color); cursor: pointer; font-size: 10px; }
@@ -1142,6 +1144,7 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 @keyframes toast-in { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes scanner-line { 0%, 100% { top: 7%; } 50% { top: 93%; } }
+@keyframes tracking-note-target { 0%, 100% { box-shadow: var(--shadow-sm); } 24%, 68% { box-shadow: 0 0 0 4px rgb(8 124 69 / 16%), 0 15px 34px rgb(8 124 69 / 13%); } }
 
 @media (max-width: 1050px) {
   .status-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }

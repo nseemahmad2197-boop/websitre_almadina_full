@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useApp } from "../lib/app-context";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, normalizeMembership, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
 import { createQrMatrix } from "../lib/qr-code";
@@ -205,7 +205,30 @@ export function OrderDetail() {
   const [detailTab, setDetailTab] = useState<"tracking" | "details">("tracking");
   const [trackingNote, setTrackingNote] = useState("");
   const [statusUpdate, setStatusUpdate] = useState<{ status: OrderStatus; note: string } | null>(null);
+  const noteComposerTarget = useRef<HTMLDivElement>(null);
   const order = database.orders.find((item) => item.id === selectedOrderId && (user?.role === "admin" || item.merchantId === user?.id));
+
+  useEffect(() => {
+    if (!selectedOrderId) return;
+
+    try {
+      if (sessionStorage.getItem("almadina-order-note-target") !== selectedOrderId) return;
+      sessionStorage.removeItem("almadina-order-note-target");
+    } catch {
+      return;
+    }
+
+    const target = noteComposerTarget.current;
+    target?.classList.add("is-highlighted");
+    const scrollFrame = window.requestAnimationFrame(() => target?.scrollIntoView({ behavior: "smooth", block: "center" }));
+    const highlightTimer = window.setTimeout(() => target?.classList.remove("is-highlighted"), 2_200);
+    return () => {
+      window.cancelAnimationFrame(scrollFrame);
+      window.clearTimeout(highlightTimer);
+      target?.classList.remove("is-highlighted");
+    };
+  }, [selectedOrderId]);
+
   if (!order) return <div className="page-content"><EmptyState icon="package" title="الطرد غير موجود" description="ربما حُذف هذا الطرد أو تغيّر رقم التتبع." action="العودة للطرود" onAction={() => setView(user?.role === "admin" ? "admin" : "shipments")} /></div>;
   const weightFee = order.weightFee ?? 0;
   const oversizeFee = order.oversizeFee ?? 0;
@@ -234,7 +257,6 @@ export function OrderDetail() {
     const note = trackingNote.trim();
     if (!note) return showToast("اكتب الملاحظة أولًا.", "error");
     updateDatabase((current) => ({ ...current, orders: current.orders.map((item) => item.id === currentOrder.id ? appendOrderTrackingNote(item, user?.name ?? "مستخدم المدينة إكسبرس", note) : item) }));
-    if (user?.role === "admin") notify({ userId: currentOrder.merchantId, title: "ملاحظة جديدة على الطرد", message: `أضافت الإدارة ملاحظة على الطرد ${currentOrder.trackingNumber}.`, icon: "message" });
     setTrackingNote("");
     showToast("تمت إضافة الملاحظة إلى الحالة الحالية.");
   }
@@ -265,10 +287,12 @@ export function OrderDetail() {
         <div className="order-tracking-panel animate-page">
           {user?.role === "admin" && <SectionCard title="تحديث حالة الطرد" icon="settings"><p className="tracking-note-intro">اختر الحالة الجديدة، ثم أضف ملاحظة اختيارية قبل الحفظ.</p><div className="status-actions">{statusDefinitions.map((entry) => <button key={entry.id} className={`status-action ${order.status === entry.id ? "is-active" : ""}`} disabled={order.status === entry.id} style={{ "--status-color": entry.color } as CSSProperties} onClick={() => changeStatus(entry.id)}><Icon name={entry.icon} size={15} />{entry.label}</button>)}</div></SectionCard>}
           <TrackingHistory order={order} />
-          <SectionCard title="إضافة ملاحظة للحالة الحالية" icon="message">
-            <p className="tracking-note-intro">ستُحفظ الملاحظة مع حالة «{getStatus(order.status).label}» واسم كاتبها ووقت إضافتها.</p>
-            <TrackingNoteComposer status={order.status} value={trackingNote} onChange={setTrackingNote} onSubmit={addTrackingNote} />
-          </SectionCard>
+          <div ref={noteComposerTarget} className="tracking-note-target">
+            <SectionCard title="إضافة ملاحظة للحالة الحالية" icon="message">
+              <p className="tracking-note-intro">ستُحفظ الملاحظة مع حالة «{getStatus(order.status).label}» واسم كاتبها ووقت إضافتها.</p>
+              <TrackingNoteComposer status={order.status} value={trackingNote} onChange={setTrackingNote} onSubmit={addTrackingNote} />
+            </SectionCard>
+          </div>
         </div>
       ) : (
         <div className="order-detail-panel animate-page">

@@ -2281,6 +2281,53 @@ test("shares accounts and orders across devices while isolating customers and pr
 
   const adminSeesMerchantNote = await call(worker, database, "database", { cookie: adminCookie });
   assert.equal(adminSeesMerchantNote.body.database.orders.find((item) => item.id === order.id).trackingEvents.at(-1).note, merchantNoteText);
+  const merchantNoteNotice = adminSeesMerchantNote.body.database.notices.find((notice) => notice.orderId === order.id && notice.message.includes(merchantNoteText));
+  assert.ok(merchantNoteNotice);
+  assert.equal(merchantNoteNotice.userId, administrator.body.userId);
+  assert.equal(merchantNoteNotice.title, "ملاحظة جديدة على الطرد");
+  assert.equal(merchantNoteNotice.read, false);
+  assert.equal(merchantNote.body.database.notices.some((notice) => notice.message.includes(merchantNoteText)), false);
+
+  const otherMerchantAfterMerchantNote = await call(worker, database, "database", { cookie: otherCookie });
+  assert.equal(otherMerchantAfterMerchantNote.body.database.notices.some((notice) => notice.message.includes(merchantNoteText)), false);
+
+  const adminNoteText = "تمت مراجعة الملاحظة وسيتم تجهيز الطرد اليوم.";
+  const adminNote = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: adminSeesMerchantNote.body.revision,
+      database: {
+        ...adminSeesMerchantNote.body.database,
+        orders: adminSeesMerchantNote.body.database.orders.map((item) => item.id === order.id ? {
+          ...item,
+          trackingEvents: [...(item.trackingEvents ?? []), {
+            id: "admin-note-request",
+            kind: "note",
+            status: item.status,
+            title: "ملاحظة الإدارة",
+            location: "مع الإدارة",
+            actor: "الإدارة",
+            note: adminNoteText,
+            createdAt: new Date().toISOString(),
+          }],
+        } : item),
+      },
+    },
+  });
+  assert.equal(adminNote.status, 200);
+  assert.equal(adminNote.body.database.orders.find((item) => item.id === order.id).trackingEvents.some((event) => event.note === adminNoteText), true);
+
+  const merchantAfterAdminNote = await call(worker, database, "database", { cookie: secondCookie });
+  const adminNoteNotice = merchantAfterAdminNote.body.database.notices.find((notice) => notice.orderId === order.id && notice.message.includes(adminNoteText));
+  assert.ok(adminNoteNotice);
+  assert.equal(adminNoteNotice.userId, firstDevice.body.userId);
+  assert.equal(adminNoteNotice.title, "ملاحظة جديدة على الطرد");
+  assert.equal(adminNoteNotice.read, false);
+  assert.equal(merchantAfterAdminNote.body.database.orders.find((item) => item.id === order.id).trackingEvents.some((event) => event.note === adminNoteText), true);
+
+  const otherMerchantAfterAdminNote = await call(worker, database, "database", { cookie: otherCookie });
+  assert.equal(otherMerchantAfterAdminNote.body.database.notices.some((notice) => notice.orderId === order.id), false);
 
   const courierDoesNotSeeMerchantNote = await call(worker, database, "database", { cookie: employeeCookie });
   assert.equal(courierDoesNotSeeMerchantNote.status, 200);
@@ -2288,6 +2335,8 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(courierOrderAfterNote.notes, courierInstructions);
   assert.ok(courierOrderAfterNote.trackingEvents.every((event) => event.kind !== "note"));
   assert.ok(!JSON.stringify(courierDoesNotSeeMerchantNote.body).includes(merchantNoteText));
+  assert.ok(!JSON.stringify(courierDoesNotSeeMerchantNote.body).includes(adminNoteText));
+  assert.equal(courierDoesNotSeeMerchantNote.body.database.notices.some((notice) => notice.orderId === order.id), false);
 
   const outdatedWrite = await call(worker, database, "database", {
     method: "PUT",

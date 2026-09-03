@@ -1721,7 +1721,8 @@ function isValidDatabase(value: unknown): value is Database {
     && Array.isArray(entry.orderIds) && entry.orderIds.length <= 50_000 && entry.orderIds.every((id) => typeof id === "string" && id.length <= 160);
   const validNotice = (entry: unknown) => record(entry) && validId(entry)
     && stringFields(entry, ["userId", "title", "message", "icon", "createdAt"])
-    && typeof entry.read === "boolean";
+    && typeof entry.read === "boolean"
+    && (entry.orderId === undefined || (typeof entry.orderId === "string" && /^[a-zA-Z0-9_-]{1,160}$/.test(entry.orderId)));
   const uniqueIds = (entries: unknown[]) => new Set(entries.map((entry) => (entry as Record<string, unknown>).id)).size === entries.length;
   const preferences = candidate.preferences;
   return Array.isArray(candidate.users) && candidate.users.length <= 5_000
@@ -1822,10 +1823,17 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
 
   const accountsById = new Map(users.map((entry) => [entry.id, entry]));
   const existingOrders = new Map(current.orders.map((order) => [order.id, order]));
+  const addedTrackingNotes: Array<{ orderId: string; trackingNumber: string; merchantId: string; note: string }> = [];
   const orders = submitted.orders.map((candidate) => {
     const existing = existingOrders.get(candidate.id);
     const merchant = accountsById.get(candidate.merchantId);
     const courier = candidate.courierId ? accountsById.get(candidate.courierId) : undefined;
+    if (existing) {
+      const savedEventIds = new Set(getOrderTrackingEvents(existing).map((event) => event.id));
+      const requestedNote = getOrderTrackingEvents(candidate).find((event) => event.kind === "note" && !savedEventIds.has(event.id));
+      const note = requestedNote?.note.trim().slice(0, 500) ?? "";
+      if (note) addedTrackingNotes.push({ orderId: existing.id, trackingNumber: existing.trackingNumber, merchantId: existing.merchantId, note });
+    }
     const protectedOrder = existing ? { ...candidate, notes: existing.notes, privateNotes: existing.privateNotes } : { ...candidate, notes: "", privateNotes: "" };
     return {
       ...protectedOrder,
@@ -1838,12 +1846,23 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     ...invoice,
     merchantName: accountsById.get(invoice.merchantId)?.name ?? invoice.merchantName,
   }));
+  const trackingNoteNotices = addedTrackingNotes.map((entry): Notice => ({
+    id: uid("notice"),
+    userId: entry.merchantId,
+    orderId: entry.orderId,
+    title: "ملاحظة جديدة على الطرد",
+    message: `أضافت الإدارة ملاحظة على الطرد ${entry.trackingNumber}: ${entry.note}`,
+    icon: "message",
+    read: false,
+    createdAt: new Date().toISOString(),
+  }));
 
   return removeLegacyDemoData({
     ...submitted,
     users,
     orders,
     collections,
+    notices: [...trackingNoteNotices, ...submitted.notices],
     nextOrder: Math.max(current.nextOrder, submitted.nextOrder || current.nextOrder),
     nextCollection: Math.max(current.nextCollection, submitted.nextCollection || current.nextCollection),
   });
@@ -1962,12 +1981,16 @@ function mergeMerchantCollections(current: CollectionInvoice[], submitted: Colle
 function mergeMerchantDatabase(current: Database, submitted: Database, account: User): Database {
   const savedAccount = account;
   const createdOrders: Order[] = [];
+  const addedTrackingNotes: Array<{ orderId: string; trackingNumber: string; note: string }> = [];
 
   let nextOrder = current.nextOrder;
 
   const orders = mergeMerchantRecords<Order>(current.orders, submitted.orders, account.id, (candidate, existing) => {
     if (existing) {
       const trackedOrder = mergeMerchantTrackingNote(existing, candidate, savedAccount);
+      const savedEventIds = new Set(getOrderTrackingEvents(existing).map((event) => event.id));
+      const addedNote = getOrderTrackingEvents(trackedOrder).find((event) => event.kind === "note" && !savedEventIds.has(event.id));
+      if (addedNote?.note) addedTrackingNotes.push({ orderId: existing.id, trackingNumber: existing.trackingNumber, note: addedNote.note });
       return {
         ...existing,
         deleted: candidate.deleted === true,
@@ -2058,6 +2081,16 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
   const otherNotices = current.notices.filter((notice) => notice.userId !== account.id);
   const myNotices = submitted.notices.filter((notice) => notice.userId === account.id).map((notice): Notice => ({ ...notice, userId: account.id }));
   const administrators = current.users.filter((entry) => entry.role === "admin");
+  const trackingNoteNotices = addedTrackingNotes.flatMap((entry) => administrators.map((administrator): Notice => ({
+    id: uid("notice"),
+    userId: administrator.id,
+    orderId: entry.orderId,
+    title: "ملاحظة جديدة على الطرد",
+    message: `أضاف ${savedAccount.name} ملاحظة على الطرد ${entry.trackingNumber}: ${entry.note}`,
+    icon: "message",
+    read: false,
+    createdAt: new Date().toISOString(),
+  })));
   const privateNoteNotices = createdOrders.flatMap((order) => order.privateNotes
     ? administrators.map((administrator): Notice => ({
       id: uid("notice"),
@@ -2079,7 +2112,7 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     orders,
     recipients,
     collections,
-    notices: [...privateNoteNotices, ...myNotices, ...otherNotices],
+    notices: [...trackingNoteNotices, ...privateNoteNotices, ...myNotices, ...otherNotices],
     preferences,
     nextOrder,
     nextCollection,

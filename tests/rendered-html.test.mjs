@@ -1200,6 +1200,7 @@ test("opens every newly created parcel on a persistent responsive tracking histo
   ]);
 
   assert.match(data, /export type TrackingEvent = \{/);
+  assert.match(data, /orderId\?: string/);
   assert.match(data, /trackingEvents\?: TrackingEvent\[\]/);
   assert.match(data, /export function createTrackingEvent\(/);
   assert.match(data, /export function getOrderTrackingEvents\(/);
@@ -1223,6 +1224,9 @@ test("opens every newly created parcel on a persistent responsive tracking histo
   assert.match(dashboard, /appendOrderTrackingNote\(/);
   assert.match(dashboard, /إضافة ملاحظة للحالة الحالية/);
   assert.match(dashboard, /<TrackingNoteComposer status=\{order\.status\}/);
+  assert.match(dashboard, /sessionStorage\.getItem\("almadina-order-note-target"\)/);
+  assert.match(dashboard, /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/);
+  assert.match(dashboard, /className="tracking-note-target"/);
   assert.match(dashboard, /<Modal title="تحديث حالة الطرد"/);
   assert.match(admin, /appendOrderTrackingEvent\(/);
   assert.match(admin, /<TrackingNoteComposer status=\{statusUpdate\.status\}/);
@@ -1237,6 +1241,10 @@ test("opens every newly created parcel on a persistent responsive tracking histo
   assert.match(server, /function mergeMerchantTrackingNote\(/);
   assert.match(server, /event\?\.kind === "note" && !savedEventIds\.has\(event\.id\)/);
   assert.match(server, /appendOrderTrackingNote\(existing, account\.name, note\)/);
+  assert.match(server, /addedTrackingNotes/);
+  assert.match(server, /orderId: entry\.orderId/);
+  assert.match(server, /أضافت الإدارة ملاحظة على الطرد/);
+  assert.match(server, /أضاف \$\{savedAccount\.name\} ملاحظة على الطرد/);
   assert.doesNotMatch(server, /trackingEvents: candidate\.trackingEvents/);
   assert.match(server, /status:\s*"draft"/);
   assert.match(server, /trackingEvents:\s*\[createTrackingEvent\("draft", savedAccount\.name/);
@@ -1245,6 +1253,7 @@ test("opens every newly created parcel on a persistent responsive tracking histo
   assert.match(styles, /\.tracking-history\s*\{/);
   assert.match(styles, /\.tracking-history__event\s*\{/);
   assert.match(styles, /\.tracking-note-form\s*\{/);
+  assert.match(styles, /\.tracking-note-target\.is-highlighted/);
   assert.match(styles, /\.tracking-status-modal\s*\{/);
   assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.tracking-history__event/);
 });
@@ -1365,6 +1374,12 @@ test("lets a signed-in account clear only its own selected notifications through
   assert.match(management, /className="notification-card__delete is-danger"/);
   assert.match(management, /label=\{`حذف الإشعار: \$\{notice\.title\}`\}/);
   assert.match(management, /disabled=\{clearingNotices\}/);
+  assert.match(management, /function openNotice\(notice: Notice\)/);
+  assert.match(management, /notice\.orderId/);
+  assert.match(management, /sessionStorage\.setItem\("almadina-order-note-target", linkedOrder\.id\)/);
+  assert.match(management, /setSelectedOrderId\(linkedOrder\.id\)/);
+  assert.match(management, /setView\("order-detail"\)/);
+  assert.match(management, /onClick=\{\(\) => openNotice\(notice\)\}/);
   assert.match(server, /async function clearNotices\(database: D1Database, request: Request, session: AuthenticatedSession\): Promise<Response>/);
   assert.match(server, /Array\.isArray\(payload\.noticeIds\)[\s\S]*payload\.noticeIds\.length > 5_000/);
   assert.match(server, /const noticeIds = new Set\(payload\.noticeIds\.map/);

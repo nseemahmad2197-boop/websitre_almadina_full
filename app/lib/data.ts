@@ -139,6 +139,7 @@ export type Notice = {
   icon: IconName;
   read: boolean;
   createdAt: string;
+  orderId?: string;
   broadcastId?: string;
   audience?: NoticeAudience;
 };
