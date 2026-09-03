@@ -234,7 +234,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .tracking-box h2 { font-size: 13px; font-weight: 750; }
 .tracking-box__row { display: grid; grid-template-columns: 1fr 46px; gap: 8px; }
 .tracking-box__camera { width: 46px !important; height: 45px !important; border-radius: 12px !important; background: var(--green) !important; color: #fff !important; }
-.available-accounts-button { display: none; width: 100%; min-height: 62px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 72%); border-radius: 14px; background: color-mix(in srgb, var(--green-pale), var(--surface) 58%); color: var(--text); text-align: right; cursor: pointer; transition: border-color .18s, box-shadow .18s, opacity .18s, transform .18s; }
+.available-accounts-button { display: grid; width: 100%; min-height: 62px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--green), var(--line) 72%); border-radius: 14px; background: color-mix(in srgb, var(--green-pale), var(--surface) 58%); color: var(--text); text-align: right; cursor: pointer; transition: border-color .18s, box-shadow .18s, opacity .18s, transform .18s; }
 .available-accounts-button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--green), var(--line) 36%); box-shadow: 0 8px 18px rgb(8 124 69 / 9%); transform: translateY(-1px); }
 .available-accounts-button:active:not(:disabled) { transform: translateY(0); }
 .available-accounts-button:disabled { border-color: var(--line); background: var(--surface-muted); cursor: default; opacity: .66; }
@@ -616,6 +616,7 @@ html[data-theme="dark"] .oversize-fee-notice.is-active strong { color: #f2d38e; 
 .modal__header > h2 { font-size: 17px; }
 .modal-description { margin-bottom: 15px; color: var(--muted); font-size: 11px; line-height: 1.8; }
 .modal-form { display: grid; gap: 13px; }
+.modal-backdrop:has(.confirm-modal) { z-index: 60; }
 .confirm-modal { display: grid; justify-items: center; gap: 11px; padding: 25px 21px 20px; text-align: center; }
 .confirm-modal__icon { display: grid; width: 53px; height: 53px; place-items: center; border-radius: 16px; background: var(--green-pale); color: var(--green); }
 .confirm-modal--danger .confirm-modal__icon { background: var(--danger-soft); color: var(--danger); }
@@ -1159,7 +1160,6 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 }
 
 @media (max-width: 760px) {
-  .available-accounts-button { display: grid; }
   .status-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .status-card { min-height: 91px; }
   .detail-columns { grid-template-columns: 1fr; }

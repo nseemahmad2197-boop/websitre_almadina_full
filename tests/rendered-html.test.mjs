@@ -470,12 +470,14 @@ test("shows a safe available-accounts picker with password fallback and signed-o
   assert.match(auth, /disabled=\{loginOperationBusy\}/);
   assert.match(auth, /الجهاز الحساب المرتبط بالبصمة/);
   assert.match(auth, /type=\{showPassword \? "text" : "password"\}/);
-  assert.match(styles, /\.available-accounts-button\s*\{\s*display:\s*none/);
+  assert.match(styles, /\.available-accounts-button\s*\{\s*display:\s*grid/);
   assert.match(styles, /\.available-accounts-button:disabled\s*\{/);
   assert.match(styles, /\.available-accounts-modal\s*\{/);
   assert.match(styles, /\.available-account-row\s*\{/);
   assert.match(styles, /\.available-account-remove\s*\{/);
-  assert.match(styles, /@media \(max-width: 760px\)\s*\{[\s\S]*?\.available-accounts-button\s*\{\s*display:\s*grid/);
+  assert.doesNotMatch(styles, /\.available-accounts-button\s*\{\s*display:\s*none/);
+  assert.match(styles, /\.modal-backdrop:has\(\.available-accounts-modal\)\s*\{\s*z-index:\s*45/);
+  assert.match(styles, /\.modal-backdrop:has\(\.confirm-modal\)\s*\{\s*z-index:\s*60/);
   assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.available-accounts-button/);
 });
 
