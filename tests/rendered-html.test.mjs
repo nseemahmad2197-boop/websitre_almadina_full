@@ -453,9 +453,16 @@ test("shows a safe available-accounts picker with password fallback and signed-o
   assert.match(auth, /setAccountsOpen\(true\)/);
   assert.match(auth, /<Modal title="الحسابات المتاحة"/);
   assert.match(auth, /availableAccounts\.map\(\(account\)/);
+  assert.match(auth, /className="available-account-row"/);
   assert.match(auth, /setEmail\(account\.email\)/);
   assert.match(auth, /setPassword\(""\)/);
   assert.match(auth, /لا يتم حفظ كلمات المرور/);
+  assert.match(auth, /forgetAvailableAccount\(account\.id\)/);
+  assert.match(auth, /إزالة حساب \$\{account\.name\} من الحسابات المتاحة/);
+  assert.match(auth, /إزالة الحساب من هذا الجهاز؟/);
+  assert.match(auth, /لن يُحذف الحساب أو بياناته/);
+  assert.match(auth, /setAvailableAccounts\(\(current\) => current\.filter\(\(entry\) => entry\.id !== account\.id\)\)/);
+  assert.doesNotMatch(auth, /removeAvailableAccount[\s\S]*?fetch\(/);
   assert.match(auth, /الدخول ببصمة الوجه أو حماية الجهاز/);
   assert.match(auth, /detectBiometricAvailability\(\)/);
   assert.match(auth, /await loginWithBiometric\(\)/);
@@ -466,6 +473,8 @@ test("shows a safe available-accounts picker with password fallback and signed-o
   assert.match(styles, /\.available-accounts-button\s*\{\s*display:\s*none/);
   assert.match(styles, /\.available-accounts-button:disabled\s*\{/);
   assert.match(styles, /\.available-accounts-modal\s*\{/);
+  assert.match(styles, /\.available-account-row\s*\{/);
+  assert.match(styles, /\.available-account-remove\s*\{/);
   assert.match(styles, /@media \(max-width: 760px\)\s*\{[\s\S]*?\.available-accounts-button\s*\{\s*display:\s*grid/);
   assert.match(styles, /@media \(max-width: 500px\)\s*\{[\s\S]*?\.available-accounts-button/);
 });

@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { detectBiometricAvailability } from "../lib/app-lock-client";
-import { AVAILABLE_ACCOUNTS_EVENT, AVAILABLE_ACCOUNTS_STORAGE_KEY, readAvailableAccounts, type AvailableAccount } from "../lib/available-accounts";
+import { AVAILABLE_ACCOUNTS_EVENT, AVAILABLE_ACCOUNTS_STORAGE_KEY, forgetAvailableAccount, readAvailableAccounts, type AvailableAccount } from "../lib/available-accounts";
 import type { TrackableOrder } from "../lib/data";
 import { Icon } from "./icon";
 import { PasswordRecovery } from "./password-recovery";
@@ -12,7 +12,7 @@ import { TrackingHistory } from "./tracking-history";
 import { Avatar, Brand, Button, Field, IconButton, Modal, StatusPill } from "./ui";
 
 export function Authentication() {
-  const { login, loginWithBiometric, requestRegistration, verifyRegistration, preferences, updatePreferences, showToast, openScanner } = useApp();
+  const { login, loginWithBiometric, requestRegistration, verifyRegistration, preferences, updatePreferences, showToast, confirm, openScanner } = useApp();
   const [mode, setMode] = useState<"login" | "register" | "recover">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -99,6 +99,27 @@ export function Authentication() {
     showToast(`تم اختيار حساب ${account.name} وملء بريده لتسجيل الدخول بكلمة المرور. عند استخدام حماية الجهاز سيختار الجهاز الحساب المرتبط بالبصمة.`, "info");
   }
 
+  function removeAvailableAccount(account: AvailableAccount) {
+    if (loginOperationBusy) return;
+    confirm({
+      title: "إزالة الحساب من هذا الجهاز؟",
+      message: `سيُزال حساب ${account.name} من قائمة الحسابات المتاحة على هذا الجهاز فقط. لن يُحذف الحساب أو بياناته، ويمكن تسجيل الدخول إليه لاحقًا بالبريد الإلكتروني وكلمة المرور.`,
+      confirmLabel: "إزالة من الجهاز",
+      danger: true,
+      onConfirm: () => {
+        forgetAvailableAccount(account.id);
+        setAvailableAccounts((current) => current.filter((entry) => entry.id !== account.id));
+        if (email.trim().toLowerCase() === account.email.trim().toLowerCase()) {
+          setEmail("");
+          setPassword("");
+          setError("");
+        }
+        if (availableAccounts.length === 1) setAccountsOpen(false);
+        showToast("تمت إزالة الحساب من قائمة هذا الجهاز.");
+      },
+    });
+  }
+
   function openPasswordRecovery() {
     if (loginOperationBusy) return;
     setPassword("");
@@ -177,19 +198,22 @@ export function Authentication() {
             {availableAccounts.map((account) => {
               const selected = email.trim().toLowerCase() === account.email;
               return (
-                <button type="button" key={account.id} className={`account-entry ${selected ? "is-active" : ""}`} disabled={loginOperationBusy} onClick={() => chooseAvailableAccount(account)}>
-                  <Avatar name={account.name} color={account.avatarColor} />
-                  <span>
-                    <strong>{account.name}</strong>
-                    <small>{account.role === "admin" ? "حساب الإدارة" : account.role === "courier" ? "حساب موظف · مندوب" : account.store}</small>
-                    <em dir="ltr">{account.email}</em>
-                  </span>
-                  <Icon name={selected ? "check" : "chevronLeft"} size={19} />
-                </button>
+                <div className="available-account-row" key={account.id}>
+                  <button type="button" className={`account-entry ${selected ? "is-active" : ""}`} disabled={loginOperationBusy} onClick={() => chooseAvailableAccount(account)}>
+                    <Avatar name={account.name} color={account.avatarColor} />
+                    <span>
+                      <strong>{account.name}</strong>
+                      <small>{account.role === "admin" ? "حساب الإدارة" : account.role === "courier" ? "حساب موظف · مندوب" : account.store}</small>
+                      <em dir="ltr">{account.email}</em>
+                    </span>
+                    <Icon name={selected ? "check" : "chevronLeft"} size={19} />
+                  </button>
+                  <IconButton type="button" name="trash" label={`إزالة حساب ${account.name} من الحسابات المتاحة`} className="available-account-remove is-danger" disabled={loginOperationBusy} onClick={() => removeAvailableAccount(account)} />
+                </div>
               );
             })}
           </div>
-          <p className="available-accounts-modal__privacy"><Icon name="shield" size={15} />لا يتم حفظ كلمات المرور في قائمة الحسابات المتاحة.</p>
+          <p className="available-accounts-modal__privacy"><Icon name="shield" size={15} /><span>لا يتم حفظ كلمات المرور هنا. زر الإزالة ينسى الحساب من قائمة هذا الجهاز فقط ولا يحذف الحساب أو بياناته.</span></p>
         </Modal>
       )}
     </main>

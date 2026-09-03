@@ -641,10 +641,14 @@ html[data-theme="dark"] .oversize-fee-notice.is-active strong { color: #f2d38e; 
 .available-accounts-modal > .modal__header { margin-bottom: 12px; }
 .available-accounts-modal > .modal-description { margin-bottom: 12px; }
 .available-account-list { min-height: 0; max-height: min(48svh, 370px); gap: 9px; padding: 2px 3px 8px; margin-bottom: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: color-mix(in srgb, var(--green), transparent 55%) transparent; scrollbar-width: thin; }
+.available-account-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: stretch; gap: 8px; }
 .available-account-list .account-entry { width: 100%; min-height: 67px; flex: 0 0 auto; padding: 9px 11px; color: var(--text); transition: border-color .18s, background-color .18s, box-shadow .18s, transform .18s; }
 .available-account-list .account-entry:hover { border-color: color-mix(in srgb, var(--green), var(--line) 53%); background: color-mix(in srgb, var(--green-pale), var(--surface) 68%); box-shadow: 0 6px 15px rgb(24 32 28 / 5%); transform: translateY(-1px); }
 .available-account-list .account-entry.is-active { box-shadow: inset 3px 0 0 var(--green); }
 .available-account-list .account-entry > span:not(.avatar) { min-width: 0; }
+.available-account-remove { width: 44px; height: auto; min-height: 67px; border: 1px solid color-mix(in srgb, var(--danger), var(--line) 75%); border-radius: 13px; background: color-mix(in srgb, var(--danger-soft), var(--surface) 58%); color: var(--danger); }
+.available-account-remove:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger), var(--line) 42%); background: var(--danger-soft); }
+.available-account-remove:disabled { cursor: not-allowed; opacity: .5; }
 .available-accounts-modal__privacy { display: flex; align-items: center; gap: 6px; padding: 11px 12px; margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-muted); color: var(--muted); font-size: 9px; line-height: 1.65; }
 .available-accounts-modal__privacy > svg { flex: 0 0 auto; color: var(--green); }
 .search-modal { display: grid; gap: 13px; }
@@ -1390,11 +1394,13 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .available-accounts-modal > .modal__header { margin-bottom: 10px; }
   .available-accounts-modal > .modal-description { margin-bottom: 10px; font-size: 10px; }
   .available-account-list { max-height: min(49svh, 390px); gap: 7px; padding-right: 1px; padding-left: 1px; }
+  .available-account-row { grid-template-columns: minmax(0, 1fr) 42px; gap: 6px; }
   .available-account-list .account-entry { min-height: 62px; gap: 8px; padding: 8px 9px; border-radius: 12px; }
   .available-account-list .account-entry > .avatar { width: 40px; height: 40px; border-radius: 12px; font-size: 16px; }
   .available-account-list .account-entry > span:not(.avatar) > strong { font-size: 11px; }
   .available-account-list .account-entry > span:not(.avatar) > small { font-size: 9px; }
   .available-account-list .account-entry > span:not(.avatar) > em { font-size: 8px; }
+  .available-account-remove { width: 42px; min-height: 62px; border-radius: 12px; }
   .available-accounts-modal__privacy { padding: 9px 10px; margin-top: 9px; font-size: 8px; }
   .collections-page > .empty-state { min-height: clamp(245px, 38svh, 390px); }
   .collections-page .empty-state__icon { width: 68px; height: 68px; border-radius: 21px; }
