@@ -1290,11 +1290,16 @@ test("lets only the administrator broadcast app-update notifications to membersh
   assert.match(server, /isUnchangedLegacyDuplicate[\s\S]*normalizeAccountPhone\(existing!\.phone\) === phone/);
   assert.match(application, /knownNoticeIds/);
   assert.match(application, /noticeBaselineUserId/);
+  assert.match(data, /notifications:\s*true,[\s\S]*sounds:\s*true/);
+  assert.match(application, /prepareNotificationAudio/);
   assert.match(application, /playNotificationChime/);
   assert.match(application, /preferences\.notifications && preferences\.sounds/);
   assert.match(application, /newNotices\.some\(\(notice\) => !notice\.read\)/);
   assert.match(application, /knownNoticeIds\.current\.add\(notice\.id\)/);
+  assert.doesNotMatch(application, /currentUserRole !== "admin"/);
+  assert.match(application, /pendingNotificationChime\.current = true/);
   assert.match(application, /document\.addEventListener\("pointerdown", unlock/);
+  assert.match(application, /document\.addEventListener\("touchend", unlock/);
   assert.match(admin, />إرسال تحديث<\/Button>/);
   assert.match(admin, /title="إرسال إشعار تحديث"/);
   assert.match(admin, /جميع المستخدمين/);

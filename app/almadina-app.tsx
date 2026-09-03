@@ -42,12 +42,32 @@ function noticeIdsForUser(notices: Notice[], userId: string): Set<string> {
   return new Set(notices.filter((notice) => notice.userId === userId).map((notice) => notice.id));
 }
 
-async function playNotificationChime(context: AudioContext | null): Promise<void> {
-  if (!context || context.state === "closed") return;
+async function prepareNotificationAudio(context: AudioContext): Promise<boolean> {
+  if (context.state === "closed") return false;
 
   try {
     if (context.state === "suspended") await context.resume();
-    if (context.state !== "running") return;
+    if (context.state !== "running") return false;
+
+    // Safari on iPhone requires an audio source to start inside a user gesture,
+    // even when resume() reports that the context is running.
+    const buffer = context.createBuffer(1, 1, context.sampleRate);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.start();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function playNotificationChime(context: AudioContext | null): Promise<boolean> {
+  if (!context || context.state === "closed") return false;
+
+  try {
+    if (context.state === "suspended") await context.resume();
+    if (context.state !== "running") return false;
 
     const now = context.currentTime;
     const playTone = (frequency: number, offset: number, duration: number, volume: number) => {
@@ -64,10 +84,11 @@ async function playNotificationChime(context: AudioContext | null): Promise<void
       oscillator.stop(start + duration + 0.02);
     };
 
-    playTone(720, 0, 0.2, 0.11);
-    playTone(960, 0.16, 0.28, 0.085);
+    playTone(720, 0, 0.2, 0.18);
+    playTone(960, 0.16, 0.28, 0.14);
+    return true;
   } catch {
-    // Some browsers block audio until the first user interaction; notifications must remain usable without sound.
+    return false;
   }
 }
 
@@ -237,36 +258,36 @@ export default function AlmadinaApplication() {
   const knownNoticeIds = useRef<Set<string>>(new Set());
   const noticeBaselineUserId = useRef<string | null>(null);
   const notificationAudioContext = useRef<AudioContext | null>(null);
+  const notificationSoundEnabled = useRef(false);
+  const pendingNotificationChime = useRef(false);
   const backgroundedAt = useRef<number | null>(null);
 
   useEffect(() => {
     let unlocking = false;
-    const removeUnlockListeners = () => {
-      document.removeEventListener("pointerdown", unlock);
-      document.removeEventListener("keydown", unlock);
-    };
     const unlock = () => {
       if (unlocking) return;
 
       try {
         const AudioContextConstructor = window.AudioContext ?? (window as WebkitAudioWindow).webkitAudioContext;
-        if (!AudioContextConstructor) {
-          removeUnlockListeners();
-          return;
-        }
+        if (!AudioContextConstructor) return;
         const context = notificationAudioContext.current?.state === "closed"
           ? new AudioContextConstructor()
           : notificationAudioContext.current ?? new AudioContextConstructor();
         notificationAudioContext.current = context;
-        if (context.state === "running") {
-          removeUnlockListeners();
-          return;
-        }
 
         unlocking = true;
-        void context.resume().then(() => {
+        void prepareNotificationAudio(context).then(async (ready) => {
           unlocking = false;
-          if (context.state === "running") removeUnlockListeners();
+          if (!ready || !pendingNotificationChime.current) return;
+
+          if (!notificationSoundEnabled.current) {
+            pendingNotificationChime.current = false;
+            return;
+          }
+
+          pendingNotificationChime.current = false;
+          const played = await playNotificationChime(context);
+          if (!played) pendingNotificationChime.current = true;
         }).catch(() => {
           unlocking = false;
         });
@@ -277,8 +298,13 @@ export default function AlmadinaApplication() {
     };
 
     document.addEventListener("pointerdown", unlock, { passive: true });
+    document.addEventListener("touchend", unlock, { passive: true });
     document.addEventListener("keydown", unlock);
-    return removeUnlockListeners;
+    return () => {
+      document.removeEventListener("pointerdown", unlock);
+      document.removeEventListener("touchend", unlock);
+      document.removeEventListener("keydown", unlock);
+    };
   }, []);
 
   useEffect(() => {
@@ -360,6 +386,11 @@ export default function AlmadinaApplication() {
   const currentUserRole = user?.role;
 
   useEffect(() => {
+    notificationSoundEnabled.current = Boolean(userId && preferences.notifications && preferences.sounds);
+    if (!notificationSoundEnabled.current) pendingNotificationChime.current = false;
+  }, [userId, preferences.notifications, preferences.sounds]);
+
+  useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => { const dark = preferences.theme === "dark" || (preferences.theme === "system" && media.matches); document.documentElement.dataset.theme = dark ? "dark" : "light"; document.documentElement.style.colorScheme = dark ? "dark" : "light"; };
     apply(); media.addEventListener("change", apply); return () => media.removeEventListener("change", apply);
@@ -390,6 +421,7 @@ export default function AlmadinaApplication() {
     if (!userId || !currentUserRole) {
       noticeBaselineUserId.current = null;
       knownNoticeIds.current = new Set();
+      pendingNotificationChime.current = false;
       return;
     }
 
@@ -403,8 +435,16 @@ export default function AlmadinaApplication() {
     if (!newNotices.length) return;
     newNotices.forEach((notice) => knownNoticeIds.current.add(notice.id));
 
-    if (currentUserRole !== "admin" && preferences.notifications && preferences.sounds && newNotices.some((notice) => !notice.read)) {
-      void playNotificationChime(notificationAudioContext.current);
+    if (preferences.notifications && preferences.sounds && newNotices.some((notice) => !notice.read)) {
+      const context = notificationAudioContext.current;
+      if (!context) {
+        pendingNotificationChime.current = true;
+        return;
+      }
+
+      void playNotificationChime(context).then((played) => {
+        if (!played) pendingNotificationChime.current = true;
+      });
     }
   }, [database.notices, userId, currentUserRole, preferences.notifications, preferences.sounds]);
 

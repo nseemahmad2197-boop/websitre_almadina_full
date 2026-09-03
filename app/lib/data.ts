@@ -168,7 +168,7 @@ export type Database = {
 export const defaultPreferences: Preferences = {
   theme: "light",
   notifications: true,
-  sounds: false,
+  sounds: true,
   orderUpdates: true,
   biometric: false,
   pin: "",
