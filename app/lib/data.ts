@@ -140,6 +140,17 @@ export type CollectionInvoice = {
   paidAt?: string;
 };
 
+export function isOrderInvoicedForCurrentShipment(order: Pick<Order, "id" | "shippedAt">, invoices: CollectionInvoice[]): boolean {
+  const shippedAt = Date.parse(order.shippedAt ?? "");
+  return invoices.some((invoice) => {
+    if (!invoice.orderIds.includes(order.id)) return false;
+    if (invoice.status !== "paid") return true;
+    const settledAt = Date.parse(invoice.paidAt || invoice.verifiedAt || invoice.createdAt);
+    // Only a confirmed shipment after settlement starts a new billable delivery.
+    return !Number.isFinite(shippedAt) || !Number.isFinite(settledAt) || shippedAt <= settledAt;
+  });
+}
+
 export type NoticeAudience = "all" | "merchants" | "couriers" | "premium" | "diamond" | "standard" | "user";
 
 export type Notice = {
@@ -401,7 +412,9 @@ export function getWeightFee(value: string | null | undefined): number {
 const arabicDigits = "٠١٢٣٤٥٦٧٨٩";
 
 function normalizeDigits(value: string): string {
-  return value.replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)));
+  return value.replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
+    .replace(/[٫,]/g, ".");
 }
 
 function validDimension(value: number | string | null | undefined): number {
@@ -414,10 +427,12 @@ export function parseDimensionCm(value: number | string | null | undefined): num
 }
 
 export function getOversizeFee(...dimensions: Array<number | string | null | undefined>): number {
-  const largestDimension = Math.max(0, ...dimensions.map(validDimension));
-  if (largestDimension <= OVERSIZE_DIMENSION_LIMIT_CM) return 0;
-  const tier = Math.ceil((largestDimension - OVERSIZE_DIMENSION_LIMIT_CM) / OVERSIZE_DIMENSION_STEP_CM);
-  return Math.min(tier * OVERSIZE_FEE, MAX_OVERSIZE_FEE);
+  return dimensions.reduce<number>((total, dimension) => {
+    const value = validDimension(dimension);
+    if (value <= OVERSIZE_DIMENSION_LIMIT_CM) return total;
+    const tier = Math.ceil((value - OVERSIZE_DIMENSION_LIMIT_CM) / OVERSIZE_DIMENSION_STEP_CM);
+    return total + Math.min(tier * OVERSIZE_FEE, MAX_OVERSIZE_FEE);
+  }, 0);
 }
 
 function parsedOrderDimensions(value: string | undefined): [number, number, number] {

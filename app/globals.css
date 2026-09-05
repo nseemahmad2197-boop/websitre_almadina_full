@@ -351,10 +351,11 @@ html[data-theme="dark"] .membership-badge--diamond { background: #172b42; color:
 .status-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; }
 .status-card { display: grid; min-height: 102px; justify-items: center; align-content: center; gap: 5px; padding: 8px 4px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); cursor: pointer; transition: transform .18s, box-shadow .18s; }
 .status-card:hover { box-shadow: 0 8px 20px rgb(0 0 0 / 6%); transform: translateY(-3px); }
+.status-card.is-selected { border-color: var(--status-color); background: color-mix(in srgb, var(--status-bg) 58%, var(--surface)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-color) 22%, transparent); }
 .status-card > span { display: grid; width: 35px; height: 35px; place-items: center; border-radius: 11px; background: var(--status-bg); color: var(--status-color); }
 .status-card strong { font-size: 18px; line-height: 1; }
 .status-card small { font-size: 9px; text-align: center; }
-.dashboard-orders { gap: 12px; }
+.dashboard-orders, .dashboard-status-orders { gap: 12px; }
 .segmented { display: grid; min-height: 39px; grid-auto-columns: 1fr; grid-auto-flow: column; gap: 3px; padding: 3px; border-radius: 12px; background: var(--surface-muted); }
 .segmented > button { display: flex; justify-content: center; align-items: center; gap: 5px; padding: 5px 8px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 700; }
 .segmented > button.segmented__active { background: var(--surface); color: var(--text); box-shadow: 0 2px 7px rgb(0 0 0 / 7%); }

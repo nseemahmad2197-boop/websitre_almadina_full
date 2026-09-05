@@ -8,7 +8,7 @@ import {
   type Base64URLString,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, RETURN_PRICING_VERSION, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, isOrderInvoicedForCurrentShipment, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, RETURN_PRICING_VERSION, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
 import { generateVapidKeyPair, sendWebPushNotification, WebPushDeliveryError, type VapidKeyPair, type WebPushMessage, type WebPushSubscriptionRecord } from "./web-push";
@@ -2225,6 +2225,9 @@ function normalizeCollectionInvoices(database: Database): Database {
   const merchants = new Map(database.users.filter((account) => account.role === "merchant").map((account) => [account.id, account]));
   const orders = new Map(database.orders.filter((order) => !order.deleted).map((order) => [order.id, order]));
   const collections = database.collections.map((invoice) => {
+    // الفاتورة المسلّمة سجل تسوية ثابت؛ إعادة شحن طردها لا تغيّر مبالغها الموثّقة.
+    // تبقى ترقية الفواتير القديمة التي تسبق إصدار التسعير الحالي متاحة أدناه.
+    if (invoice.status === "paid" && invoice.returnPricingVersion === RETURN_PRICING_VERSION) return invoice;
     const merchant = merchants.get(invoice.merchantId);
     if (!merchant) return invoice;
 
@@ -2239,8 +2242,6 @@ function normalizeCollectionInvoices(database: Database): Database {
         : merchant.membership;
       const amounts = calculateCollectionAmounts(invoiceOrders, membership);
 
-      // الفاتورة المسلّمة تحتفظ بسعرها الموثّق، بينما الفواتير المفتوحة تتبع نوع الحساب الحالي.
-      if (invoice.status === "paid" && collectionAmountsMatch(invoice, amounts)) return invoice;
       if (collectionAmountsMatch(invoice, amounts)) return invoice;
       return { ...invoice, ...amounts };
     } catch {
@@ -2257,13 +2258,14 @@ function mergeMerchantCollections(current: CollectionInvoice[], submitted: Colle
   const others = current.filter((invoice) => invoice.merchantId !== account.id);
   const existing = new Map(mine.map((invoice) => [invoice.id, invoice]));
   const allExistingIds = new Set(current.map((invoice) => invoice.id));
-  const usedOrderIds = new Set(current.flatMap((invoice) => invoice.orderIds));
+  const usedOrderIds = new Set(orders.filter((order) => isOrderInvoicedForCurrentShipment(order, current)).map((order) => order.id));
   let nextCollection = startingNumber;
 
   for (const candidate of submitted.filter((invoice) => invoice.merchantId === account.id)) {
     const saved = existing.get(candidate.id);
     if (saved) {
       const canEditVerification = saved.status === "pending" || saved.status === "ready";
+      if (!canEditVerification) continue;
       const verificationCode = canEditVerification && /^\d{4}$/.test(candidate.verificationCode) ? candidate.verificationCode : saved.verificationCode;
       const authorizedRecipient = canEditVerification ? candidate.authorizedRecipient.trim().slice(0, 120) : saved.authorizedRecipient;
       const updated = { ...saved, verificationCode, authorizedRecipient, updatedAt: new Date().toISOString() };
@@ -2274,7 +2276,7 @@ function mergeMerchantCollections(current: CollectionInvoice[], submitted: Colle
     if (allExistingIds.has(candidate.id) || !Array.isArray(candidate.orderIds)) throw new Error("بيانات فاتورة التحصيل غير صالحة.");
     const requestedOrderIds = new Set(candidate.orderIds.filter((id): id is string => typeof id === "string"));
     const eligible = orders.filter((order) => order.merchantId === account.id && !order.deleted && (order.status === "delivered" || order.status === "returned") && requestedOrderIds.has(order.id) && !usedOrderIds.has(order.id));
-    if (!eligible.length) throw new Error("لا توجد طرود جديدة صالحة لفاتورة التحصيل.");
+    if (!eligible.length) throw new ApiRequestError("لا توجد طرود جديدة صالحة لفاتورة التحصيل.", 409);
 
     const amounts = calculateCollectionAmounts(eligible, account.membership);
     const now = new Date();
@@ -3338,14 +3340,17 @@ async function shipScannedOrder(database: D1Database, request: Request, session:
     const order = state.database.orders.find((entry) => entry.trackingNumber.toUpperCase() === trackingNumber && !entry.deleted);
     if (!order) return json({ error: "لم نعثر على طرد بهذا الكود." }, 404);
     if (order.status === "shipped") return json({ error: "تم شحن هذا الطرد مسبقًا." }, 409);
-    if (order.status !== "ready") return json({ error: "يجب أن تكون حالة الطرد «جاهز للإرسال» قبل شحنه." }, 409);
+    if (order.status !== "ready" && order.status !== "returned") return json({ error: "يجب أن تكون حالة الطرد «جاهز للإرسال» أو «راجع» قبل شحنه." }, 409);
 
     const now = new Date().toISOString();
+    const returnedToShipping = order.status === "returned";
     const trackedOrder = appendOrderTrackingEvent(
       order,
       "shipped",
       employee.name,
-      "استلم الموظف الطرد بعد مسح كود الشحن بالكاميرا.",
+      returnedToShipping
+        ? "أعاد الموظف الطرد الراجع إلى الشحن بعد مسح كوده بالكاميرا."
+        : "استلم الموظف الطرد بعد مسح كود الشحن بالكاميرا.",
     );
     const shippedOrder: Order = {
       ...trackedOrder,
@@ -3359,7 +3364,9 @@ async function shipScannedOrder(database: D1Database, request: Request, session:
       userId: order.merchantId,
       orderId: order.id,
       title: "تم شحن الطرد",
-      message: `قرأ الموظف كود الطرد ${order.trackingNumber} وأصبحت حالته «مشحون».`,
+      message: returnedToShipping
+        ? `قرأ الموظف كود الطرد الراجع ${order.trackingNumber} وأعاده إلى حالة «مشحون».`
+        : `قرأ الموظف كود الطرد ${order.trackingNumber} وأصبحت حالته «مشحون».`,
       icon: "truck",
       read: false,
       createdAt: now,

@@ -9,7 +9,7 @@ import { CollectionsPage, ImportPage, NotificationsPage, ProfilePage, Recipients
 import { NewOrder } from "./order-form";
 import { ChangePasswordPage, DeleteAccountPage, HelpPage, LinkedDevicesPage, NotificationSettings, PreferencesPage, PrivacyPage, SecurityPage, SettingsPage } from "./settings-pages";
 import { Icon, type IconName } from "./icon";
-import { Avatar, Brand, EmptyState, Field, IconButton, Modal, StatusPill } from "./ui";
+import { Avatar, Brand, Button, EmptyState, Field, IconButton, Modal, StatusPill } from "./ui";
 
 function NavigationDrawer({ onClose }: { onClose: () => void }) {
   const { user, setView, logout, confirm, openAccountSwitcher } = useApp();
@@ -45,9 +45,11 @@ function GlobalSearch({ onClose }: { onClose: () => void }) {
 }
 
 function TopBar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void }) {
-  const { database, user, setView, openScanner } = useApp();
+  const { database, user, view, setView, openScanner } = useApp();
   const unread = database.notices.filter((notice) => notice.userId === user?.id && !notice.read).length;
   const employee = user?.role === "courier";
+  if (view === "settings" || view === "profile") return null;
+  if (view === "new-order") return <header className="topbar"><div className="topbar__inner"><Button type="reset" form="new-order-form" variant="ghost" icon="trash">مسح جميع الحقول</Button></div></header>;
   return <header className="topbar"><div className="topbar__inner"><IconButton name="menu" label="فتح القائمة" onClick={onMenu} /><button className="topbar__brand" onClick={() => setView(user?.role === "admin" ? "admin" : "home")}><Brand compact /></button><div className="topbar__actions">{user?.role === "merchant" && <button className="topbar__import" type="button" onClick={() => setView("import")}><Icon name="spreadsheet" size={18} /><span>استيراد Excel</span></button>}{!employee && <IconButton name="search" label="بحث" onClick={onSearch} />}<IconButton name="camera" label={employee ? "مسح كود الطرد بالكاميرا" : "مسح رمز الطرد"} onClick={() => openScanner()} />{!employee && <IconButton name="trash" label="المحذوفات" onClick={() => setView("trash")} />}<IconButton name="bell" label="الإشعارات" badge={unread} onClick={() => setView("notifications")} /></div></div></header>;
 }
 

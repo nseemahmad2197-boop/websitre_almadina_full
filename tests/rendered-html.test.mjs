@@ -57,6 +57,21 @@ test("renders the Almadina Express Arabic login application", async () => {
   assert.doesNotMatch(html, /name="codex-preview"/);
 });
 
+test("keeps status-filtered parcels and latest parcels together on the dashboard", async () => {
+  const [dashboard, styles] = await Promise.all([
+    readFile(new URL("../app/components/dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dashboard, /useState<OrderStatus \| null>\(null\)/);
+  assert.match(dashboard, /selectedStatusOrders/);
+  assert.match(dashboard, /طرود حالة \{selectedStatusDefinition\.label\}/);
+  assert.match(dashboard, /أحدث الطرود/);
+  assert.match(dashboard, /aria-pressed=\{selectedStatus === status\.id\}/);
+  assert.doesNotMatch(dashboard, /sessionStorage\.setItem\("almadina-status-filter"/);
+  assert.match(styles, /\.status-card\.is-selected/);
+});
+
 test("offers a responsive Brevo email-only password recovery flow backed by public one-time server grants", async () => {
   const [auth, recovery, server, delivery, worker, renderWorker, schema, migration, styles, blueprint, readme] = await Promise.all([
     readFile(new URL("../app/components/auth.tsx", import.meta.url), "utf8"),
@@ -750,7 +765,7 @@ test("lets courier employees prepare and deliver a collection invoice with the c
   assert.match(styles, /employee-collection/);
 });
 
-test("lets courier employees scan a ready parcel with the camera and mark it shipped", async () => {
+test("lets courier employees scan ready or returned parcels and mark them shipped", async () => {
   const [application, context, shell, admin, employee, dashboard, orderForm, server, data, styles, appSources] = await Promise.all([
     readFile(new URL("../app/almadina-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/app-context.tsx", import.meta.url), "utf8"),
@@ -784,7 +799,7 @@ test("lets courier employees scan a ready parcel with the camera and mark it shi
   assert.match(server, /url\.pathname === ["']\/api\/almadina\/orders\/scan["']/);
   assert.match(server, /session\.account\.role !== "courier"/);
   assert.match(server, /invoice|trackingNumber/);
-  assert.match(server, /status !== "ready"/);
+  assert.match(server, /order\.status !== "ready" && order\.status !== "returned"/);
   assert.match(server, /appendOrderTrackingEvent\(\s*order,\s*"shipped"/);
   assert.match(server, /courierName:\s*(?:employee|account)\.name/);
   assert.match(server, /appendOrderTrackingEvent|createTrackingEvent/);
@@ -1018,8 +1033,9 @@ test("adds progressive weight and dimension fees while keeping legacy imports co
   assert.match(data, /OVERSIZE_DIMENSION_STEP_CM = 20/);
   assert.match(data, /OVERSIZE_FEE = 7/);
   assert.match(data, /MAX_OVERSIZE_FEE = 28/);
-  assert.match(data, /Math\.ceil\(\(largestDimension - OVERSIZE_DIMENSION_LIMIT_CM\) \/ OVERSIZE_DIMENSION_STEP_CM\)/);
-  assert.match(data, /Math\.min\(tier \* OVERSIZE_FEE, MAX_OVERSIZE_FEE\)/);
+  assert.match(data, /dimensions\.reduce<number>\(\(total, dimension\)/);
+  assert.match(data, /Math\.ceil\(\(value - OVERSIZE_DIMENSION_LIMIT_CM\) \/ OVERSIZE_DIMENSION_STEP_CM\)/);
+  assert.match(data, /total \+ Math\.min\(tier \* OVERSIZE_FEE, MAX_OVERSIZE_FEE\)/);
   assert.match(data, /export const WEIGHT_OPTIONS/);
   assert.match(data, /\{ label: "أكثر من 30 كغم", fee: 20 \}/);
   assert.match(data, /export function getWeightFee/);
@@ -1029,7 +1045,7 @@ test("adds progressive weight and dimension fees while keeping legacy imports co
   assert.match(data, /export function getOrderOversizeFee/);
   assert.match(data, /export function parseDimensionCm/);
   assert.match(data, /normalizeDigits/);
-  assert.match(orderForm, /تزيد الرسوم تدريجيًا \$\{OVERSIZE_FEE\} ₪ لكل \$\{OVERSIZE_DIMENSION_STEP_CM\} سم إضافية/);
+  assert.match(orderForm, /تزيد رسوم كل بُعد تدريجيًا \$\{OVERSIZE_FEE\} ₪ لكل \$\{OVERSIZE_DIMENSION_STEP_CM\} سم إضافية/);
   assert.match(orderForm, /className=\{`oversize-fee-notice \$\{dimensionOversizeFee \? "is-active" : ""\}`\}/);
   assert.match(orderForm, /weightFee, oversizeFee/);
   assert.match(orderForm, /oversizeFee:\s*oversizeFee|heightCm: Number\(form\.height\)[\s\S]{0,80}oversizeFee/);
@@ -1097,6 +1113,10 @@ test("normalizes Arabic and Latin dimension values used by CSV importing", async
   assert.equal(parseDimensionCm("40"), 40);
   assert.equal(parseDimensionCm("٤٠"), 40);
   assert.equal(parseDimensionCm("٥٠"), 50);
+  assert.equal(parseDimensionCm("40.5"), 40.5);
+  assert.equal(parseDimensionCm("٤٠٫٥"), 40.5);
+  assert.equal(parseDimensionCm("۴۰,۵"), 40.5);
+  assert.equal(getOversizeFee("٤٠٫٥", 40, 40), 7);
   assert.equal(getOversizeFee(40, 40, 40), 0);
   assert.equal(getOversizeFee(41, 40, 40), 7);
   assert.equal(getOversizeFee(60, 40, 40), 7);
@@ -1106,7 +1126,8 @@ test("normalizes Arabic and Latin dimension values used by CSV importing", async
   assert.equal(getOversizeFee(100, 40, 40), 21);
   assert.equal(getOversizeFee(101, 40, 40), 28);
   assert.equal(getOversizeFee(300, 40, 40), 28);
-  assert.equal(getOversizeFee(50, 50, 50), 7);
+  assert.equal(getOversizeFee(50, 50, 50), 21);
+  assert.equal(getOversizeFee(41, 61, 81), 42);
   assert.equal(getOversizeFee("٨١", "٢٠", "٢٠"), 21);
   assert.equal(getWeightFee("0 - 5 كغم"), 0);
   assert.equal(getWeightFee("5 - 10 كغم"), 5);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { createTrackingEvent, deliveryLocalities, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, normalizeMembership, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
 import { Icon } from "./icon";
@@ -35,6 +35,15 @@ const blankForm = {
   favorite: false,
 };
 
+function dimensionInput(value: string): string {
+  const normalized = value.replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
+    .replace(/[٫,]/g, ".").replace(/[^\d.]/g, "");
+  const separator = normalized.indexOf(".");
+  const whole = (separator === -1 ? normalized : normalized.slice(0, separator)).slice(0, 3);
+  return separator === -1 ? whole : `${whole}.${normalized.slice(separator + 1).replace(/\./g, "").slice(0, 2)}`;
+}
+
 export function NewOrder() {
   const { database, user, updateDatabase, setView, setSelectedOrderId, showToast, confirm, notify } = useApp();
   const [form, setForm] = useState(blankForm);
@@ -66,11 +75,19 @@ export function NewOrder() {
   const dimensions = [form.length, form.width, form.height].some(Boolean)
     ? [form.length || "0", form.width || "0", form.height || "0"].join(" × ")
     : "";
-  const dirty = useMemo(() => form.name || form.phone || form.amount || form.address, [form]);
+  const dirty = (Object.keys(blankForm) as Array<keyof typeof blankForm>).some((key) => form[key] !== blankForm[key]);
 
-  function reset() {
+  function clearAllFields(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (loading) return;
+    setForm(blankForm);
+    setUsingSaved(false);
+    showToast("تم مسح جميع الحقول.");
+  }
+
+  function leaveForm() {
     if (!dirty) return setView("home");
-    confirm({ title: "مسح جميع الحقول؟", message: "سيتم تفريغ كل البيانات المدخلة في نموذج إنشاء الطرد.", confirmLabel: "نعم، امسح", onConfirm: () => { setForm(blankForm); showToast("تم مسح الحقول."); } });
+    confirm({ title: "الخروج من إنشاء الطرد؟", message: "سيتم تجاهل البيانات المدخلة في نموذج إنشاء الطرد.", confirmLabel: "الخروج", onConfirm: () => setView("home") });
   }
 
   function chooseSaved(id: string) {
@@ -124,8 +141,8 @@ export function NewOrder() {
   }
 
   return (
-    <form className="page-content order-form-page animate-page" onSubmit={createOrder} noValidate>
-      <PageHeader title="إنشاء طرد جديد" subtitle="أدخل بيانات المستلم والطرد" onBack={() => dirty ? reset() : setView("home")} action={<Button variant="ghost" icon="trash" type="button" onClick={reset}>مسح الكل</Button>} />
+    <form id="new-order-form" className="page-content order-form-page animate-page" onSubmit={createOrder} onReset={clearAllFields} noValidate>
+      <PageHeader title="إنشاء طرد جديد" subtitle="أدخل بيانات المستلم والطرد" onBack={leaveForm} />
 
       <SectionCard title="نوع الطرد" icon="package"><div className="order-type-grid">{orderTypes.map((type) => <button type="button" key={type.id} className={`order-type ${form.type === type.id ? "is-selected" : ""}`} onClick={() => setForm({ ...form, type: type.id })}><span className="radio-indicator" /><div><strong>{type.title}</strong><small>{type.description}</small></div></button>)}</div></SectionCard>
 
@@ -169,10 +186,10 @@ export function NewOrder() {
         <p className={`form-note content-value-note ${amount > 0 && amount < deliveryFee ? "is-warning" : ""}`} aria-live="polite">{region ? form.amount ? `تم خصم ${money(deliveryFee)} ₪ للتوصيل${additionalFeeDetails ? `، منها ${additionalFeeDetails}` : ""}: ${money(amount)} − ${money(deliveryFee)} = ${money(contentValue)} ₪.` : `أدخل سعر الطرد، وسيُخصم منه إجمالي توصيل ${region.name} البالغ ${money(deliveryFee)} ₪ تلقائيًا.` : "أدخل المحافظة أو المدينة أولًا لتحديد رسوم التوصيل وحساب قيمة المحتويات."}</p>
         <Field label="وصف المحتوى" placeholder="مثلًا: ساعة، ملابس، إكسسوارات..." value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} />
         <div className="field"><span className="field__label">الوزن التقديري</span><div className="weight-options">{WEIGHT_OPTIONS.map((option) => <button type="button" key={option.label} className={form.weight === option.label ? "filter-chip is-active" : "filter-chip"} onClick={() => setForm({ ...form, weight: option.label })}><span>{option.label}</span><small>{option.fee ? `+ ${option.fee} ₪` : "بدون إضافة"}</small></button>)}</div></div>
-        <div className="dimensions-grid"><Field label="الطول (سم)" placeholder="20" value={form.length} onChange={(event) => setForm({ ...form, length: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /><Field label="العرض (سم)" placeholder="15" value={form.width} onChange={(event) => setForm({ ...form, width: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /><Field label="الارتفاع (سم)" placeholder="10" value={form.height} onChange={(event) => setForm({ ...form, height: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })} inputMode="numeric" /></div>
+        <div className="dimensions-grid"><Field label="الطول (سم)" placeholder="20" value={form.length} onChange={(event) => setForm({ ...form, length: dimensionInput(event.target.value) })} inputMode="decimal" /><Field label="العرض (سم)" placeholder="15" value={form.width} onChange={(event) => setForm({ ...form, width: dimensionInput(event.target.value) })} inputMode="decimal" /><Field label="الارتفاع (سم)" placeholder="10" value={form.height} onChange={(event) => setForm({ ...form, height: dimensionInput(event.target.value) })} inputMode="decimal" /></div>
         <div className={`oversize-fee-notice ${dimensionOversizeFee ? "is-active" : ""}`} aria-live="polite">
           <span><Icon name="info" size={18} /></span>
-          <div><strong>{dimensionOversizeFee ? "حجم الطرد مقبول مع رسوم إضافية" : `الحد القياسي لكل بُعد هو ${OVERSIZE_DIMENSION_LIMIT_CM} سم`}</strong><small>{dimensionOversizeFee ? region ? `أكبر بُعد يضيف الآن ${dimensionOversizeFee} ₪؛ وتزيد الرسوم ${OVERSIZE_FEE} ₪ لكل ${OVERSIZE_DIMENSION_STEP_CM} سم إضافية حتى ${MAX_OVERSIZE_FEE} ₪.` : `أكبر بُعد يضيف ${dimensionOversizeFee} ₪ بعد تحديد منطقة التوصيل.` : `بعد ${OVERSIZE_DIMENSION_LIMIT_CM} سم تزيد الرسوم تدريجيًا ${OVERSIZE_FEE} ₪ لكل ${OVERSIZE_DIMENSION_STEP_CM} سم إضافية.`}</small></div>
+          <div><strong>{dimensionOversizeFee ? "حجم الطرد مقبول مع رسوم إضافية" : `الحد القياسي لكل بُعد هو ${OVERSIZE_DIMENSION_LIMIT_CM} سم`}</strong><small>{dimensionOversizeFee ? region ? `الأبعاد المدخلة تضيف الآن ${dimensionOversizeFee} ₪؛ وتزيد رسوم كل بُعد ${OVERSIZE_FEE} ₪ لكل ${OVERSIZE_DIMENSION_STEP_CM} سم إضافية حتى ${MAX_OVERSIZE_FEE} ₪ للبُعد الواحد.` : `الأبعاد المدخلة تضيف ${dimensionOversizeFee} ₪ بعد تحديد منطقة التوصيل.` : `بعد ${OVERSIZE_DIMENSION_LIMIT_CM} سم تزيد رسوم كل بُعد تدريجيًا ${OVERSIZE_FEE} ₪ لكل ${OVERSIZE_DIMENSION_STEP_CM} سم إضافية.`}</small></div>
         </div>
       </SectionCard>
 

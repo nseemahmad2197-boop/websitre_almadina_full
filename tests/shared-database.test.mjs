@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSeedDatabase, removeLegacyDemoData } from "../app/lib/data.ts";
+import { createSeedDatabase, isOrderInvoicedForCurrentShipment, removeLegacyDemoData } from "../app/lib/data.ts";
 import { matchRegistrationMapAddress } from "../app/lib/registration-map-address.ts";
 import { reverseGeocode } from "../app/lib/reverse-geocoding.ts";
 
@@ -1490,9 +1490,9 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(createdOrder.body.database.orders[0].trackingEvents[0].title, "قيد الإنشاء");
   assert.equal(createdOrder.body.database.orders[0].trackingEvents[0].actor, "التاجر الأول");
   assert.equal(createdOrder.body.database.orders[0].trackingEvents[0].note, "تم إنشاء الطرد وهو قيد الإنشاء.");
-  assert.equal(createdOrder.body.database.orders[0].deliveryFee, 42);
+  assert.equal(createdOrder.body.database.orders[0].deliveryFee, 56);
   assert.equal(createdOrder.body.database.orders[0].weightFee, 0);
-  assert.equal(createdOrder.body.database.orders[0].oversizeFee, 7);
+  assert.equal(createdOrder.body.database.orders[0].oversizeFee, 21);
   assert.equal(createdOrder.body.database.orders[0].courierId, undefined);
   assert.equal(createdOrder.body.database.orders[0].shippedAt, undefined);
   assert.equal(createdOrder.body.database.orders[0].notes, "");
@@ -2081,14 +2081,41 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(stillShippedParcel.status, "shipped");
   assert.equal(stillShippedParcel.trackingEvents.filter((event) => event.status === "shipped").length, 1);
 
-  const deliveredAfterScan = await call(worker, database, "database", {
+  const returnedBeforeRescan = await call(worker, database, "database", {
     method: "PUT",
     cookie: adminCookie,
     payload: {
       revision: unchangedAfterRepeatedScan.body.revision,
       database: {
         ...unchangedAfterRepeatedScan.body.database,
-        orders: unchangedAfterRepeatedScan.body.database.orders.map((item) => item.id === order.id ? { ...item, status: "delivered", updatedAt: new Date().toISOString() } : item),
+        orders: unchangedAfterRepeatedScan.body.database.orders.map((item) => item.id === order.id ? { ...item, status: "returned", updatedAt: new Date().toISOString() } : item),
+      },
+    },
+  });
+  assert.equal(returnedBeforeRescan.status, 200);
+
+  const rescannedReturnedParcel = await call(worker, database, "orders/scan", {
+    method: "POST",
+    cookie: employeeCookie,
+    payload: { trackingNumber: order.trackingNumber },
+  });
+  assert.equal(rescannedReturnedParcel.status, 200);
+  assert.equal(rescannedReturnedParcel.body.database.orders[0].status, "shipped");
+
+  const adminAfterReturnedRescan = await call(worker, database, "database", { cookie: adminCookie });
+  const reshippedReturnedParcel = adminAfterReturnedRescan.body.database.orders.find((item) => item.id === order.id);
+  assert.equal(reshippedReturnedParcel.status, "shipped");
+  assert.equal(reshippedReturnedParcel.trackingEvents.filter((event) => event.status === "shipped").length, 2);
+  assert.match(reshippedReturnedParcel.trackingEvents.at(-1).note, /الطرد الراجع/);
+
+  const deliveredAfterScan = await call(worker, database, "database", {
+    method: "PUT",
+    cookie: adminCookie,
+    payload: {
+      revision: adminAfterReturnedRescan.body.revision,
+      database: {
+        ...adminAfterReturnedRescan.body.database,
+        orders: adminAfterReturnedRescan.body.database.orders.map((item) => item.id === order.id ? { ...item, status: "delivered", updatedAt: new Date().toISOString() } : item),
       },
     },
   });
@@ -2130,7 +2157,7 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(protectedOrder.city, "القدس");
   assert.equal(protectedOrder.address, "عنوان خاص");
   assert.equal(protectedOrder.amount, 100);
-  assert.equal(protectedOrder.deliveryFee, 42);
+  assert.equal(protectedOrder.deliveryFee, 56);
   assert.equal(protectedOrder.status, "delivered");
   assert.equal(protectedOrder.privateNotes, "");
 
@@ -2171,8 +2198,8 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(createdCollection.body.database.collections.length, 1);
   assert.equal(createdCollection.body.database.collections[0].invoiceNumber, "#618000");
   assert.equal(createdCollection.body.database.collections[0].grossAmount, 100);
-  assert.equal(createdCollection.body.database.collections[0].deliveryFees, 42);
-  assert.equal(createdCollection.body.database.collections[0].netAmount, 58);
+  assert.equal(createdCollection.body.database.collections[0].deliveryFees, 56);
+  assert.equal(createdCollection.body.database.collections[0].netAmount, 44);
   assert.equal(createdCollection.body.database.collections[0].deliveredCount, 1);
   assert.equal(createdCollection.body.database.collections[0].status, "pending");
   assert.match(createdCollection.body.database.collections[0].verificationCode, /^\d{4}$/);
@@ -2189,7 +2216,7 @@ test("shares accounts and orders across devices while isolating customers and pr
     },
   });
   assert.equal(pendingVerificationUpdate.status, 200);
-  assert.equal(pendingVerificationUpdate.body.database.collections[0].netAmount, 58);
+  assert.equal(pendingVerificationUpdate.body.database.collections[0].netAmount, 44);
   assert.equal(pendingVerificationUpdate.body.database.collections[0].status, "pending");
   assert.equal(pendingVerificationUpdate.body.database.collections[0].verificationCode, "2468");
   assert.equal(pendingVerificationUpdate.body.database.collections[0].authorizedRecipient, "مستلم أثناء التجهيز");
@@ -2255,7 +2282,7 @@ test("shares accounts and orders across devices while isolating customers and pr
     },
   });
   assert.equal(securedMerchantUpdate.status, 200);
-  assert.equal(securedMerchantUpdate.body.database.collections[0].netAmount, 58);
+  assert.equal(securedMerchantUpdate.body.database.collections[0].netAmount, 44);
   assert.equal(securedMerchantUpdate.body.database.collections[0].status, "ready");
   assert.equal(securedMerchantUpdate.body.database.collections[0].verificationCode, "4321");
   assert.equal(securedMerchantUpdate.body.database.collections[0].authorizedRecipient, "المستلم المفوض");
@@ -2329,7 +2356,7 @@ test("shares accounts and orders across devices while isolating customers and pr
 
   const deliveredForMerchant = await call(worker, database, "database", { cookie: secondCookie });
   assert.equal(deliveredForMerchant.body.database.collections[0].status, "paid");
-  assert.equal(deliveredForMerchant.body.database.collections[0].netAmount, 58);
+  assert.equal(deliveredForMerchant.body.database.collections[0].netAmount, 44);
   assert.ok(deliveredForMerchant.body.database.notices.some((notice) => notice.userId === firstDevice.body.userId));
 
   const merchantNoteText = "يرجى الاتصال بالمستلم قبل التوصيل.";
@@ -2528,6 +2555,148 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(revoked.status, 401);
   const stillSignedIn = await call(worker, database, "database", { cookie: firstCookie });
   assert.equal(stillSignedIn.status, 200);
+});
+
+test("preserves a settled return invoice and bills a later delivery once after a courier rescan", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const registration = await call(worker, database, "register", {
+    method: "POST",
+    payload: accountPayload("تاجر إعادة الشحن", "reship-merchant@example.test", "0594455771"),
+  });
+  assert.equal(registration.status, 201);
+  const merchantCookie = sessionFrom(registration);
+  const administrator = await call(worker, database, "login", {
+    method: "POST",
+    payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
+  });
+  assert.equal(administrator.status, 200);
+  const adminCookie = sessionFrom(administrator);
+  const oldTime = "2026-01-01T10:00:00.000Z";
+  const courierAccount = {
+    id: "courier-return-reship", name: "موظف إعادة الشحن", email: "reship-courier@example.test",
+    phone: "0564455771", store: "قسم التوصيل", password: "Courier@123", role: "courier",
+    joinedAt: oldTime, avatarColor: "#6655a6",
+  };
+  const courierCreated = await call(worker, database, "database", {
+    method: "PUT", cookie: adminCookie,
+    payload: {
+      revision: administrator.body.revision,
+      database: { ...administrator.body.database, users: [...administrator.body.database.users, courierAccount] },
+    },
+  });
+  assert.equal(courierCreated.status, 200);
+  const courier = await call(worker, database, "login", {
+    method: "POST", payload: { email: courierAccount.email, password: courierAccount.password },
+  });
+  assert.equal(courier.status, 200);
+  const courierCookie = sessionFrom(courier);
+  const order = {
+    id: "order-return-reship", trackingNumber: "ALX-20880001", merchantId: registration.body.userId,
+    merchantName: "تاجر إعادة الشحن", merchantStore: "متجر إعادة الشحن", recipientName: "مستلم الطرد",
+    recipientPhone: "0591122334", governorate: "نابلس", city: "نابلس", address: "رفيديا",
+    pickupAddress: "نابلس", amount: 100, deliveryFee: 25, content: "ملابس", weight: "0 - 5 كغم",
+    dimensions: "20 × 20 × 20 سم", notes: "", privateNotes: "", reference: "", type: "طرد عادي",
+    status: "returned", courierName: "بانتظار تعيين المندوب", shippedAt: oldTime,
+    createdAt: oldTime, updatedAt: oldTime, deleted: false,
+  };
+  const invoice = {
+    id: "invoice-settled-return", merchantId: registration.body.userId, merchantName: order.merchantName,
+    invoiceNumber: "#618800", orderIds: [order.id], grossAmount: 0, deliveryFees: 0, returnFees: 20,
+    netAmount: -20, deliveredCount: 0, returnedCount: 1, status: "ready", verificationCode: "2468",
+    authorizedRecipient: "", createdAt: oldTime, updatedAt: oldTime, scheduledAt: oldTime,
+  };
+  const seed = JSON.parse(database.state.payload);
+  database.state.payload = JSON.stringify({ ...seed, orders: [order], collections: [invoice] });
+  const paid = await call(worker, database, "collections/verify", {
+    method: "POST", cookie: courierCookie,
+    payload: { invoiceId: invoice.id, verificationCode: invoice.verificationCode },
+  });
+  assert.equal(paid.status, 200);
+
+  // The original return was settled before today's second shipping attempt.
+  const settledState = JSON.parse(database.state.payload);
+  const settledInvoice = settledState.collections.find((entry) => entry.id === invoice.id);
+  settledInvoice.paidAt = "2026-01-02T10:00:00.000Z";
+  settledInvoice.verifiedAt = settledInvoice.paidAt;
+  settledInvoice.updatedAt = settledInvoice.paidAt;
+  database.state.payload = JSON.stringify(settledState);
+  assert.equal(settledInvoice.status, "paid");
+  assert.equal(settledInvoice.returnPricingVersion, 1);
+  assert.equal(isOrderInvoicedForCurrentShipment(order, [settledInvoice]), true);
+
+  const rescanned = await call(worker, database, "orders/scan", {
+    method: "POST", cookie: courierCookie, payload: { trackingNumber: order.trackingNumber },
+  });
+  assert.equal(rescanned.status, 200);
+  const rescannedOrder = rescanned.body.database.orders.find((entry) => entry.id === order.id);
+  assert.equal(rescannedOrder.status, "shipped");
+  assert.equal(rescannedOrder.courierId, courierAccount.id);
+  assert.match(rescannedOrder.trackingEvents.at(-1).note, /الطرد الراجع/);
+  assert.equal(isOrderInvoicedForCurrentShipment(rescannedOrder, [settledInvoice]), false);
+  assert.equal(isOrderInvoicedForCurrentShipment(rescannedOrder, [{ ...settledInvoice, status: "ready" }]), true);
+  assert.equal(isOrderInvoicedForCurrentShipment({ ...rescannedOrder, shippedAt: undefined }, [settledInvoice]), true);
+  assert.equal(isOrderInvoicedForCurrentShipment(rescannedOrder, [{ ...settledInvoice, paidAt: "invalid" }]), true);
+  assert.deepEqual(JSON.parse(database.state.payload).collections.find((entry) => entry.id === invoice.id), settledInvoice);
+  const merchantAfterScan = await call(worker, database, "database", { cookie: merchantCookie });
+  assert.deepEqual(merchantAfterScan.body.database.collections.find((entry) => entry.id === invoice.id), settledInvoice);
+
+  const adminAfterScan = await call(worker, database, "database", { cookie: adminCookie });
+  const delivered = await call(worker, database, "database", {
+    method: "PUT", cookie: adminCookie,
+    payload: {
+      revision: adminAfterScan.body.revision,
+      database: {
+        ...adminAfterScan.body.database,
+        orders: adminAfterScan.body.database.orders.map((entry) => entry.id === order.id
+          ? { ...entry, status: "delivered", updatedAt: new Date().toISOString() } : entry),
+      },
+    },
+  });
+  assert.equal(delivered.status, 200);
+  const merchantWithDelivery = await call(worker, database, "database", { cookie: merchantCookie });
+  assert.deepEqual(merchantWithDelivery.body.database.collections.find((entry) => entry.id === invoice.id), settledInvoice);
+  const newInvoice = { ...invoice, id: "invoice-second-delivery", status: "pending" };
+  const beforeDuplicates = database.state.payload;
+  const duplicateBatch = await call(worker, database, "database", {
+    method: "PUT", cookie: merchantCookie,
+    payload: {
+      revision: merchantWithDelivery.body.revision,
+      database: {
+        ...merchantWithDelivery.body.database,
+        collections: [newInvoice, { ...newInvoice, id: "invoice-duplicate-delivery" }, ...merchantWithDelivery.body.database.collections],
+      },
+    },
+  });
+  assert.equal(duplicateBatch.status, 409);
+  assert.equal(database.state.payload, beforeDuplicates);
+
+  const billed = await call(worker, database, "database", {
+    method: "PUT", cookie: merchantCookie,
+    payload: {
+      revision: merchantWithDelivery.body.revision,
+      database: { ...merchantWithDelivery.body.database, collections: [newInvoice, ...merchantWithDelivery.body.database.collections] },
+    },
+  });
+  assert.equal(billed.status, 200, billed.body.error);
+  const deliveryInvoice = billed.body.database.collections.find((entry) => entry.id === newInvoice.id);
+  assert.equal(deliveryInvoice.grossAmount, 100);
+  assert.equal(deliveryInvoice.deliveryFees, 25);
+  assert.equal(deliveryInvoice.returnFees, 0);
+  assert.equal(deliveryInvoice.netAmount, 75);
+  assert.equal(deliveryInvoice.deliveredCount, 1);
+  assert.equal(isOrderInvoicedForCurrentShipment(rescannedOrder, billed.body.database.collections), true);
+  const repeated = await call(worker, database, "database", {
+    method: "PUT", cookie: merchantCookie,
+    payload: {
+      revision: billed.body.revision,
+      database: { ...billed.body.database, collections: [{ ...newInvoice, id: "invoice-repeated-delivery" }, ...billed.body.database.collections] },
+    },
+  });
+  assert.equal(repeated.status, 409);
+  const finalMerchantView = await call(worker, database, "database", { cookie: merchantCookie });
+  assert.equal(finalMerchantView.body.database.collections.length, 2);
+  assert.deepEqual(finalMerchantView.body.database.collections.find((entry) => entry.id === invoice.id), settledInvoice);
 });
 
 test("rate limits repeated courier collection-code attempts without changing the invoice", async () => {
@@ -2938,9 +3107,11 @@ test("recalculates progressive weight and dimension fees without trusting client
     { id: "parcel-second-tier", weight: "20 - 30 كغم", dimensions: [61, 20, 20], expectedWeightFee: 15, expectedOversizeFee: 14, expectedFee: 64 },
     { id: "parcel-third-tier", weight: "أكثر من 30 كغم", dimensions: [81, 20, 20], expectedWeightFee: 20, expectedOversizeFee: 21, expectedFee: 76 },
     { id: "parcel-capped-size", weight: "أكثر من 30 كغم", dimensions: [101, 20, 20], expectedWeightFee: 20, expectedOversizeFee: 28, expectedFee: 83 },
-    { id: "parcel-all-over", weight: "0 - 5 كغم", dimensions: [50, 50, 50], expectedWeightFee: 0, expectedOversizeFee: 7, expectedFee: 42 },
+    { id: "parcel-all-over", weight: "0 - 5 كغم", dimensions: [50, 50, 50], expectedWeightFee: 0, expectedOversizeFee: 21, expectedFee: 56 },
+    { id: "parcel-mixed-tiers", weight: "0 - 5 كغم", dimensions: [41, 61, 81], expectedWeightFee: 0, expectedOversizeFee: 42, expectedFee: 77 },
     { id: "parcel-partial-width", weight: undefined, dimensions: [undefined, 50, undefined], dimensionText: "50 سم", expectedDimensions: [0, 50, 0], expectedWeight: "0 - 5 كغم", expectedWeightFee: 0, expectedOversizeFee: 7, expectedFee: 42 },
     { id: "parcel-arabic-digits", weight: "5 - 10 كغم", dimensions: [undefined, undefined, undefined], dimensionText: "٨١ × ٢٠ × ٢٠ سم", expectedDimensions: [81, 20, 20], expectedWeightFee: 5, expectedOversizeFee: 21, expectedFee: 61 },
+    { id: "parcel-decimal-arabic-digits", weight: "0 - 5 كغم", dimensions: [undefined, undefined, undefined], dimensionText: "٤٠٫٥ × ٦٠٫٢٥ × ۸۰,۵ سم", expectedDimensions: [40.5, 60.25, 80.5], expectedWeightFee: 0, expectedOversizeFee: 42, expectedFee: 77 },
   ];
 
   for (const [index, entry] of cases.entries()) {

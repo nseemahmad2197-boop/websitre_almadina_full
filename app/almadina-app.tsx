@@ -220,7 +220,7 @@ function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employe
     };
   }, [employeeMode]);
 
-  return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2 aria-live="polite">{message}</h2><p>{employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام فقط الطرود الجاهزة للإرسال." : "ضع رمز QR داخل الإطار ليُقرأ تلقائيًا."}</p><div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetectedRef.current(manual.trim())}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div></div></div>;
+  return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2 aria-live="polite">{message}</h2><p>{employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام الطرود الجاهزة للإرسال والطرود الراجعة." : "ضع رمز QR داخل الإطار ليُقرأ تلقائيًا."}</p><div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetectedRef.current(manual.trim())}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div></div></div>;
 }
 
 function ConfirmModal({ options, onClose }: { options: ConfirmOptions; onClose: () => void }) {
@@ -806,6 +806,7 @@ export default function AlmadinaApplication() {
 
   async function shipScannedOrder(trackingNumber: string): Promise<boolean> {
     const operationEpoch = sessionEpoch.current;
+    const normalizedTrackingNumber = trackingNumber.trim().toUpperCase();
     try {
       const snapshot = await sharedRequest("orders/scan", {
         method: "POST",
@@ -817,7 +818,7 @@ export default function AlmadinaApplication() {
       serverRevision.current = snapshot.revision;
       pendingUpdates.current = [];
       setDatabase(snapshot.database);
-      showToast(`تم تحديث الطرد ${trackingNumber.trim().toUpperCase()} من «جاهز للإرسال» إلى «مشحون».`);
+      showToast(`تم تحديث الطرد ${normalizedTrackingNumber} إلى حالة «مشحون».`);
       return true;
     } catch (error) {
       if (operationEpoch !== sessionEpoch.current) return false;

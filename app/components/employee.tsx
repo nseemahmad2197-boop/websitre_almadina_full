@@ -53,7 +53,7 @@ export function EmployeeDashboard() {
         <div className="employee-scan-card__copy">
           <span>استلام طرد جديد</span>
           <h2>مسح كود الطرد بالكاميرا</h2>
-          <p>امسح كود QR الموجود على ملصق الشحن. إذا كان الطرد «جاهزًا للإرسال» ستصبح حالته «مشحون» ويُسجّل باسمك مباشرة.</p>
+          <p>امسح كود QR الموجود على ملصق الشحن. إذا كان الطرد «جاهزًا للإرسال» أو «راجعًا» ستصبح حالته «مشحون» ويُسجّل باسمك مباشرة.</p>
         </div>
         <Button icon="camera" className="employee-scan-card__button" onClick={() => openScanner()}>فتح الكاميرا ومسح الكود</Button>
         <div className="employee-scan-card__rule"><Icon name="shield" size={16} /><span>لا يستطيع حساب المستخدم العادي تنفيذ هذا التحديث.</span></div>
@@ -75,7 +75,7 @@ export function EmployeeDashboard() {
       </section>
 
       <section className="employee-permissions" aria-label="صلاحيات حساب الموظف">
-        <article><span><Icon name="camera" size={20} /></span><div><strong>مسح الطرود</strong><small>تحديث آمن من جاهز للإرسال إلى مشحون</small></div></article>
+        <article><span><Icon name="camera" size={20} /></span><div><strong>مسح الطرود</strong><small>تحديث آمن من جاهز للإرسال أو راجع إلى مشحون</small></div></article>
         <article><span><Icon name="user" size={20} /></span><div><strong>إسناد تلقائي</strong><small>يُربط الطرد بحساب الموظف الذي مسحه</small></div></article>
         <article><span><Icon name="receipt" size={20} /></span><div><strong>تجهيز الفواتير</strong><small>تحويل فاتورة المستخدم من قيد التجهيز إلى جاهزة للتحويل</small></div></article>
         <article><span><Icon name="clipboard" size={20} /></span><div><strong>تحقق موثّق</strong><small>يحفظ اسم الموظف ووقت شحن الطرد أو تسليم التحصيل</small></div></article>
@@ -101,7 +101,7 @@ export function EmployeeDashboard() {
               </article>;
             })}
           </div>
-        ) : <EmptyState icon="scan" title="لا توجد طرود مسندة بعد" description="امسح كود أول طرد جاهز للإرسال ليظهر هنا تلقائيًا." action="مسح كود الطرد" onAction={() => openScanner()} />}
+        ) : <EmptyState icon="scan" title="لا توجد طرود مسندة بعد" description="امسح كود طرد جاهز للإرسال أو راجع ليظهر هنا تلقائيًا." action="مسح كود الطرد" onAction={() => openScanner()} />}
       </section>
 
       {collectionVerification && <Modal title="قراءة كود التحقق" onClose={() => !verifyingCollection && setCollectionVerification(null)} className="employee-verification-modal" sheet><form className="modal-form employee-verification-form" onSubmit={submitCollectionVerification}><div className="employee-verification-form__intro"><span><Icon name="key" size={24} /></span><div><strong dir="ltr">{collectionVerification.invoiceNumber}</strong><p>أدخل الكود المكوّن من 4 أرقام الذي يعرضه المستخدم. عند صحته تصبح حالة الفاتورة «تم التسليم» مباشرة.</p></div></div><Field icon="key" label="كود التحقق" aria-label="كود تحقق فاتورة التحصيل للموظف" placeholder="0000" value={collectionVerification.code} onChange={(event) => setCollectionVerification({ ...collectionVerification, code: event.target.value.replace(/[^\d]/g, "").slice(0, 4) })} inputMode="numeric" autoComplete="one-time-code" maxLength={4} dir="ltr" autoFocus /><p className="employee-verification-form__note"><Icon name="shield" size={16} />لن تتغير الفاتورة إذا كان الكود غير صحيح، والمحاولات المتكررة محدودة للحماية.</p><Button type="submit" icon="check" full loading={verifyingCollection} disabled={collectionVerification.code.length !== 4}>تحقق وتسليم التحصيل</Button></form></Modal>}

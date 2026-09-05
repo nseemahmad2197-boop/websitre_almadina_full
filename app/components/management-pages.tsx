@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { downloadDocument, importTemplate, ordersCsv } from "../lib/download";
-import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getReturnFee, getReturnMembershipPrices, getWeightFee, governorates, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Notice, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getReturnFee, getReturnMembershipPrices, getWeightFee, governorates, isOrderInvoicedForCurrentShipment, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Notice, type Order } from "../lib/data";
 import { parseParcelImportCsv, type ParcelImportCsvLayout, type ParcelImportRow } from "../lib/import-csv";
 import { OrderCard } from "./dashboard";
 import { Icon } from "./icon";
@@ -43,8 +43,7 @@ export function CollectionsPage() {
   const [codeInvoiceId, setCodeInvoiceId] = useState<string | null>(null);
   const [authorizedRecipient, setAuthorizedRecipient] = useState("");
   const invoices = database.collections.filter((invoice) => invoice.merchantId === user?.id);
-  const invoicedOrders = new Set(invoices.flatMap((invoice) => invoice.orderIds));
-  const eligibleOrders = database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && (order.status === "delivered" || order.status === "returned") && !invoicedOrders.has(order.id));
+  const eligibleOrders = database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && (order.status === "delivered" || order.status === "returned") && !isOrderInvoicedForCurrentShipment(order, invoices));
   const returnFeeForOrder = (order: Order) => getReturnFee(resolveDeliveryRegion(order.governorate ?? "", order.city), user?.membership);
   const selectedInvoice = invoices.find((invoice) => invoice.id === selectedId) ?? null;
   const codeInvoice = invoices.find((invoice) => invoice.id === codeInvoiceId) ?? null;
@@ -88,7 +87,12 @@ export function CollectionsPage() {
 
   function invoiceOrders(invoice: CollectionInvoice) {
     const ids = new Set(invoice.orderIds);
-    return database.orders.filter((order) => ids.has(order.id));
+    const settledReturnIds = invoice.status === "paid" && Array.isArray(invoice.returnFeeDetails)
+      ? new Set(invoice.returnFeeDetails.map((item) => item.orderId))
+      : null;
+    return database.orders.filter((order) => ids.has(order.id)).map((order): Order => settledReturnIds
+      ? { ...order, status: settledReturnIds.has(order.id) ? "returned" : "delivered" }
+      : order);
   }
 
   function returnFeeForInvoiceOrder(invoice: CollectionInvoice, order: Order) {
