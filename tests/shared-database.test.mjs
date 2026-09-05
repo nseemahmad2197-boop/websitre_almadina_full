@@ -4752,7 +4752,7 @@ test("requires an issued code, normalizes printed digits, and rejects conflictin
   const merchant = await call(worker, database, "register", { method: "POST", payload: accountPayload("تاجر يدوي", "manual@example.test", "0591000022") });
   const cookie = sessionFrom(merchant);
   const post = (orders) => call(worker, database, "orders", { method: "POST", cookie, payload: { orders } });
-  for (const code of ["", "ALX-99999999", "TEMP-123", "invalid"]) {
+  for (const code of ["ALX-99999999", "TEMP-123", "invalid"]) {
     assert.equal((await post([printedParcel(merchant.body.userId, "bad-code", code)])).status, 400);
     assert.equal(JSON.parse(database.state.payload).orders.length, 0);
     assert.deepEqual(JSON.parse(database.state.payload).parcelCodeClaims, {});
@@ -4800,4 +4800,96 @@ test("allows only one account to claim a printed code concurrently and preserves
   assert.equal(removed.body.database.nextOrder, saved.nextOrder);
   const reused = await call(worker, database, "orders", { method: "POST", cookie: sessionFrom(first), payload: { orders: [printedParcel(first.body.userId, "after-permanent-delete", code)] } });
   assert.equal(reused.status, 409);
+});
+
+
+test("creates blank parcels and assigns printed codes from details without changing shipment data", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const codes = await reserveCodes(worker, database, 4);
+  const merchant = await call(worker, database, "register", { method: "POST", payload: accountPayload("تاجر التفاصيل", "details@example.test", "0591000031") });
+  const cookie = sessionFrom(merchant);
+  const parcels = [printedParcel(merchant.body.userId, "blank-details-one", ""), printedParcel(merchant.body.userId, "blank-details-two", "")];
+  const cursor = JSON.parse(database.state.payload).nextOrder;
+  const created = await call(worker, database, "orders", { method: "POST", cookie, payload: { orders: parcels } });
+  assert.equal(created.status, 201, created.body.error);
+  assert.equal(created.body.database.orders.length, 2);
+  assert.ok(created.body.database.orders.every((order) => order.trackingNumber === "" && order.status === "draft"));
+  assert.equal(JSON.parse(database.state.payload).nextOrder, cursor);
+  assert.deepEqual(JSON.parse(database.state.payload).parcelCodeClaims, {});
+  const assign = (orderId, trackingNumber) => call(worker, database, "orders/assign-code", { method: "POST", cookie, payload: { orderId, trackingNumber } });
+  for (const code of ["", "   ", "ALX-99999999", "invalid"]) assert.equal((await assign(parcels[0].id, code)).status, 400);
+  const before = created.body.database.orders.find((order) => order.id === parcels[0].id);
+  const arabicCode = codes[0].slice(4).replace(/\d/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
+  const assigned = await assign(parcels[0].id, ` ${arabicCode} `);
+  assert.equal(assigned.status, 200, assigned.body.error);
+  const after = assigned.body.database.orders.find((order) => order.id === parcels[0].id);
+  assert.deepEqual({ ...after, trackingNumber: before.trackingNumber, updatedAt: before.updatedAt }, before);
+  assert.equal(after.trackingNumber, codes[0]);
+  const revision = database.state.revision;
+  assert.equal((await assign(parcels[0].id, codes[0])).status, 200);
+  assert.equal(database.state.revision, revision, "retry must not mutate state");
+  assert.equal((await assign(parcels[0].id, codes[1])).status, 409);
+  assert.equal((await assign(parcels[1].id, codes[0])).status, 409);
+  const repeatCreation = await call(worker, database, "orders", { method: "POST", cookie, payload: { orders: parcels } });
+  assert.equal(repeatCreation.status, 200, repeatCreation.body.error);
+  assert.equal(repeatCreation.body.database.orders.find((order) => order.id === parcels[0].id).trackingNumber, codes[0]);
+  assert.equal(database.state.revision, revision);
+  const stalePut = await call(worker, database, "database", { method: "PUT", cookie, payload: { revision, database: { ...repeatCreation.body.database, orders: created.body.database.orders } } });
+  assert.equal(stalePut.status, 200, stalePut.body.error);
+  assert.equal(stalePut.body.database.orders.find((order) => order.id === parcels[0].id).trackingNumber, codes[0]);
+  assert.equal((await assign("missing-parcel", codes[1])).status, 404);
+  assert.equal(JSON.parse(database.state.payload).parcelCodeClaims[codes[1]], undefined);
+});
+
+test("only the parcel owner or administrator can attach a code and deleted parcels consume no labels", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const codes = await reserveCodes(worker, database, 3);
+  const merchant = await call(worker, database, "register", { method: "POST", payload: accountPayload("صاحب الطرد", "owner-details@example.test", "0591000032") });
+  const other = await call(worker, database, "register", { method: "POST", payload: accountPayload("حساب آخر", "other-details@example.test", "0591000033") });
+  const cookie = sessionFrom(merchant);
+  const created = await call(worker, database, "orders", { method: "POST", cookie, payload: { orders: [printedParcel(merchant.body.userId, "owner-blank-parcel", ""), printedParcel(merchant.body.userId, "deleted-blank-parcel", "")] } });
+  assert.equal(created.status, 201);
+  const admin = await call(worker, database, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  const adminCookie = sessionFrom(admin);
+  const employee = { id: "courier-code-details", name: "المندوب", email: "courier-details@example.test", phone: "0561000034", store: "الإدارة", password: "Employee@123", role: "courier", joinedAt: new Date().toISOString(), avatarColor: "#187a50" };
+  const modified = await call(worker, database, "database", { method: "PUT", cookie: adminCookie, payload: { revision: admin.body.revision, database: { ...admin.body.database, users: [...admin.body.database.users, employee], orders: admin.body.database.orders.map((order) => ({ ...order, deleted: order.id === "deleted-blank-parcel", status: "ready" })) } } });
+  assert.equal(modified.status, 200, modified.body.error);
+  const courier = await call(worker, database, "login", { method: "POST", payload: { email: employee.email, password: employee.password } });
+  const assign = (asCookie, orderId, trackingNumber) => call(worker, database, "orders/assign-code", { method: "POST", cookie: asCookie, payload: { orderId, trackingNumber } });
+  assert.equal((await assign(undefined, "owner-blank-parcel", codes[0])).status, 401);
+  assert.equal((await assign(sessionFrom(other), "owner-blank-parcel", codes[0])).status, 404);
+  assert.equal((await assign(sessionFrom(courier), "owner-blank-parcel", codes[0])).status, 403);
+  assert.equal((await assign(cookie, "deleted-blank-parcel", codes[1])).status, 409);
+  assert.deepEqual(JSON.parse(database.state.payload).parcelCodeClaims, {});
+  const assigned = await assign(adminCookie, "owner-blank-parcel", codes[0]);
+  assert.equal(assigned.status, 200, assigned.body.error);
+  assert.equal(assigned.body.database.orders.find((order) => order.id === "owner-blank-parcel").status, "ready", "assignment preserves current status");
+  assert.equal(JSON.parse(database.state.payload).parcelCodeClaims[codes[1]], undefined);
+});
+
+test("concurrent detail assignments never consume the same label twice or consume a losing label", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const codes = await reserveCodes(worker, database, 3);
+  const first = await call(worker, database, "register", { method: "POST", payload: accountPayload("أول متزامن", "detail-race-one@example.test", "0591000035") });
+  const second = await call(worker, database, "register", { method: "POST", payload: accountPayload("ثان متزامن", "detail-race-two@example.test", "0591000036") });
+  const cookies = [sessionFrom(first), sessionFrom(second)];
+  for (const [index, merchant] of [first, second].entries()) {
+    const created = await call(worker, database, "orders", { method: "POST", cookie: cookies[index], payload: { orders: [printedParcel(merchant.body.userId, `detail-race-${index}`, "")] } });
+    assert.equal(created.status, 201);
+  }
+  const assign = (index, code) => call(worker, database, "orders/assign-code", { method: "POST", cookie: cookies[index], payload: { orderId: `detail-race-${index}`, trackingNumber: code } });
+  const race = await Promise.all([assign(0, codes[0]), assign(1, codes[0])]);
+  assert.deepEqual(race.map((result) => result.status).sort(), [200, 409]);
+  const loser = race.findIndex((result) => result.status === 409);
+  const state = JSON.parse(database.state.payload);
+  assert.equal(state.orders.find((order) => order.id === `detail-race-${loser}`).trackingNumber, "");
+  assert.equal(Object.keys(state.parcelCodeClaims).length, 1);
+  const competingLabels = await Promise.all([assign(loser, codes[1]), assign(loser, codes[2])]);
+  assert.deepEqual(competingLabels.map((result) => result.status).sort(), [200, 409]);
+  const latest = JSON.parse(database.state.payload);
+  assert.equal(Object.keys(latest.parcelCodeClaims).length, 2, "losing label stays unused");
+  assert.equal(new Set(latest.orders.map((order) => order.trackingNumber)).size, 2);
 });

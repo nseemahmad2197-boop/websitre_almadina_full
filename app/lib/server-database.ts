@@ -2085,7 +2085,7 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     const protectedOrder = existing ? { ...candidate, notes: existing.notes, privateNotes: existing.privateNotes } : { ...candidate, notes: "", privateNotes: "" };
     return {
       ...protectedOrder,
-      trackingNumber: existing?.trackingNumber ?? claimParcelCode(current, parcelCodeClaims, candidate),
+      trackingNumber: existing?.trackingNumber ?? (candidate.trackingNumber.trim() ? claimParcelCode(current, parcelCodeClaims, candidate) : ""),
       merchantName: merchant?.name ?? protectedOrder.merchantName,
       merchantStore: merchant?.store ?? protectedOrder.merchantStore,
       courierName: courier?.role === "courier" ? courier.name : protectedOrder.courierName,
@@ -2352,7 +2352,7 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
       merchantId: account.id,
       merchantName: savedAccount.name,
       merchantStore: savedAccount.store,
-      trackingNumber: claimParcelCode(current, parcelCodeClaims, candidate),
+      trackingNumber: candidate.trackingNumber.trim() ? claimParcelCode(current, parcelCodeClaims, candidate) : "",
       recipientName,
       recipientPhone,
       governorate: candidate.governorate?.trim().slice(0, 120),
@@ -2483,6 +2483,36 @@ function claimParcelCode(current: Database, claims: Record<string, ParcelCodeCla
   return code;
 }
 
+async function assignParcelCode(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  if (session.account.role !== "merchant" && session.account.role !== "admin") return json({ error: "حفظ الكود متاح لصاحب الطرد أو المسؤول فقط." }, 403);
+  const payload = await request.json() as { orderId?: unknown; trackingNumber?: unknown } | null;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.orderId !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/.test(payload.orderId) || typeof payload.trackingNumber !== "string") {
+    return json({ error: "بيانات كود الطرد غير صالحة." }, 400);
+  }
+  const trackingNumber = normalizeParcelCode(payload.trackingNumber);
+  if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return json({ error: "أدخل كود الطرد المطبوع على الملصق." }, 400);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const state = await readState(database);
+    const account = state.database.users.find((entry) => entry.id === session.account.id);
+    if (!account) return json({ error: "لم يعد الحساب متاحًا." }, 401);
+    if (account.role !== "merchant" && account.role !== "admin") return json({ error: "حفظ الكود متاح لصاحب الطرد أو المسؤول فقط." }, 403);
+    const order = state.database.orders.find((entry) => entry.id === payload.orderId && (account.role === "admin" || entry.merchantId === account.id));
+    if (!order) return json({ error: "لم نعثر على هذا الطرد." }, 404);
+    if (order.deleted) return json({ error: "استعد الطرد من المحذوفات قبل حفظ الكود." }, 409);
+    if (order.trackingNumber.trim()) {
+      if (order.trackingNumber === trackingNumber) return json(snapshot(state, account));
+      return json({ error: "للطرد كود محفوظ بالفعل ولا يمكن استبداله." }, 409);
+    }
+    const parcelCodeClaims = { ...state.database.parcelCodeClaims };
+    const code = claimParcelCode(state.database, parcelCodeClaims, { ...order, trackingNumber });
+    const updatedOrder = { ...order, trackingNumber: code, updatedAt: new Date().toISOString() };
+    const next = { ...state.database, parcelCodeClaims, orders: state.database.orders.map((entry) => entry.id === order.id ? updatedOrder : entry) };
+    if (!await saveState(database, next, state.revision)) continue;
+    return json(snapshot({ database: next, revision: state.revision + 1 }, account));
+  }
+  return json({ error: "تعذّر حفظ الكود بسبب تحديث متزامن. أعد المحاولة." }, 409);
+}
+
 async function generateParcelCodeBatch(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
   if (session.account.role !== "admin") return json({ error: "إنشاء دفعات الأكواد متاح للمسؤول فقط." }, 403);
   const payload = await request.json() as { requestId?: unknown; count?: unknown; label?: unknown } | null;
@@ -2546,7 +2576,7 @@ async function createParcels(database: D1Database, request: Request, session: Au
     if (input.orders.some((order) => order.merchantId !== account.id) || input.recipients.some((recipient) => recipient.merchantId !== account.id)) return json({ error: "لا يمكنك إنشاء طرد لحساب آخر." }, 403);
     for (const order of input.orders) {
       const existing = state.database.orders.find((saved) => saved.id === order.id);
-      if (existing && (existing.merchantId !== account.id || existing.trackingNumber !== normalizeParcelCode(order.trackingNumber) || parcelCreationDetails(existing) !== parcelCreationDetails(order))) {
+      if (existing && (existing.merchantId !== account.id || (normalizeParcelCode(order.trackingNumber) && existing.trackingNumber !== normalizeParcelCode(order.trackingNumber)) || parcelCreationDetails(existing) !== parcelCreationDetails(order))) {
         return json({ error: "تم حفظ هذا الطرد سابقًا ببيانات مختلفة. افتح الطرد المحفوظ للتحقق قبل إنشاء طرد آخر." }, 409);
       }
     }
@@ -2560,7 +2590,7 @@ async function createParcels(database: D1Database, request: Request, session: Au
     const next = mergeMerchantDatabase(state.database, { ...current, orders: [...fresh, ...current.orders], recipients }, account);
     next.notices.unshift(...fresh.map((order): Notice => ({
       id: uid("notice"), userId: account.id, orderId: order.id,
-      title: "تم إنشاء الطرد", message: `تم إنشاء الطرد ${normalizeParcelCode(order.trackingNumber)} بنجاح.`,
+      title: "تم إنشاء الطرد", message: `تم إنشاء الطرد${order.trackingNumber.trim() ? ` ${normalizeParcelCode(order.trackingNumber)}` : ` للمستلم ${order.recipientName.trim()}`} بنجاح.`,
       icon: "package", read: false, createdAt: new Date().toISOString(),
     })));
     const existingNoticeIds = new Set(state.database.notices.map((notice) => notice.id));
@@ -3759,6 +3789,10 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
 
     if (url.pathname === "/api/almadina/orders" && request.method === "POST") {
       return await createParcels(database, request, session, config);
+    }
+
+    if (url.pathname === "/api/almadina/orders/assign-code" && request.method === "POST") {
+      return await assignParcelCode(database, request, session);
     }
 
     if (url.pathname === "/api/almadina/orders/scan" && request.method === "POST") {

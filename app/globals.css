@@ -1607,3 +1607,10 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .parcel-code-label strong { font-size: 9pt; }
   .parcel-code-label b { font-size: 10pt; }
 }
+
+.parcel-code-entry form { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+.parcel-code-entry .field { flex: 1 1 220px; min-width: 0; }
+.parcel-code-entry .field-hint { flex-basis: 100%; margin: 0; font-size: 14px; }
+.order-detail-actions > button:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 500px) { .parcel-code-entry .button { width: 100%; } }
+@media print { .parcel-code-entry { display: none; } }

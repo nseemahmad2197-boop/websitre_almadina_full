@@ -1064,7 +1064,7 @@ test("adds progressive weight and dimension fees while keeping legacy imports co
   assert.match(management, /getOversizeFee\(lengthCm, widthCm, heightCm\)/);
   assert.match(management, /getDeliveryFee\(region, user\.membership\) \+ weightFee \+ oversizeFee/);
   assert.match(management, /resolveDeliveryRegion\(row\.governorate, row\.city\)/);
-  assert.match(management, /كود الطرد/);
+  assert.match(management, /تُنشأ الطرود دون كود/);
   assert.match(management, /رسوم الوزن والحجم تدريجيًا/);
   assert.match(styles, /\.oversize-fee-notice\.is-active/);
 });
@@ -1258,7 +1258,7 @@ test("lets the merchant select exactly which parcels are included in the respons
   ]);
 
   assert.match(dashboard, /const \[bulkPrintOpen, setBulkPrintOpen\] = useState\(false\)/);
-  assert.match(dashboard, /const printableOrders = useMemo\(\(\) => database\.orders\.filter\(\(order\) => order\.merchantId === user\?\.id && !order\.deleted\)/);
+  assert.match(dashboard, /const printableOrders = useMemo\(\(\) => database\.orders\.filter\(\(order\) => order\.merchantId === user\?\.id && !order\.deleted && !!order\.trackingNumber\.trim\(\)\)/);
   assert.match(dashboard, /طباعة الكل/);
   assert.match(dashboard, /className="shipments-page__bulk-print"/);
   assert.match(dashboard, /disabled=\{!printableOrders\.length\}/);
@@ -1736,4 +1736,39 @@ test("printed parcel codes round-trip through the scanner and CSV manual entry",
   assert.equal(normalizeParcelCode("alx-۲۰۲۰۰۰۰۱"), codes[0]);
   const imported = parseParcelImportCsv("الاسم,رقم الجوال,المحافظة,المدينة,العنوان,القيمة,الوصف,كود الطرد\nأحمد,0599123456,نابلس,نابلس,الشارع,100,ملابس,ALX-20200001");
   assert.equal(imported.rows[0].trackingNumber, codes[0]);
+});
+
+test("renders the empty code field only on parcel details after creation", async () => {
+  const [{ rolldown }, { mkdtemp, rm }, { fileURLToPath }, React, { renderToStaticMarkup }, { createSeedDatabase }] = await Promise.all([
+    import("rolldown"), import("node:fs/promises"), import("node:url"), import("react"), import("react-dom/server"),
+    import(new URL("../app/lib/data.ts", import.meta.url)),
+  ]);
+  const project = fileURLToPath(new URL("../", import.meta.url));
+  const temporary = await mkdtemp(`${project}.parcel-details-test-`);
+  const bundled = await rolldown({
+    input: "virtual:parcel-details-test", platform: "node", external: ["react", "react/jsx-runtime", "react-dom"], transform: { jsx: "react-jsx" },
+    onLog(level, log, next) { if (log.code !== "MODULE_LEVEL_DIRECTIVE") next(level, log); },
+    plugins: [{ name: "parcel-detail-test", resolveId(id) { if (id === "virtual:parcel-details-test") return id; }, load(id) { if (id === "virtual:parcel-details-test") return `export { OrderDetail } from ${JSON.stringify(`${project}app/components/dashboard.tsx`)}; export { NewOrder } from ${JSON.stringify(`${project}app/components/order-form.tsx`)}; export { AppContext } from ${JSON.stringify(`${project}app/lib/app-context.tsx`)};`; } }],
+  });
+  try {
+    await bundled.write({ dir: temporary, format: "esm", entryFileNames: "ui.mjs" });
+    const { OrderDetail, NewOrder, AppContext } = await import(`${temporary}/ui.mjs`);
+    const user = { id: "detail-merchant", name: "التاجر", store: "المتجر", role: "merchant", membership: "standard" };
+    const order = { id: "detail-ui-parcel", merchantId: user.id, trackingNumber: "", recipientName: "المستلم", recipientPhone: "0591234567", city: "نابلس", address: "الشارع", amount: 100, deliveryFee: 25, status: "draft", createdAt: "2026-09-05T10:00:00.000Z", updatedAt: "2026-09-05T10:00:00.000Z", deleted: false };
+    const context = { user, database: { ...createSeedDatabase(), users: [user], orders: [order] }, selectedOrderId: order.id };
+    const render = (Component, values = context) => renderToStaticMarkup(React.createElement(AppContext.Provider, { value: values }, React.createElement(Component)));
+    const creation = render(NewOrder);
+    assert.doesNotMatch(creation, /كود الملصق المطبوع|أدخل الكود يدويًا|أدخل الكود المطبوع/);
+    const details = render(OrderDetail);
+    assert.match(details, /placeholder="أدخل الكود يدويًا"[^>]*value=""/);
+    assert.match(details, /حفظ الكود/);
+    assert.match(details, /بانتظار إدخال الكود/);
+    assert.doesNotMatch(details, /class="shipping-qr"/);
+    const assigned = render(OrderDetail, { ...context, database: { ...context.database, orders: [{ ...order, trackingNumber: "ALX-20200001" }] } });
+    assert.match(assigned, /ALX-20200001/);
+    assert.doesNotMatch(assigned, /أدخل الكود يدويًا/);
+  } finally {
+    await bundled.close();
+    await rm(temporary, { recursive: true, force: true });
+  }
 });

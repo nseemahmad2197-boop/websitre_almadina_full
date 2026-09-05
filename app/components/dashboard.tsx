@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, normalizeMembership, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, normalizeMembership, normalizeParcelCode, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
 import { createQrMatrix } from "../lib/qr-code";
 import { Icon } from "./icon";
 import { TrackingHistory, TrackingNoteComposer } from "./tracking-history";
@@ -12,7 +12,7 @@ export function OrderCard({ order, showMerchant = false, compact = false }: { or
   const { setView, setSelectedOrderId } = useApp();
   return (
     <button className={`order-card ${compact ? "order-card--compact" : ""}`} onClick={() => { setSelectedOrderId(order.id); setView("order-detail"); }}>
-      <div className="order-card__top"><div className="order-card__identity"><span className="order-card__icon"><Icon name="package" size={21} /></span><div><strong>{showMerchant ? order.merchantName : order.recipientName}</strong><span dir="ltr">{order.trackingNumber}</span></div></div><StatusPill status={order.status} /></div>
+      <div className="order-card__top"><div className="order-card__identity"><span className="order-card__icon"><Icon name="package" size={21} /></span><div><strong>{showMerchant ? order.merchantName : order.recipientName}</strong><span dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إدخال الكود"}</span></div></div><StatusPill status={order.status} /></div>
       <div className="order-card__details"><span><Icon name="mapPin" size={15} />{order.city}</span><span><Icon name="wallet" size={15} />{money(order.amount)} ₪</span><span><Icon name="clock" size={15} />{relativeDate(order.createdAt)}</span></div>
     </button>
   );
@@ -58,7 +58,7 @@ export function Shipments() {
     return stored ?? "all";
   });
 
-  const printableOrders = useMemo(() => database.orders.filter((order) => order.merchantId === user?.id && !order.deleted), [database.orders, user?.id]);
+  const printableOrders = useMemo(() => database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && !!order.trackingNumber.trim()), [database.orders, user?.id]);
   const orders = useMemo(() => database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && (status === "all" || order.status === status) && (!query || `${order.trackingNumber} ${order.recipientName} ${order.city} ${order.recipientPhone}`.toLowerCase().includes(query.toLowerCase()))), [database.orders, user?.id, status, query]);
 
   return (
@@ -85,7 +85,8 @@ export function Shipments() {
 }
 
 function ShippingQr({ value }: { value: string }) {
-  const matrix = useMemo(() => createQrMatrix(value), [value]);
+  const matrix = useMemo(() => value.trim() ? createQrMatrix(value) : [], [value]);
+  if (!value.trim()) return null;
   return (
     <svg className="shipping-qr" viewBox="0 0 29 29" role="img" aria-label={`رمز QR لرقم التتبع ${value}`} shapeRendering="crispEdges">
       <rect width="29" height="29" fill="#fff" />
@@ -205,6 +206,29 @@ function BulkShippingLabelsModal({ orders, onClose }: { orders: Order[]; onClose
   );
 }
 
+function ParcelCodeEntry({ order }: { order: Order }) {
+  const { assignParcelCode, showToast } = useApp();
+  const [code, setCode] = useState("");
+  const [saving, setSaving] = useState(false);
+  const inFlight = useRef(false);
+  async function saveCode(event: FormEvent) {
+    event.preventDefault();
+    if (inFlight.current || order.deleted) return;
+    const trackingNumber = normalizeParcelCode(code);
+    if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return showToast("أدخل كود الطرد المطبوع على الملصق.", "error");
+    inFlight.current = true;
+    setSaving(true);
+    try {
+      if (await assignParcelCode(order.id, trackingNumber)) showToast("تم حفظ كود الطرد.");
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
+    }
+  }
+  if (order.deleted) return <SectionCard title="كود الطرد" icon="qrCode"><p>استعد الطرد من المحذوفات لإدخال كوده.</p></SectionCard>;
+  return <SectionCard title="كود الطرد" icon="qrCode" className="parcel-code-entry"><form onSubmit={saveCode}><Field label="كود الملصق المطبوع" placeholder="أدخل الكود يدويًا" value={code} onChange={(event) => setCode(event.target.value)} maxLength={32} autoComplete="off" dir="ltr" disabled={saving} required /><Button type="submit" icon="check" loading={saving} disabled={!code.trim()}>حفظ الكود</Button><p className="field-hint">أدخل الكود الموجود على الملصق الذي استلمته من الشركة. يُحفظ هذا الكود لهذا الطرد فقط.</p></form></SectionCard>;
+}
+
 export function OrderDetail() {
   const { database, user, selectedOrderId, setView, updateDatabase, showToast, confirm } = useApp();
   const [labelOpen, setLabelOpen] = useState(false);
@@ -274,7 +298,7 @@ export function OrderDetail() {
 
   async function copyTrackingNumber() {
     const currentOrder = order;
-    if (!currentOrder) return;
+    if (!currentOrder?.trackingNumber.trim()) return;
     try {
       await navigator.clipboard.writeText(currentOrder.trackingNumber);
       showToast("تم نسخ رقم التتبع.");
@@ -286,7 +310,8 @@ export function OrderDetail() {
   return (
     <div className="page-content animate-page order-detail-page">
       <PageHeader title="تفاصيل الطرد" subtitle={order.trackingNumber} onBack={() => setView(user?.role === "admin" ? "admin" : "shipments")} />
-      <SectionCard className="detail-hero"><div><Icon name="package" size={30} /><div><strong dir="ltr">{order.trackingNumber}</strong><span>أُنشئ في {formatDate(order.createdAt)}</span></div></div><StatusPill status={order.status} /></SectionCard>
+      <SectionCard className="detail-hero"><div><Icon name="package" size={30} /><div><strong dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إدخال الكود"}</strong><span>أُنشئ في {formatDate(order.createdAt)}</span></div></div><StatusPill status={order.status} /></SectionCard>
+      {!order.trackingNumber.trim() && <ParcelCodeEntry key={order.id} order={order} />}
       <Segmented className="order-detail-tabs" value={detailTab} onChange={(value) => setDetailTab(value as "tracking" | "details")} items={[{ value: "tracking", label: "التتبّع" }, { value: "details", label: "تفاصيل الطرد" }]} />
       {detailTab === "tracking" ? (
         <div className="order-tracking-panel animate-page">
@@ -302,8 +327,8 @@ export function OrderDetail() {
       ) : (
         <div className="order-detail-panel animate-page">
           <div className="order-detail-actions" aria-label="إجراءات الطرد">
-            <button type="button" onClick={() => setLabelOpen(true)}><span><Icon name="qrCode" size={23} /></span><strong>ملصق الشحن</strong></button>
-            <button type="button" onClick={() => { void copyTrackingNumber(); }}><span><Icon name="copy" size={22} /></span><strong>نسخ الرقم</strong></button>
+            <button type="button" disabled={!order.trackingNumber.trim()} onClick={() => setLabelOpen(true)}><span><Icon name="qrCode" size={23} /></span><strong>ملصق الشحن</strong></button>
+            <button type="button" disabled={!order.trackingNumber.trim()} onClick={() => { void copyTrackingNumber(); }}><span><Icon name="copy" size={22} /></span><strong>نسخ الرقم</strong></button>
             <button type="button" onClick={() => window.print()}><span><Icon name="printer" size={22} /></span><strong>طباعة البيانات</strong></button>
             <button type="button" className="is-danger" onClick={removeOrder}><span><Icon name="trash" size={22} /></span><strong>حذف</strong></button>
           </div>
@@ -311,7 +336,7 @@ export function OrderDetail() {
           {user?.role === "admin" && order.privateNotes && <SectionCard title="الملاحظة الخاصة للمسؤول" subtitle="لا تظهر للمندوب أو المستخدم" icon="lock" className="admin-private-note"><p className="detail-note">{order.privateNotes}</p></SectionCard>}
         </div>
       )}
-      {labelOpen && <ShippingLabelModal order={order} onClose={() => setLabelOpen(false)} />}
+      {labelOpen && !!order.trackingNumber.trim() && <ShippingLabelModal order={order} onClose={() => setLabelOpen(false)} />}
       {statusUpdate && <Modal title="تحديث حالة الطرد" onClose={() => setStatusUpdate(null)} className="tracking-status-modal" sheet><p className="modal-description">سيتم تغيير الحالة من «{getStatus(order.status).label}» إلى «{getStatus(statusUpdate.status).label}». يمكنك كتابة ملاحظة تظهر في سجل التتبع.</p><TrackingNoteComposer status={statusUpdate.status} value={statusUpdate.note} onChange={(note) => setStatusUpdate({ ...statusUpdate, note })} onSubmit={saveStatusUpdate} submitLabel="حفظ الحالة والملاحظة" optional /></Modal>}
     </div>
   );

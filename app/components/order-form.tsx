@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { createTrackingEvent, deliveryLocalities, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, normalizeMembership, normalizeParcelCode, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, normalizeMembership, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
 import { Icon } from "./icon";
 import { Button, Field, PageHeader, SectionCard, SelectField } from "./ui";
 
@@ -14,7 +14,6 @@ const orderTypes = [
 ];
 
 const blankForm = {
-  trackingNumber: "",
   type: "standard",
   phone: "",
   name: "",
@@ -107,8 +106,6 @@ export function NewOrder() {
   async function createOrder(event: FormEvent) {
     event.preventDefault();
     if (!user || loading) return;
-    const trackingNumber = normalizeParcelCode(form.trackingNumber);
-    if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return showToast("أدخل كود الطرد المطبوع على الملصق.", "error");
     if (!/^05\d{8}$/.test(form.phone)) return showToast("أدخل رقم جوال صحيح مكوّن من 10 أرقام.", "error");
     if (!form.name.trim()) return showToast("أدخل اسم المستلم.", "error");
     if (!form.governorate.trim() || !form.city.trim()) return showToast("أدخل المحافظة والمدينة أو المنطقة للتوصيل.", "error");
@@ -120,7 +117,7 @@ export function NewOrder() {
     try {
       const now = new Date().toISOString();
       const order: Order = {
-        id: orderId, trackingNumber, merchantId: user.id, merchantName: user.name, merchantStore: user.store,
+        id: orderId, trackingNumber: "", merchantId: user.id, merchantName: user.name, merchantStore: user.store,
         recipientName: form.name.trim(), recipientPhone: form.phone, governorate: form.governorate.trim(), city: form.city.trim(), address: form.address.trim(),
         pickupAddress: form.pickup.trim() || `${user.store} - ${form.governorate.trim()}`, amount, deliveryFee,
         preferredDeliveryDate: form.deliveryDate || undefined,
@@ -136,7 +133,7 @@ export function NewOrder() {
       if (!await createParcels([order], recipients)) return;
       setSelectedOrderId(order.id);
       setView("order-detail");
-      showToast(`تم إنشاء الطرد ${trackingNumber} بنجاح وحالته قيد الإنشاء.`);
+      showToast("تم إنشاء الطرد وحالته قيد الإنشاء. أدخل كود الملصق من تفاصيل الطرد.");
     } finally {
       setLoading(false);
     }
@@ -146,7 +143,6 @@ export function NewOrder() {
     <form id="new-order-form" className="page-content order-form-page animate-page" onSubmit={createOrder} onReset={clearAllFields} noValidate>
       <PageHeader title="إنشاء طرد جديد" subtitle="أدخل بيانات المستلم والطرد" onBack={leaveForm} />
 
-      <SectionCard title="كود الطرد" icon="qrCode"><Field label="كود الطرد" placeholder="أدخل الكود المطبوع" value={form.trackingNumber} onChange={(event) => setForm({ ...form, trackingNumber: event.target.value })} maxLength={32} autoComplete="off" dir="ltr" required /><p className="field-hint">اكتب الكود الموجود على الملصق الذي استلمته من الشركة. كل كود مخصص لطرد واحد.</p></SectionCard>
 
       <SectionCard title="نوع الطرد" icon="package"><div className="order-type-grid">{orderTypes.map((type) => <button type="button" key={type.id} className={`order-type ${form.type === type.id ? "is-selected" : ""}`} onClick={() => setForm({ ...form, type: type.id })}><span className="radio-indicator" /><div><strong>{type.title}</strong><small>{type.description}</small></div></button>)}</div></SectionCard>
 
