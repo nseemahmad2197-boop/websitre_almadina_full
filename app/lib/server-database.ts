@@ -2471,7 +2471,7 @@ function mergeCourierDatabase(current: Database, submitted: Database, account: U
 
 function claimParcelCode(current: Database, claims: Record<string, ParcelCodeClaim>, order: Order): string {
   const code = normalizeParcelCode(order.trackingNumber);
-  if (!/^ALX-\d{6,20}$/.test(code)) throw new ApiRequestError("أدخل كود الطرد المطبوع على الملصق.", 400);
+  if (!/^ALX-\d{6,20}$/.test(code)) throw new ApiRequestError("امسح رمز QR المطبوع على ملصق الطرد.", 400);
   if (claims[code] || current.orders.some((saved) => normalizeParcelCode(saved.trackingNumber) === code)) {
     throw new ApiRequestError("كود الطرد مستخدم بالفعل. استخدم ملصقًا جديدًا.", 409);
   }
@@ -2490,7 +2490,7 @@ async function assignParcelCode(database: D1Database, request: Request, session:
     return json({ error: "بيانات كود الطرد غير صالحة." }, 400);
   }
   const trackingNumber = normalizeParcelCode(payload.trackingNumber);
-  if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return json({ error: "أدخل كود الطرد المطبوع على الملصق." }, 400);
+  if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return json({ error: "امسح رمز QR المطبوع على ملصق الطرد." }, 400);
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const state = await readState(database);
     const account = state.database.users.find((entry) => entry.id === session.account.id);

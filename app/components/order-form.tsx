@@ -133,7 +133,7 @@ export function NewOrder() {
       if (!await createParcels([order], recipients)) return;
       setSelectedOrderId(order.id);
       setView("order-detail");
-      showToast("تم إنشاء الطرد وحالته قيد الإنشاء. أدخل كود الملصق من تفاصيل الطرد.");
+      showToast("تم إنشاء الطرد وحالته قيد الإنشاء. امسح كود QR من تفاصيل الطرد.");
     } finally {
       setLoading(false);
     }

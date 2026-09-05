@@ -1167,7 +1167,7 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 .scanner-overlay--employee .scanner-frame > i { border-color: #7dffc0; }
 .scanner-overlay--employee .scanner-frame > span { background: #7dffc0; box-shadow: 0 0 15px #7dffc0; }
 .scanner-overlay__footer > h2 { font-size: 17px; }
-.scanner-overlay__footer > p { max-width: 340px; color: rgb(255 255 255 / 75%); font-size: 11px; }
+.scanner-overlay__footer > p { max-width: 340px; color: rgb(255 255 255 / 85%); font-size: 14px; }
 .scanner-manual { display: grid; width: min(100%, 400px); grid-template-columns: 1fr auto; gap: 9px; margin-top: 8px; }
 .scanner-manual .field__control { background: #fff; color: #111; }
 .scanner-manual .field__control input { color: #111; }
@@ -1608,7 +1608,7 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .parcel-code-label b { font-size: 10pt; }
 }
 
-.parcel-code-entry form { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+.parcel-code-entry__actions { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
 .parcel-code-entry .field { flex: 1 1 220px; min-width: 0; }
 .parcel-code-entry .field-hint { flex-basis: 100%; margin: 0; font-size: 14px; }
 .order-detail-actions > button:disabled { opacity: .45; cursor: not-allowed; }

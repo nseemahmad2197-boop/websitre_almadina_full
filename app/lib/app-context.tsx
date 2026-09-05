@@ -37,6 +37,8 @@ export type ConfirmOptions = {
   onConfirm: () => void | boolean | Promise<void | boolean>;
 };
 
+export type ScannerPurpose = "lookup" | "assign-parcel-code";
+
 export type ToastKind = "success" | "error" | "info";
 
 export type RegistrationFormValues = Pick<User, "name" | "phone" | "store" | "email" | "password">
@@ -87,7 +89,7 @@ export type AppContextValue = {
   notify: (notice: Omit<Notice, "id" | "read" | "createdAt">) => void;
   broadcastNotice: (notice: { audience: NoticeAudience; recipientUserId?: string; title: string; message: string }) => Promise<number | null>;
   clearNotices: (noticeIds: string[]) => Promise<number | null>;
-  openScanner: (callback?: (value: string) => void) => void;
+  openScanner: (callback?: (value: string) => void, options?: { purpose?: ScannerPurpose }) => void;
   openAccountSwitcher: () => void;
 };
 

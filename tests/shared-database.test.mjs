@@ -4893,3 +4893,33 @@ test("concurrent detail assignments never consume the same label twice or consum
   assert.equal(Object.keys(latest.parcelCodeClaims).length, 2, "losing label stays unused");
   assert.equal(new Set(latest.orders.map((order) => order.trackingNumber)).size, 2);
 });
+
+test("links a QR from an administrator's printed batch to the selected blank parcel", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const [code] = await reserveCodes(worker, database, 1);
+  const [{ createQrMatrix }, { BitMatrix }, decoderModule] = await Promise.all([
+    import(new URL("../app/lib/qr-code.ts", import.meta.url)),
+    import("@zxing/library"),
+    import("@zxing/library/cjs/core/qrcode/decoder/Decoder.js"),
+  ]);
+  const matrix = createQrMatrix(code);
+  const bits = new BitMatrix(matrix.length);
+  matrix.forEach((row, y) => row.forEach((dark, x) => { if (dark) bits.set(x, y); }));
+  const Decoder = decoderModule.default.default ?? decoderModule.default;
+  const scanned = new Decoder().decodeBitMatrix(bits).getText();
+  const merchant = await call(worker, database, "register", { method: "POST", payload: accountPayload("زبون QR", "camera-label@example.test", "0591000041") });
+  const cookie = sessionFrom(merchant);
+  const create = await call(worker, database, "orders", { method: "POST", cookie, payload: { orders: [printedParcel(merchant.body.userId, "qr-unselected", ""), printedParcel(merchant.body.userId, "qr-selected", "")] } });
+  assert.equal(create.status, 201);
+  const result = await call(worker, database, "orders/assign-code", { method: "POST", cookie, payload: { orderId: "qr-selected", trackingNumber: scanned } });
+  assert.equal(result.status, 200, result.body.error);
+  assert.equal(result.body.database.orders.find((order) => order.id === "qr-selected").trackingNumber, code);
+  assert.equal(result.body.database.orders.find((order) => order.id === "qr-unselected").trackingNumber, "");
+  const revision = database.state.revision;
+  const repeatedFrame = await call(worker, database, "orders/assign-code", { method: "POST", cookie, payload: { orderId: "qr-selected", trackingNumber: scanned } });
+  assert.equal(repeatedFrame.status, 200);
+  assert.equal(database.state.revision, revision);
+  const anotherParcel = await call(worker, database, "orders/assign-code", { method: "POST", cookie, payload: { orderId: "qr-unselected", trackingNumber: scanned } });
+  assert.equal(anotherParcel.status, 409);
+});

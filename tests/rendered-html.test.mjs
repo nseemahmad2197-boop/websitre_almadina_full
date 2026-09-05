@@ -1738,7 +1738,7 @@ test("printed parcel codes round-trip through the scanner and CSV manual entry",
   assert.equal(imported.rows[0].trackingNumber, codes[0]);
 });
 
-test("renders the empty code field only on parcel details after creation", async () => {
+test("renders camera-only QR assignment on parcel details without manual code entry", async () => {
   const [{ rolldown }, { mkdtemp, rm }, { fileURLToPath }, React, { renderToStaticMarkup }, { createSeedDatabase }] = await Promise.all([
     import("rolldown"), import("node:fs/promises"), import("node:url"), import("react"), import("react-dom/server"),
     import(new URL("../app/lib/data.ts", import.meta.url)),
@@ -1748,11 +1748,11 @@ test("renders the empty code field only on parcel details after creation", async
   const bundled = await rolldown({
     input: "virtual:parcel-details-test", platform: "node", external: ["react", "react/jsx-runtime", "react-dom"], transform: { jsx: "react-jsx" },
     onLog(level, log, next) { if (log.code !== "MODULE_LEVEL_DIRECTIVE") next(level, log); },
-    plugins: [{ name: "parcel-detail-test", resolveId(id) { if (id === "virtual:parcel-details-test") return id; }, load(id) { if (id === "virtual:parcel-details-test") return `export { OrderDetail } from ${JSON.stringify(`${project}app/components/dashboard.tsx`)}; export { NewOrder } from ${JSON.stringify(`${project}app/components/order-form.tsx`)}; export { AppContext } from ${JSON.stringify(`${project}app/lib/app-context.tsx`)};`; } }],
+    plugins: [{ name: "parcel-detail-test", resolveId(id) { if (id === "virtual:parcel-details-test") return id; }, load(id) { if (id === "virtual:parcel-details-test") return `export { OrderDetail } from ${JSON.stringify(`${project}app/components/dashboard.tsx`)}; export { NewOrder } from ${JSON.stringify(`${project}app/components/order-form.tsx`)}; export { AppContext } from ${JSON.stringify(`${project}app/lib/app-context.tsx`)}; export { ScannerOverlay } from ${JSON.stringify(`${project}app/almadina-app.tsx`)};`; } }],
   });
   try {
     await bundled.write({ dir: temporary, format: "esm", entryFileNames: "ui.mjs" });
-    const { OrderDetail, NewOrder, AppContext } = await import(`${temporary}/ui.mjs`);
+    const { OrderDetail, NewOrder, AppContext, ScannerOverlay } = await import(`${temporary}/ui.mjs`);
     const user = { id: "detail-merchant", name: "التاجر", store: "المتجر", role: "merchant", membership: "standard" };
     const order = { id: "detail-ui-parcel", merchantId: user.id, trackingNumber: "", recipientName: "المستلم", recipientPhone: "0591234567", city: "نابلس", address: "الشارع", amount: 100, deliveryFee: 25, status: "draft", createdAt: "2026-09-05T10:00:00.000Z", updatedAt: "2026-09-05T10:00:00.000Z", deleted: false };
     const context = { user, database: { ...createSeedDatabase(), users: [user], orders: [order] }, selectedOrderId: order.id };
@@ -1760,13 +1760,19 @@ test("renders the empty code field only on parcel details after creation", async
     const creation = render(NewOrder);
     assert.doesNotMatch(creation, /كود الملصق المطبوع|أدخل الكود يدويًا|أدخل الكود المطبوع/);
     const details = render(OrderDetail);
-    assert.match(details, /placeholder="أدخل الكود يدويًا"[^>]*value=""/);
-    assert.match(details, /حفظ الكود/);
-    assert.match(details, /بانتظار إدخال الكود/);
+    assert.match(details, /إضافة كود QR/);
+    assert.doesNotMatch(details, /<input|أدخل الكود|حفظ الكود/);
+    assert.match(details, /بانتظار إضافة كود QR/);
     assert.doesNotMatch(details, /class="shipping-qr"/);
     const assigned = render(OrderDetail, { ...context, database: { ...context.database, orders: [{ ...order, trackingNumber: "ALX-20200001" }] } });
     assert.match(assigned, /ALX-20200001/);
-    assert.doesNotMatch(assigned, /أدخل الكود يدويًا/);
+    assert.doesNotMatch(assigned, /إضافة كود QR|أدخل الكود يدويًا/);
+    const camera = renderToStaticMarkup(React.createElement(ScannerOverlay, { purpose: "assign-parcel-code", onClose() {}, onDetected() {} }));
+    assert.match(camera, /<video/);
+    assert.match(camera, /إغلاق الماسح/);
+    assert.doesNotMatch(camera, /<input|scanner-manual/);
+    const generalScanner = renderToStaticMarkup(React.createElement(ScannerOverlay, { onClose() {}, onDetected() {} }));
+    assert.match(generalScanner, /scanner-manual/);
   } finally {
     await bundled.close();
     await rm(temporary, { recursive: true, force: true });

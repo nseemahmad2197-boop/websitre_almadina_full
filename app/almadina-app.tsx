@@ -7,7 +7,7 @@ import { ApplicationShell } from "./components/application-shell";
 import { Authentication } from "./components/auth";
 import { Icon } from "./components/icon";
 import { Avatar, Brand, Button, Field, IconButton, Modal } from "./components/ui";
-import { AppContext, type ConfirmOptions, type RegistrationChallenge, type RegistrationFormValues, type ToastKind, type View } from "./lib/app-context";
+import { AppContext, type ConfirmOptions, type RegistrationChallenge, type RegistrationFormValues, type ScannerPurpose, type ToastKind, type View } from "./lib/app-context";
 import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/available-accounts";
 import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiometricAvailability, getAppLockStatus, registerBiometricUnlock, removeAppLock, removeBiometricUnlock, startSignedOutBiometricAuthentication, verifyAppLockPin, verifySignedOutBiometricAuthentication, type AppLockState } from "./lib/app-lock-client";
 import { createSeedDatabase, defaultPreferences, uid, type Database, type LinkedDevice, type Notice, type NoticeAudience, type Preferences, type Order, type Recipient } from "./lib/data";
@@ -147,11 +147,14 @@ async function sharedRequest(path: string, options: RequestInit = {}): Promise<S
   };
 }
 
-function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employeeMode?: boolean; onClose: () => void; onDetected: (value: string) => void }) {
+export function ScannerOverlay({ employeeMode = false, purpose = "lookup", onClose, onDetected }: { employeeMode?: boolean; purpose?: ScannerPurpose; onClose: () => void; onDetected: (value: string) => void }) {
+  const cameraOnly = purpose === "assign-parcel-code";
   const videoRef = useRef<HTMLVideoElement>(null);
   const onDetectedRef = useRef(onDetected);
   const handledRef = useRef(false);
   const [manual, setManual] = useState("");
+  const [cameraFailed, setCameraFailed] = useState(false);
+  const [cameraAttempt, setCameraAttempt] = useState(0);
   const [message, setMessage] = useState("جارٍ تشغيل الكاميرا...");
 
   useEffect(() => {
@@ -165,7 +168,11 @@ function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employe
     handledRef.current = false;
 
     async function start() {
-      if (!navigator.mediaDevices?.getUserMedia) { setMessage("الكاميرا تحتاج HTTPS أو localhost — أدخل رقم التتبع يدويًا."); return; }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraFailed(true);
+        setMessage(cameraOnly ? "تعذّر الوصول للكاميرا. افتح الموقع برابط آمن واسمح باستخدام الكاميرا." : "الكاميرا تحتاج HTTPS أو localhost — أدخل رقم التتبع يدويًا.");
+        return;
+      }
       try {
         if (!video) return;
         const { BrowserQRCodeReader } = await import("@zxing/browser");
@@ -194,18 +201,19 @@ function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employe
 
         if (!active) { nextControls.stop(); return; }
         controls = nextControls;
-        setMessage(employeeMode ? "ضع كود QR للطرد داخل الإطار" : "ضع رمز QR داخل الإطار");
+        setMessage(cameraOnly ? "امسح كود QR المطبوع لإضافته إلى الطرد" : employeeMode ? "ضع كود QR للطرد داخل الإطار" : "ضع رمز QR داخل الإطار");
       } catch (error) {
         if (!active) return;
+        setCameraFailed(true);
         const errorName = error instanceof DOMException ? error.name : "";
         if (errorName === "NotAllowedError" || errorName === "SecurityError") {
           setMessage("تم رفض إذن الكاميرا — اسمح للموقع باستخدامها ثم حاول مجددًا.");
         } else if (errorName === "NotFoundError" || errorName === "OverconstrainedError") {
-          setMessage("لم يتم العثور على كاميرا مناسبة — أدخل رقم التتبع يدويًا.");
+          setMessage(cameraOnly ? "لم يتم العثور على كاميرا. افتح تفاصيل الطرد من جهاز مزوّد بكاميرا." : "لم يتم العثور على كاميرا مناسبة — أدخل رقم التتبع يدويًا.");
         } else if (errorName === "NotReadableError") {
           setMessage("الكاميرا مستخدمة في تطبيق آخر — أغلقه ثم حاول مجددًا.");
         } else {
-          setMessage("تعذّر تشغيل قارئ QR — يمكنك إدخال الرقم يدويًا.");
+          setMessage(cameraOnly ? "تعذّر تشغيل قارئ QR. أعد تشغيل الكاميرا وحاول مجددًا." : "تعذّر تشغيل قارئ QR — يمكنك إدخال الرقم يدويًا.");
         }
       }
     }
@@ -218,9 +226,9 @@ function ScannerOverlay({ employeeMode = false, onClose, onDetected }: { employe
       if (stream instanceof MediaStream) stream.getTracks().forEach((track) => track.stop());
       if (video) video.srcObject = null;
     };
-  }, [employeeMode]);
+  }, [employeeMode, cameraOnly, cameraAttempt]);
 
-  return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2 aria-live="polite">{message}</h2><p>{employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام الطرود الجاهزة للإرسال والطرود الراجعة." : "ضع رمز QR داخل الإطار ليُقرأ تلقائيًا."}</p><div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetectedRef.current(manual.trim())}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div></div></div>;
+  return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2 aria-live="polite">{message}</h2><p>{cameraOnly ? "وجّه الكاميرا إلى ملصق الأكواد الذي استلمته من الشركة. سيُحفظ الكود لهذا الطرد بعد التحقق منه." : employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام الطرود الجاهزة للإرسال والطرود الراجعة." : "ضع رمز QR داخل الإطار ليُقرأ تلقائيًا."}</p>{cameraFailed && <Button icon="camera" onClick={() => { setCameraFailed(false); setMessage("جارٍ تشغيل الكاميرا..."); setCameraAttempt((attempt) => attempt + 1); }}>إعادة تشغيل الكاميرا</Button>}{!cameraOnly && <div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetectedRef.current(manual.trim())}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div>}</div></div>;
 }
 
 function ConfirmModal({ options, onClose }: { options: ConfirmOptions; onClose: () => void }) {
@@ -254,7 +262,7 @@ export default function AlmadinaApplication() {
   const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
   const [accountSwitcher, setAccountSwitcher] = useState(false);
   const [accountSwitcherLogoutBusy, setAccountSwitcherLogoutBusy] = useState(false);
-  const [scanner, setScanner] = useState<{ callback?: (value: string) => void } | null>(null);
+  const [scanner, setScanner] = useState<{ callback?: (value: string) => void; purpose?: ScannerPurpose; epoch: number } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const authoritativeDatabase = useRef<Database | null>(null);
   const visibleDatabase = useRef<Database>(database);
@@ -1026,6 +1034,7 @@ export default function AlmadinaApplication() {
   }
 
   function clearLocalSession() {
+    setScanner(null);
     sessionEpoch.current += 1;
     authoritativeDatabase.current = null;
     pendingUpdates.current = [];
@@ -1350,7 +1359,8 @@ export default function AlmadinaApplication() {
 
   function onScan(value: string) {
     const currentScanner = scanner; setScanner(null);
-    if (currentScanner?.callback) return currentScanner.callback(value);
+    if (!value.trim() || !currentScanner || currentScanner.epoch !== sessionEpoch.current) return;
+    if (currentScanner.callback) return currentScanner.callback(value);
     if (user?.role === "courier") { void shipScannedOrder(value.trim().toUpperCase()); return; }
     const order = database.orders.find((entry) => entry.trackingNumber.toUpperCase() === value.trim().toUpperCase() && !entry.deleted);
     if (!order) return showToast("لم نعثر على طرد بهذا الرقم.", "error");
@@ -1364,11 +1374,11 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}
-    {!appLock.locked && scanner && <ScannerOverlay employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}
+    {!appLock.locked && scanner && <ScannerOverlay purpose={scanner.purpose} employeeMode={user?.role === "courier"} onClose={() => setScanner(null)} onDetected={onScan} />}
     <div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`toast toast--${toast.kind}`}><Icon name={toast.kind === "error" ? "alert" : toast.kind === "info" ? "info" : "check"} size={19} />{toast.message}</div>)}</div>
   </AppContext.Provider>;
 }

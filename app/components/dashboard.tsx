@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useApp } from "../lib/app-context";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, normalizeMembership, normalizeParcelCode, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
 import { createQrMatrix } from "../lib/qr-code";
@@ -12,7 +12,7 @@ export function OrderCard({ order, showMerchant = false, compact = false }: { or
   const { setView, setSelectedOrderId } = useApp();
   return (
     <button className={`order-card ${compact ? "order-card--compact" : ""}`} onClick={() => { setSelectedOrderId(order.id); setView("order-detail"); }}>
-      <div className="order-card__top"><div className="order-card__identity"><span className="order-card__icon"><Icon name="package" size={21} /></span><div><strong>{showMerchant ? order.merchantName : order.recipientName}</strong><span dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إدخال الكود"}</span></div></div><StatusPill status={order.status} /></div>
+      <div className="order-card__top"><div className="order-card__identity"><span className="order-card__icon"><Icon name="package" size={21} /></span><div><strong>{showMerchant ? order.merchantName : order.recipientName}</strong><span dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إضافة كود QR"}</span></div></div><StatusPill status={order.status} /></div>
       <div className="order-card__details"><span><Icon name="mapPin" size={15} />{order.city}</span><span><Icon name="wallet" size={15} />{money(order.amount)} ₪</span><span><Icon name="clock" size={15} />{relativeDate(order.createdAt)}</span></div>
     </button>
   );
@@ -207,26 +207,26 @@ function BulkShippingLabelsModal({ orders, onClose }: { orders: Order[]; onClose
 }
 
 function ParcelCodeEntry({ order }: { order: Order }) {
-  const { assignParcelCode, showToast } = useApp();
-  const [code, setCode] = useState("");
+  const { assignParcelCode, openScanner, showToast } = useApp();
+  const [scannedCode, setScannedCode] = useState("");
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
-  async function saveCode(event: FormEvent) {
-    event.preventDefault();
+  async function saveScannedCode(value: string) {
     if (inFlight.current || order.deleted) return;
-    const trackingNumber = normalizeParcelCode(code);
-    if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return showToast("أدخل كود الطرد المطبوع على الملصق.", "error");
+    const trackingNumber = normalizeParcelCode(value);
+    if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return showToast("هذا الرمز ليس كود طرد صالحًا. امسح ملصق الشركة.", "error");
     inFlight.current = true;
+    setScannedCode(trackingNumber);
     setSaving(true);
     try {
-      if (await assignParcelCode(order.id, trackingNumber)) showToast("تم حفظ كود الطرد.");
+      if (await assignParcelCode(order.id, trackingNumber)) showToast("تمت قراءة QR وحفظ كود الطرد.");
     } finally {
       inFlight.current = false;
       setSaving(false);
     }
   }
-  if (order.deleted) return <SectionCard title="كود الطرد" icon="qrCode"><p>استعد الطرد من المحذوفات لإدخال كوده.</p></SectionCard>;
-  return <SectionCard title="كود الطرد" icon="qrCode" className="parcel-code-entry"><form onSubmit={saveCode}><Field label="كود الملصق المطبوع" placeholder="أدخل الكود يدويًا" value={code} onChange={(event) => setCode(event.target.value)} maxLength={32} autoComplete="off" dir="ltr" disabled={saving} required /><Button type="submit" icon="check" loading={saving} disabled={!code.trim()}>حفظ الكود</Button><p className="field-hint">أدخل الكود الموجود على الملصق الذي استلمته من الشركة. يُحفظ هذا الكود لهذا الطرد فقط.</p></form></SectionCard>;
+  if (order.deleted) return <SectionCard title="كود الطرد" icon="qrCode"><p>استعد الطرد من المحذوفات لإضافة كود QR.</p></SectionCard>;
+  return <SectionCard title="كود الطرد" icon="qrCode" className="parcel-code-entry"><div className="parcel-code-entry__actions"><Button icon="camera" loading={saving} onClick={() => openScanner((value) => { void saveScannedCode(value); }, { purpose: "assign-parcel-code" })}>{scannedCode ? "قراءة QR آخر" : "إضافة كود QR"}</Button>{scannedCode && <><strong dir="ltr" aria-live="polite">{scannedCode}</strong><Button variant="outline" disabled={saving} onClick={() => { void saveScannedCode(scannedCode); }}>إعادة محاولة الحفظ</Button></>}<p className="field-hint">امسح بالكاميرا رمز QR الموجود على ملصق الشركة. سيُضاف الكود لهذا الطرد تلقائيًا بعد التحقق منه.</p></div></SectionCard>;
 }
 
 export function OrderDetail() {
@@ -310,7 +310,7 @@ export function OrderDetail() {
   return (
     <div className="page-content animate-page order-detail-page">
       <PageHeader title="تفاصيل الطرد" subtitle={order.trackingNumber} onBack={() => setView(user?.role === "admin" ? "admin" : "shipments")} />
-      <SectionCard className="detail-hero"><div><Icon name="package" size={30} /><div><strong dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إدخال الكود"}</strong><span>أُنشئ في {formatDate(order.createdAt)}</span></div></div><StatusPill status={order.status} /></SectionCard>
+      <SectionCard className="detail-hero"><div><Icon name="package" size={30} /><div><strong dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إضافة كود QR"}</strong><span>أُنشئ في {formatDate(order.createdAt)}</span></div></div><StatusPill status={order.status} /></SectionCard>
       {!order.trackingNumber.trim() && <ParcelCodeEntry key={order.id} order={order} />}
       <Segmented className="order-detail-tabs" value={detailTab} onChange={(value) => setDetailTab(value as "tracking" | "details")} items={[{ value: "tracking", label: "التتبّع" }, { value: "details", label: "تفاصيل الطرد" }]} />
       {detailTab === "tracking" ? (
