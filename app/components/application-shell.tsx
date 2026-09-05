@@ -6,6 +6,7 @@ import { AdminDashboard } from "./admin";
 import { Dashboard, OrderDetail, Shipments } from "./dashboard";
 import { EmployeeDashboard } from "./employee";
 import { CollectionsPage, ImportPage, NotificationsPage, ProfilePage, RecipientsPage, ReturnsPage, TrashPage } from "./management-pages";
+import { ParcelCodeBatchesPage } from "./parcel-code-batches";
 import { NewOrder } from "./order-form";
 import { ChangePasswordPage, DeleteAccountPage, HelpPage, LinkedDevicesPage, NotificationSettings, PreferencesPage, PrivacyPage, SecurityPage, SettingsPage } from "./settings-pages";
 import { Icon, type IconName } from "./icon";
@@ -18,6 +19,7 @@ function NavigationDrawer({ onClose }: { onClose: () => void }) {
   const employee = user.role === "courier";
   const links: { icon: IconName; label: string; view: View }[] = admin ? [
     { icon: "home", label: "لوحة التحكم", view: "admin" },
+    { icon: "qrCode", label: "أكواد الطرود للطباعة", view: "parcel-codes" },
     { icon: "bell", label: "الإشعارات", view: "notifications" },
     { icon: "trash", label: "الطرود المحذوفة", view: "trash" },
     { icon: "settings", label: "الإعدادات", view: "settings" },
@@ -67,6 +69,7 @@ function CurrentPage() {
     case "shipments": return <Shipments />;
     case "returns": return <ReturnsPage />;
     case "collections": return <CollectionsPage />;
+    case "parcel-codes": return <ParcelCodeBatchesPage />;
     case "new-order": return <NewOrder />;
     case "order-detail": return <OrderDetail />;
     case "recipients": return <RecipientsPage />;

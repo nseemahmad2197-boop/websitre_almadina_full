@@ -10,7 +10,7 @@ import { Avatar, Brand, Button, Field, IconButton, Modal } from "./components/ui
 import { AppContext, type ConfirmOptions, type RegistrationChallenge, type RegistrationFormValues, type ToastKind, type View } from "./lib/app-context";
 import { forgetAvailableAccount, rememberAvailableAccount } from "./lib/available-accounts";
 import { AppLockApiError, authenticateWithBiometric, createAppLock, detectBiometricAvailability, getAppLockStatus, registerBiometricUnlock, removeAppLock, removeBiometricUnlock, startSignedOutBiometricAuthentication, verifyAppLockPin, verifySignedOutBiometricAuthentication, type AppLockState } from "./lib/app-lock-client";
-import { createSeedDatabase, defaultPreferences, uid, type Database, type LinkedDevice, type Notice, type NoticeAudience, type Preferences } from "./lib/data";
+import { createSeedDatabase, defaultPreferences, uid, type Database, type LinkedDevice, type Notice, type NoticeAudience, type Preferences, type Order, type Recipient } from "./lib/data";
 import {
   PhoneNotificationError,
   disablePhoneNotifications as disableSystemNotifications,
@@ -643,6 +643,41 @@ export default function AlmadinaApplication() {
       await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
     }
     return !savingUpdates.current && !remoteMutationInFlight.current && pendingUpdates.current.length === 0;
+  }
+
+  async function saveParcelRequest(path: string, payload: unknown): Promise<boolean> {
+    if (!await waitForPendingUpdates()) {
+      showToast("انتظر اكتمال الحفظ ثم أعد المحاولة.", "error");
+      return false;
+    }
+    const operationEpoch = sessionEpoch.current;
+    remoteMutationInFlight.current = true;
+    try {
+      const snapshot = await sharedRequest(path, { method: "POST", body: JSON.stringify(payload) });
+      if (operationEpoch !== sessionEpoch.current) return false;
+      authoritativeDatabase.current = snapshot.database;
+      serverRevision.current = snapshot.revision;
+      visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), snapshot.database);
+      setDatabase(visibleDatabase.current);
+      return true;
+    } catch (error) {
+      if (operationEpoch !== sessionEpoch.current) return false;
+      if (error instanceof SharedApiError && error.status === 401) clearLocalSession();
+      showToast(error instanceof Error ? error.message : "تعذّر حفظ البيانات. أعد المحاولة.", "error");
+      return false;
+    } finally {
+      remoteMutationInFlight.current = false;
+      if (pendingUpdates.current.length) void savePendingUpdates();
+    }
+  }
+
+  async function createParcels(orders: Order[], recipients: Recipient[] = []): Promise<boolean> {
+    return saveParcelRequest("orders", { orders, recipients });
+  }
+
+  async function generateParcelCodes(requestId: string, count: number, label: string): Promise<boolean> {
+    if (user?.role !== "admin") return false;
+    return saveParcelRequest("parcel-code-batches", { requestId, count, label });
   }
 
   async function verifyCollectionCode(invoiceId: string, verificationCode: string): Promise<boolean> {
@@ -1325,7 +1360,7 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, generateParcelCodes, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback) => setScanner({ callback }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

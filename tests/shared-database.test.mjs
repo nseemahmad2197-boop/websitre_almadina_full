@@ -822,6 +822,15 @@ function sessionFrom(result) {
   return value.split(";")[0];
 }
 
+async function reserveCodes(worker, database, count, requestId = "fixture-printed-labels") {
+  const login = await call(worker, database, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  assert.equal(login.status, 200);
+  const reserved = await call(worker, database, "parcel-code-batches", { method: "POST", cookie: sessionFrom(login), payload: { requestId, count, label: "رموز الاختبار" } });
+  assert.equal(reserved.status, 201, reserved.body.error);
+  const batch = reserved.body.database.parcelCodeBatches.find((entry) => entry.id === requestId);
+  return Array.from({ length: batch.count }, (_, index) => `ALX-${batch.startNumber + index}`);
+}
+
 function namedCookieFrom(result, name) {
   const value = result.headers.get("set-cookie");
   assert.ok(value);
@@ -1409,6 +1418,7 @@ test("accepts a complete manual address without requiring or trusting map coordi
 test("shares accounts and orders across devices while isolating customers and protecting sessions", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
+  const issuedCodes = await reserveCodes(worker, database, 1);
 
   const firstDevice = await call(worker, database, "register", {
     method: "POST",
@@ -1465,7 +1475,7 @@ test("shares accounts and orders across devices while isolating customers and pr
     shippedAt: new Date(0).toISOString(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    trackingNumber: "ALX-20200001",
+    trackingNumber: issuedCodes[0],
     deleted: false,
   };
 
@@ -3092,6 +3102,7 @@ test("allows only the administrator to change merchant and courier account field
 test("recalculates progressive weight and dimension fees without trusting client totals", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
+  const issuedCodes = await reserveCodes(worker, database, 13);
   const registration = await call(worker, database, "register", {
     method: "POST",
     payload: accountPayload("تاجر القياسات", "dimensions@example.test", "0591112233"),
@@ -3119,7 +3130,7 @@ test("recalculates progressive weight and dimension fees without trusting client
     const now = new Date().toISOString();
     const candidate = {
       id: entry.id,
-      trackingNumber: `FORGED-${index}`,
+      trackingNumber: issuedCodes[index],
       merchantId: registration.body.userId,
       merchantName: "قيمة غير موثوقة",
       merchantStore: "قيمة غير موثوقة",
@@ -3179,7 +3190,7 @@ test("recalculates progressive weight and dimension fees without trusting client
   const conflictingDestination = {
     ...snapshot.database.orders[0],
     id: "parcel-conflicting-destination",
-    trackingNumber: "FORGED-CONFLICT",
+    trackingNumber: issuedCodes[11],
     governorate: "الخليل",
     city: "حيفا",
     createdAt: new Date().toISOString(),
@@ -3228,7 +3239,7 @@ test("recalculates progressive weight and dimension fees without trusting client
   const now = new Date().toISOString();
   const premiumOversize = {
     id: "parcel-premium-over",
-    trackingNumber: "FORGED-PREMIUM",
+    trackingNumber: issuedCodes[12],
     merchantId: registration.body.userId,
     merchantName: "قيمة غير موثوقة",
     merchantStore: "قيمة غير موثوقة",
@@ -3280,6 +3291,7 @@ test("recalculates progressive weight and dimension fees without trusting client
 test("persists diamond membership and enforces its 15/25/55 regional prices on the server", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
+  const issuedCodes = await reserveCodes(worker, database, 3);
   const registration = await call(worker, database, "register", {
     method: "POST",
     payload: accountPayload("تاجر ماسي", "diamond@example.test", "0599988776"),
@@ -3321,7 +3333,7 @@ test("persists diamond membership and enforces its 15/25/55 regional prices on t
   const now = new Date().toISOString();
   const orders = destinations.map((destination, index) => ({
     id: destination.id,
-    trackingNumber: `FORGED-DIAMOND-${index}`,
+    trackingNumber: issuedCodes[index],
     merchantId: registration.body.userId,
     merchantName: "قيمة غير موثوقة",
     merchantStore: "قيمة غير موثوقة",
@@ -3388,6 +3400,7 @@ test("recalculates return fees on the server for standard, premium, and diamond 
 
   for (const [membershipIndex, pricing] of memberships.entries()) {
     const database = new FakeD1Database();
+  const issuedCodes = await reserveCodes(worker, database, 3);
     const registration = await call(worker, database, "register", {
       method: "POST",
       payload: accountPayload(`تاجر رواجع ${pricing.membership}`, pricing.email, pricing.phone),
@@ -3421,7 +3434,7 @@ test("recalculates return fees on the server for standard, premium, and diamond 
     const orderIds = destinations.map((_, index) => `return-${membershipIndex}-${index}`);
     const candidates = destinations.map((destination, index) => ({
       id: orderIds[index],
-      trackingNumber: `FORGED-RETURN-${membershipIndex}-${index}`,
+      trackingNumber: issuedCodes[index],
       merchantId: registration.body.userId,
       merchantName: "قيمة غير موثوقة",
       merchantStore: "قيمة غير موثوقة",
@@ -3661,6 +3674,7 @@ test("issues an anonymous discoverable-passkey challenge and consumes it only on
 test("deletes only the authenticated eligible account and preserves every other hosted record", async () => {
   const worker = await loadWorker();
   const database = new FakeD1Database();
+  const issuedCodes = await reserveCodes(worker, database, 2);
 
   const merchant = await call(worker, database, "register", {
     method: "POST",
@@ -3705,7 +3719,7 @@ test("deletes only the authenticated eligible account and preserves every other 
   const now = new Date().toISOString();
   const ownedOrder = {
     id: "order-account-deletion",
-    trackingNumber: "ALX-DELETE-1",
+    trackingNumber: issuedCodes[0],
     merchantId: merchant.body.userId,
     merchantName: "صاحب الحساب المحذوف",
     merchantStore: "متجر صاحب الحساب المحذوف",
@@ -3859,7 +3873,7 @@ test("deletes only the authenticated eligible account and preserves every other 
   const courierOrder = {
     ...ownedOrder,
     id: "order-preserved-after-courier-deletion",
-    trackingNumber: "ALX-KEEP-COURIER-1",
+    trackingNumber: issuedCodes[1],
     merchantId: otherMerchant.body.userId,
     merchantName: "الحساب المحفوظ",
     merchantStore: "متجر الحساب المحفوظ",
@@ -4689,4 +4703,101 @@ test("counts only failed sign-ins while keeping brute-force protection active", 
   });
   assert.equal(blocked.status, 429);
   assert.match(blocked.body.error, /محاولات تسجيل دخول كثيرة/);
+});
+
+
+function printedParcel(merchantId, id, trackingNumber, extra = {}) {
+  return {
+    id, trackingNumber, merchantId, merchantName: "متجر", merchantStore: "متجر",
+    recipientName: "المستلم", recipientPhone: "0597654321", governorate: "نابلس", city: "نابلس",
+    address: "الشارع الرئيسي", pickupAddress: "متجر المرسل", amount: 100, deliveryFee: 999,
+    content: "ملابس", weight: "0 - 5 كغم", dimensions: "غير محددة", notes: "", privateNotes: "",
+    reference: "", type: "طرد عادي", status: "draft", courierName: "بانتظار تعيين المندوب",
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), deleted: false, ...extra,
+  };
+}
+
+test("reserves disjoint printable batches atomically and retries the same batch without reallocating", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const codes = await reserveCodes(worker, database, 2);
+  const admin = await call(worker, database, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  const cookie = sessionFrom(admin);
+  const post = (payload) => call(worker, database, "parcel-code-batches", { method: "POST", cookie, payload });
+  const revision = database.state.revision;
+  const retry = await post({ requestId: "fixture-printed-labels", count: 2, label: "رموز الاختبار" });
+  assert.equal(retry.status, 200);
+  assert.equal(database.state.revision, revision);
+  assert.equal((await post({ requestId: "fixture-printed-labels", count: 3, label: "رموز الاختبار" })).status, 409);
+  for (const count of [0, 501, 1.5, "50"]) assert.equal((await post({ requestId: "invalid-quantity", count })).status, 400);
+  const batches = await Promise.all([post({ requestId: "parallel-batch-one", count: 3 }), post({ requestId: "parallel-batch-two", count: 4 })]);
+  batches.forEach((result) => assert.equal(result.status, 201, result.body.error));
+  const state = JSON.parse(database.state.payload);
+  const all = state.parcelCodeBatches.flatMap((batch) => Array.from({ length: batch.count }, (_, index) => `ALX-${batch.startNumber + index}`));
+  assert.equal(all.length, 9);
+  assert.equal(new Set(all).size, 9);
+  assert.equal(codes[0], "ALX-20200001");
+  assert.equal(state.orders.length, 0, "printing labels must not create parcels");
+  const merchant = await call(worker, database, "register", { method: "POST", payload: accountPayload("تاجر الأكواد", "codes@example.test", "0591000021") });
+  assert.equal(merchant.status, 201);
+  assert.equal(merchant.body.database.parcelCodeBatches, undefined);
+  assert.equal(merchant.body.database.parcelCodeClaims, undefined);
+  assert.equal((await call(worker, database, "parcel-code-batches", { method: "POST", cookie: sessionFrom(merchant), payload: { requestId: "merchant-denied", count: 5 } })).status, 403);
+});
+
+test("requires an issued code, normalizes printed digits, and rejects conflicting parcel retries", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const codes = await reserveCodes(worker, database, 3);
+  const merchant = await call(worker, database, "register", { method: "POST", payload: accountPayload("تاجر يدوي", "manual@example.test", "0591000022") });
+  const cookie = sessionFrom(merchant);
+  const post = (orders) => call(worker, database, "orders", { method: "POST", cookie, payload: { orders } });
+  for (const code of ["", "ALX-99999999", "TEMP-123", "invalid"]) {
+    assert.equal((await post([printedParcel(merchant.body.userId, "bad-code", code)])).status, 400);
+    assert.equal(JSON.parse(database.state.payload).orders.length, 0);
+    assert.deepEqual(JSON.parse(database.state.payload).parcelCodeClaims, {});
+  }
+  const arabicCode = codes[0].slice(4).replace(/\d/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
+  const order = printedParcel(merchant.body.userId, "manual-code-parcel", ` ${arabicCode} `, { privateNotes: "ملاحظة إلى الإدارة", lengthCm: 61, widthCm: 40, heightCm: 40 });
+  const created = await post([order]);
+  assert.equal(created.status, 201, created.body.error);
+  assert.equal(created.body.database.orders[0].trackingNumber, codes[0]);
+  assert.equal(created.body.database.orders[0].oversizeFee, 14);
+  assert.equal(created.body.database.orders[0].deliveryFee, 39);
+  assert.ok(created.body.database.notices.some((notice) => notice.orderId === order.id && notice.title === "تم إنشاء الطرد"));
+  assert.ok(JSON.parse(database.state.payload).notices.some((notice) => notice.title === "ملاحظة خاصة جديدة"));
+  const revision = database.state.revision;
+  const repeat = await post([{ ...order, trackingNumber: codes[0], createdAt: new Date().toISOString() }]);
+  assert.equal(repeat.status, 200, repeat.body.error);
+  assert.equal(database.state.revision, revision);
+  assert.equal((await post([{ ...order, amount: 120 }])).status, 409);
+  assert.equal((await post([printedParcel(merchant.body.userId, "used-code-parcel", codes[0])])).status, 409);
+  assert.equal(JSON.parse(database.state.payload).orders.length, 1);
+  const duplicateImport = await post([printedParcel(merchant.body.userId, "import-one", codes[1]), printedParcel(merchant.body.userId, "import-two", codes[1])]);
+  assert.equal(duplicateImport.status, 409);
+  assert.equal(JSON.parse(database.state.payload).parcelCodeClaims[codes[1]], undefined, "failed batch must not partially consume labels");
+  assert.equal((await post([printedParcel(merchant.body.userId, "import-three", codes[1])])).status, 201);
+});
+
+test("allows only one account to claim a printed code concurrently and preserves claims after permanent removal", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const [code] = await reserveCodes(worker, database, 1);
+  const first = await call(worker, database, "register", { method: "POST", payload: accountPayload("متجر أول", "race-one@example.test", "0591000023") });
+  const second = await call(worker, database, "register", { method: "POST", payload: accountPayload("متجر ثان", "race-two@example.test", "0591000024") });
+  const attempts = await Promise.all([first, second].map((merchant, index) => call(worker, database, "orders", { method: "POST", cookie: sessionFrom(merchant), payload: { orders: [printedParcel(merchant.body.userId, `race-parcel-${index}`, code)] } })));
+  assert.deepEqual(attempts.map((entry) => entry.status).sort(), [201, 409]);
+  const saved = JSON.parse(database.state.payload);
+  assert.equal(saved.orders.length, 1);
+  assert.equal(saved.parcelCodeClaims[code].orderId, saved.orders[0].id);
+  const admin = await call(worker, database, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  const adminCookie = sessionFrom(admin);
+  const removed = await call(worker, database, "database", { method: "PUT", cookie: adminCookie, payload: { revision: admin.body.revision, database: { ...admin.body.database, orders: [], parcelCodeBatches: [], parcelCodeClaims: {}, nextOrder: 1 } } });
+  assert.equal(removed.status, 200, removed.body.error);
+  assert.equal(removed.body.database.orders.length, 0);
+  assert.equal(removed.body.database.parcelCodeBatches.length, 1);
+  assert.equal(removed.body.database.parcelCodeClaims[code].orderId, saved.orders[0].id);
+  assert.equal(removed.body.database.nextOrder, saved.nextOrder);
+  const reused = await call(worker, database, "orders", { method: "POST", cookie: sessionFrom(first), payload: { orders: [printedParcel(first.body.userId, "after-permanent-delete", code)] } });
+  assert.equal(reused.status, 409);
 });

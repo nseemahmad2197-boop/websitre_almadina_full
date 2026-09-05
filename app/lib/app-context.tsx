@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { Database, LinkedDevice, Notice, NoticeAudience, Preferences, User } from "./data";
+import type { Database, LinkedDevice, Notice, NoticeAudience, Preferences, User, Order, Recipient } from "./data";
 import type { AppLockState } from "./app-lock-client";
 import type { PhoneNotificationState } from "./phone-notifications";
 
@@ -26,7 +26,8 @@ export type View =
   | "trash"
   | "import"
   | "profile"
-  | "admin";
+  | "admin"
+  | "parcel-codes";
 
 export type ConfirmOptions = {
   title: string;
@@ -54,6 +55,8 @@ export type AppContextValue = {
   setSelectedOrderId: (id: string | null) => void;
   setView: (view: View) => void;
   updateDatabase: (updater: (current: Database) => Database) => void;
+  createParcels: (orders: Order[], recipients?: Recipient[]) => Promise<boolean>;
+  generateParcelCodes: (requestId: string, count: number, label: string) => Promise<boolean>;
   updatePreferences: (values: Partial<Preferences>) => void;
   setNotificationSounds: (enabled: boolean) => Promise<boolean>;
   enablePhoneNotifications: () => Promise<boolean>;

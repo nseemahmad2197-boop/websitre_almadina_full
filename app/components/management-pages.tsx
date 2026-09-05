@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { downloadDocument, importTemplate, ordersCsv } from "../lib/download";
-import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getReturnFee, getReturnMembershipPrices, getWeightFee, governorates, isOrderInvoicedForCurrentShipment, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Notice, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getReturnFee, getReturnMembershipPrices, getWeightFee, governorates, isOrderInvoicedForCurrentShipment, money, normalizeParcelCode, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Notice, type Order } from "../lib/data";
 import { parseParcelImportCsv, type ParcelImportCsvLayout, type ParcelImportRow } from "../lib/import-csv";
 import { OrderCard } from "./dashboard";
 import { Icon } from "./icon";
@@ -281,9 +281,11 @@ export function TrashPage() {
 }
 
 export function ImportPage() {
-  const { user, updateDatabase, setView, showToast } = useApp();
+  const { user, createParcels, setView, showToast } = useApp();
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
+  const [importing, setImporting] = useState(false);
+  const importOrderIds = useRef<string[]>([]);
   const [rows, setRows] = useState<ParcelImportRow[]>([]);
   const [layout, setLayout] = useState<ParcelImportCsvLayout>("governorate-city");
 
@@ -294,23 +296,27 @@ export function ImportPage() {
     reader.onload = () => {
       const parsed = parseParcelImportCsv(String(reader.result ?? ""));
       if (!parsed.rows.length) return showToast("الملف لا يحتوي على طلبات صالحة.", "error");
+      importOrderIds.current = parsed.rows.map(() => uid("order"));
       setFileName(file.name); setRows(parsed.rows); setLayout(parsed.layout);
       showToast(`تم العثور على ${parsed.rows.length} طلب في الملف${parsed.layout === "legacy-region" ? " باستخدام تنسيق المنطقة القديم" : ""}.`);
     };
     reader.readAsText(file);
   }
 
-  function importRows() {
-    if (!user || !rows.length) return;
+  async function importRows() {
+    if (!user || !rows.length || importing) return;
     const validRows = rows.filter((row) => row.name && row.phone);
     if (!validRows.length) return showToast("لا توجد صفوف تحتوي على اسم مستلم ورقم جوال.", "error");
+    const codes = validRows.map((row) => normalizeParcelCode(row.trackingNumber));
+    if (codes.some((code) => !/^ALX-\d{6,20}$/.test(code))) return showToast("أضف كود الملصق المطبوع في عمود كود الطرد لكل صف.", "error");
+    if (new Set(codes).size !== codes.length) return showToast("يوجد كود طرد مكرر داخل الملف.", "error");
     const invalidRows = validRows.filter((row) => (
       (layout === "governorate-city" && (!row.governorate || !row.city))
       || !resolveDeliveryRegion(row.governorate, row.city)
     ));
     if (invalidRows.length) return showToast(`تعذّر تحديد محافظة ومدينة متطابقتين في ${invalidRows.length.toLocaleString("ar-EG")} صف. استخدم القيم الموجودة في قوائم المناطق.`, "error");
-    updateDatabase((current) => {
-      let counter = current.nextOrder;
+    setImporting(true);
+    try {
       const created: Order[] = validRows.map((row) => {
         const region = resolveDeliveryRegion(row.governorate, row.city);
         if (!region) throw new Error("منطقة توصيل غير معروفة في ملف الاستيراد.");
@@ -323,7 +329,7 @@ export function ImportPage() {
         const dimensions = [lengthCm, widthCm, heightCm].some(Boolean) ? `${lengthCm ?? 0} × ${widthCm ?? 0} × ${heightCm ?? 0} سم` : "غير محددة";
         const now = new Date().toISOString();
         const order: Order = {
-          id: uid("order"), trackingNumber: `ALX-${counter++}`, merchantId: user.id, merchantName: user.name, merchantStore: user.store,
+          id: importOrderIds.current[rows.indexOf(row)], trackingNumber: normalizeParcelCode(row.trackingNumber), merchantId: user.id, merchantName: user.name, merchantStore: user.store,
           recipientName: row.name, recipientPhone: row.phone, governorate: region.name, city: row.city, address: row.address || "يُحدد لاحقًا",
           pickupAddress: user.store, amount: Number(row.amount) || 0, deliveryFee: getDeliveryFee(region, user.membership) + weightFee + oversizeFee,
           content: row.content, weight, dimensions, lengthCm, widthCm, heightCm, weightFee, oversizeFee,
@@ -333,12 +339,14 @@ export function ImportPage() {
         };
         return order;
       });
-      return { ...current, orders: [...created, ...current.orders], nextOrder: counter };
-    });
-    showToast(`تم استيراد ${validRows.length} طرد بحالة قيد الإنشاء.`); setView("shipments");
+      if (!await createParcels(created)) return;
+      showToast(`تم استيراد ${validRows.length} طرد بحالة قيد الإنشاء.`); setView("shipments");
+    } finally {
+      setImporting(false);
+    }
   }
 
-  return <div className="page-content animate-page"><PageHeader title="استيراد طرود من Excel" subtitle="أنشئ عدة طرود دفعة واحدة" onBack={() => setView("home")} /><SectionCard title="تعليمات الاستيراد" icon="info"><ol className="instruction-list"><li>حمّل نموذج الاستيراد وافتحه باستخدام Excel أو Google Sheets.</li><li>املأ الاسم ورقم الجوال، ثم أدخل المحافظة والمدينة في عمودين منفصلين.</li><li>يبقى القالب القديم ذو عمود المدينة أو المنطقة الواحد مدعومًا للمناطق التي يمكن تحديدها دون التباس.</li><li>اختر الوزن، وأدخل الأبعاد اختياريًا؛ يحسب النظام رسوم الوزن والحجم تدريجيًا.</li><li>احفظ الملف بصيغة CSV ثم اختره من منطقة الرفع.</li></ol><Button variant="outline" icon="download" onClick={() => { downloadDocument("نموذج-استيراد-طرود-المدينة-إكسبرس.csv", importTemplate); showToast("تم تنزيل نموذج الاستيراد."); }}>تحميل نموذج الاستيراد</Button></SectionCard><button className={`upload-zone ${fileName ? "has-file" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); openFile(event.dataTransfer.files[0]); }}><Icon name="upload" size={42} /><strong>{fileName || "اسحب ملف CSV إلى هنا أو اضغط لاختياره"}</strong><span>{rows.length ? `${rows.length} طلب جاهز للاستيراد${layout === "legacy-region" ? " · قالب قديم" : ""}` : "ملفات CSV المتوافقة مع Excel — بحد أقصى 1000 طلب"}</span></button><input ref={inputRef} type="file" accept=".csv,.txt" className="sr-only" onChange={(event) => openFile(event.target.files?.[0])} />{rows.length > 0 && <Button icon="upload" full onClick={importRows}>استيراد {rows.length} طلب</Button>}</div>;
+  return <div className="page-content animate-page"><PageHeader title="استيراد طرود من Excel" subtitle="أنشئ عدة طرود دفعة واحدة" onBack={() => setView("home")} /><SectionCard title="تعليمات الاستيراد" icon="info"><ol className="instruction-list"><li>حمّل نموذج الاستيراد وافتحه باستخدام Excel أو Google Sheets.</li><li>املأ الاسم ورقم الجوال والمحافظة والمدينة، وأدخل كود الملصق المطبوع في عمود كود الطرد لكل صف.</li><li>يمكن استخدام قالب قديم بعد إضافة عمود كود الطرد؛ لا تُنشأ أكواد تلقائيًا أثناء الاستيراد.</li><li>اختر الوزن، وأدخل الأبعاد اختياريًا؛ يحسب النظام رسوم الوزن والحجم تدريجيًا.</li><li>احفظ الملف بصيغة CSV ثم اختره من منطقة الرفع.</li></ol><Button variant="outline" icon="download" onClick={() => { downloadDocument("نموذج-استيراد-طرود-المدينة-إكسبرس.csv", importTemplate); showToast("تم تنزيل نموذج الاستيراد."); }}>تحميل نموذج الاستيراد</Button></SectionCard><button className={`upload-zone ${fileName ? "has-file" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); openFile(event.dataTransfer.files[0]); }}><Icon name="upload" size={42} /><strong>{fileName || "اسحب ملف CSV إلى هنا أو اضغط لاختياره"}</strong><span>{rows.length ? `${rows.length} طلب جاهز للاستيراد${layout === "legacy-region" ? " · قالب قديم" : ""}` : "ملفات CSV المتوافقة مع Excel — بحد أقصى 1000 طلب"}</span></button><input ref={inputRef} type="file" accept=".csv,.txt" className="sr-only" onChange={(event) => openFile(event.target.files?.[0])} />{rows.length > 0 && <Button icon="upload" full loading={importing} onClick={() => void importRows()}>استيراد {rows.length} طلب</Button>}</div>;
 }
 
 export function ProfilePage() {

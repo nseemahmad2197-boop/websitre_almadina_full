@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { createTrackingEvent, deliveryLocalities, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, normalizeMembership, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
+import { createTrackingEvent, deliveryLocalities, getDeliveryFee, getMembershipPrices, getOversizeFee, getWeightFee, governorates, MAX_OVERSIZE_FEE, money, normalizeMembership, normalizeParcelCode, OVERSIZE_DIMENSION_LIMIT_CM, OVERSIZE_DIMENSION_STEP_CM, OVERSIZE_FEE, resolveDeliveryRegion, uid, WEIGHT_OPTIONS, type Order } from "../lib/data";
 import { Icon } from "./icon";
 import { Button, Field, PageHeader, SectionCard, SelectField } from "./ui";
 
@@ -14,6 +14,7 @@ const orderTypes = [
 ];
 
 const blankForm = {
+  trackingNumber: "",
   type: "standard",
   phone: "",
   name: "",
@@ -45,7 +46,8 @@ function dimensionInput(value: string): string {
 }
 
 export function NewOrder() {
-  const { database, user, updateDatabase, setView, setSelectedOrderId, showToast, confirm, notify } = useApp();
+  const { database, user, createParcels, setView, setSelectedOrderId, showToast, confirm } = useApp();
+  const [orderId, setOrderId] = useState(() => uid("order"));
   const [form, setForm] = useState(blankForm);
   const [loading, setLoading] = useState(false);
   const [usingSaved, setUsingSaved] = useState(false);
@@ -81,6 +83,7 @@ export function NewOrder() {
     event.preventDefault();
     if (loading) return;
     setForm(blankForm);
+    setOrderId(uid("order"));
     setUsingSaved(false);
     showToast("تم مسح جميع الحقول.");
   }
@@ -101,9 +104,11 @@ export function NewOrder() {
     showToast("تم تعبئة بيانات المستلم المحفوظ.");
   }
 
-  function createOrder(event: FormEvent) {
+  async function createOrder(event: FormEvent) {
     event.preventDefault();
-    if (!user) return;
+    if (!user || loading) return;
+    const trackingNumber = normalizeParcelCode(form.trackingNumber);
+    if (!/^ALX-\d{6,20}$/.test(trackingNumber)) return showToast("أدخل كود الطرد المطبوع على الملصق.", "error");
     if (!/^05\d{8}$/.test(form.phone)) return showToast("أدخل رقم جوال صحيح مكوّن من 10 أرقام.", "error");
     if (!form.name.trim()) return showToast("أدخل اسم المستلم.", "error");
     if (!form.governorate.trim() || !form.city.trim()) return showToast("أدخل المحافظة والمدينة أو المنطقة للتوصيل.", "error");
@@ -112,11 +117,10 @@ export function NewOrder() {
     if (!form.amount || Number(form.amount) < 0) return showToast("أدخل قيمة محتويات الطرد.", "error");
 
     setLoading(true);
-    window.setTimeout(() => {
-      const trackingNumber = `ALX-${database.nextOrder}`;
+    try {
       const now = new Date().toISOString();
       const order: Order = {
-        id: uid("order"), trackingNumber, merchantId: user.id, merchantName: user.name, merchantStore: user.store,
+        id: orderId, trackingNumber, merchantId: user.id, merchantName: user.name, merchantStore: user.store,
         recipientName: form.name.trim(), recipientPhone: form.phone, governorate: form.governorate.trim(), city: form.city.trim(), address: form.address.trim(),
         pickupAddress: form.pickup.trim() || `${user.store} - ${form.governorate.trim()}`, amount, deliveryFee,
         preferredDeliveryDate: form.deliveryDate || undefined,
@@ -127,22 +131,22 @@ export function NewOrder() {
         trackingEvents: [createTrackingEvent("draft", user.name, { location: "مع المرسل", note: "تم إنشاء الطرد وهو قيد الإنشاء.", createdAt: now })],
         createdAt: now, updatedAt: now, deleted: false,
       };
-      updateDatabase((current) => {
-        const alreadySaved = current.recipients.some((recipient) => recipient.merchantId === user.id && recipient.phone === form.phone);
-        const recipients = form.favorite && !alreadySaved ? [{ id: uid("recipient"), merchantId: user.id, name: form.name.trim(), phone: form.phone, governorate: form.governorate.trim(), city: form.city.trim(), address: form.address.trim(), favorite: true }, ...current.recipients] : current.recipients;
-        return { ...current, orders: [order, ...current.orders], recipients, nextOrder: current.nextOrder + 1 };
-      });
-      notify({ userId: user.id, title: "تم إنشاء طرد جديد", message: `تم إنشاء الطرد ${trackingNumber} وحالته قيد الإنشاء.`, icon: "edit" });
+      const alreadySaved = database.recipients.some((recipient) => recipient.merchantId === user.id && recipient.phone === form.phone);
+      const recipients = form.favorite && !alreadySaved ? [{ id: `recipient-${orderId}`, merchantId: user.id, name: form.name.trim(), phone: form.phone, governorate: form.governorate.trim(), city: form.city.trim(), address: form.address.trim(), favorite: true }] : [];
+      if (!await createParcels([order], recipients)) return;
       setSelectedOrderId(order.id);
       setView("order-detail");
-      showToast(`تم إنشاء الطرد ${trackingNumber} بنجاح.`);
+      showToast(`تم إنشاء الطرد ${trackingNumber} بنجاح وحالته قيد الإنشاء.`);
+    } finally {
       setLoading(false);
-    }, 450);
+    }
   }
 
   return (
     <form id="new-order-form" className="page-content order-form-page animate-page" onSubmit={createOrder} onReset={clearAllFields} noValidate>
       <PageHeader title="إنشاء طرد جديد" subtitle="أدخل بيانات المستلم والطرد" onBack={leaveForm} />
+
+      <SectionCard title="كود الطرد" icon="qrCode"><Field label="كود الطرد" placeholder="أدخل الكود المطبوع" value={form.trackingNumber} onChange={(event) => setForm({ ...form, trackingNumber: event.target.value })} maxLength={32} autoComplete="off" dir="ltr" required /><p className="field-hint">اكتب الكود الموجود على الملصق الذي استلمته من الشركة. كل كود مخصص لطرد واحد.</p></SectionCard>
 
       <SectionCard title="نوع الطرد" icon="package"><div className="order-type-grid">{orderTypes.map((type) => <button type="button" key={type.id} className={`order-type ${form.type === type.id ? "is-selected" : ""}`} onClick={() => setForm({ ...form, type: type.id })}><span className="radio-indicator" /><div><strong>{type.title}</strong><small>{type.description}</small></div></button>)}</div></SectionCard>
 

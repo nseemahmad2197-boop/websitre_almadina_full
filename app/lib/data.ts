@@ -177,6 +177,29 @@ export type Preferences = {
   compact: boolean;
 };
 
+export type ParcelCodeBatch = {
+  id: string;
+  label: string;
+  createdAt: string;
+  createdById: string;
+  startNumber: number;
+  count: number;
+};
+
+export type ParcelCodeClaim = { orderId: string; claimedAt: string };
+
+export function normalizeParcelCode(value: string): string {
+  const code = value.trim().toUpperCase()
+    .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
+    .replace(/\s+/g, "");
+  return /^\d+$/.test(code) ? `ALX-${code}` : code;
+}
+
+export function parcelBatchCodes(batch: ParcelCodeBatch): string[] {
+  return Array.from({ length: batch.count }, (_, index) => `ALX-${batch.startNumber + index}`);
+}
+
 export type Database = {
   users: User[];
   orders: Order[];
@@ -186,6 +209,8 @@ export type Database = {
   preferences: Record<string, Preferences>;
   nextOrder: number;
   nextCollection: number;
+  parcelCodeBatches?: ParcelCodeBatch[];
+  parcelCodeClaims?: Record<string, ParcelCodeClaim>;
 };
 
 export const defaultPreferences: Preferences = {
@@ -470,10 +495,21 @@ export function createSeedDatabase(): Database {
     preferences: {},
     nextOrder: 20200001,
     nextCollection: 618000,
+    parcelCodeBatches: [],
+    parcelCodeClaims: {},
   };
 }
 
 export function removeLegacyDemoData(database: Database & { compensations?: unknown[] }): Database {
+  // Retain consumed labels even when their parcel or merchant is later deleted.
+  // Existing parcels keep their original numbers when upgrading an older database.
+  const parcelCodeClaims = { ...database.parcelCodeClaims };
+  for (const order of database.orders) {
+    const code = normalizeParcelCode(order.trackingNumber);
+    if (/^ALX-\d{6,20}$/.test(code) && !parcelCodeClaims[code]) {
+      parcelCodeClaims[code] = { orderId: order.id, claimedAt: order.createdAt };
+    }
+  }
   const users = database.users.filter((account) => !legacyDemoAccountIds.has(account.id));
   const accountIds = new Set(users.map((account) => account.id));
   const merchantIds = new Set(users.filter((account) => account.role === "merchant").map((account) => account.id));
@@ -517,6 +553,8 @@ export function removeLegacyDemoData(database: Database & { compensations?: unkn
       .map(([accountId, preference]) => [accountId, { ...preference, biometric: false, pin: "" }])),
     nextOrder: Math.max(20200001, database.nextOrder || 20200001),
     nextCollection: Math.max(618000, database.nextCollection || 618000),
+    parcelCodeBatches: database.parcelCodeBatches ?? [],
+    parcelCodeClaims,
   };
 }
 

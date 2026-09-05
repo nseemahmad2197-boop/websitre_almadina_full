@@ -1064,7 +1064,7 @@ test("adds progressive weight and dimension fees while keeping legacy imports co
   assert.match(management, /getOversizeFee\(lengthCm, widthCm, heightCm\)/);
   assert.match(management, /getDeliveryFee\(region, user\.membership\) \+ weightFee \+ oversizeFee/);
   assert.match(management, /resolveDeliveryRegion\(row\.governorate, row\.city\)/);
-  assert.match(management, /القالب القديم ذو عمود المدينة أو المنطقة الواحد مدعومًا/);
+  assert.match(management, /كود الطرد/);
   assert.match(management, /رسوم الوزن والحجم تدريجيًا/);
   assert.match(styles, /\.oversize-fee-notice\.is-active/);
 });
@@ -1081,6 +1081,7 @@ test("imports explicit governorate and city CSV columns while preserving the leg
   ].join("\n"));
   assert.equal(current.layout, "governorate-city");
   assert.deepEqual(current.rows[0], {
+    trackingNumber: "",
     name: "أحمد",
     phone: "0599123456",
     governorate: "نابلس",
@@ -1711,4 +1712,28 @@ test("supports opt-in phone push notifications with sound guidance for every sig
   assert.match(legal, /لا يطلب إذن إشعارات الهاتف إلا عندما تضغط زر التفعيل/);
   assert.doesNotMatch(legal, /لا يطلب إذن إشعارات النظام حاليًا/);
   assert.match(readme, /لا تحتاج هذه الميزة إلى متغيرات Render جديدة/);
+});
+
+test("printed parcel codes round-trip through the scanner and CSV manual entry", async () => {
+  const [{ parcelBatchCodes, normalizeParcelCode }, { createQrMatrix }, zxing, decoderModule, { parseParcelImportCsv }] = await Promise.all([
+    import(new URL("../app/lib/data.ts", import.meta.url)),
+    import(new URL("../app/lib/qr-code.ts", import.meta.url)),
+    import("@zxing/library"),
+    import("@zxing/library/cjs/core/qrcode/decoder/Decoder.js"),
+    import(new URL("../app/lib/import-csv.ts", import.meta.url)),
+  ]);
+  const Decoder = decoderModule.default.default ?? decoderModule.default;
+  const codes = parcelBatchCodes({ id: "print-test", label: "اختبار", createdAt: "2026-09-05", createdById: "admin", startNumber: 20200001, count: 50 });
+  assert.equal(codes.length, 50);
+  assert.equal(new Set(codes).size, 50);
+  for (const code of [codes[0], codes[23], codes[24], codes[49], "ALX-9007199254740990"]) {
+    const matrix = createQrMatrix(code);
+    const bits = new zxing.BitMatrix(matrix.length);
+    matrix.forEach((row, y) => row.forEach((dark, x) => { if (dark) bits.set(x, y); }));
+    assert.equal(new Decoder().decodeBitMatrix(bits).getText(), code);
+  }
+  assert.equal(normalizeParcelCode(" ٢٠٢٠٠٠٠١ "), codes[0]);
+  assert.equal(normalizeParcelCode("alx-۲۰۲۰۰۰۰۱"), codes[0]);
+  const imported = parseParcelImportCsv("الاسم,رقم الجوال,المحافظة,المدينة,العنوان,القيمة,الوصف,كود الطرد\nأحمد,0599123456,نابلس,نابلس,الشارع,100,ملابس,ALX-20200001");
+  assert.equal(imported.rows[0].trackingNumber, codes[0]);
 });

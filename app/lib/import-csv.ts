@@ -1,6 +1,7 @@
 export type ParcelImportCsvLayout = "governorate-city" | "legacy-region";
 
 export type ParcelImportRow = {
+  trackingNumber: string;
   name: string;
   phone: string;
   governorate: string;
@@ -84,6 +85,7 @@ export function parseParcelImportCsv(input: string): ParsedParcelImportCsv {
   const shift = layout === "governorate-city" ? 1 : 0;
 
   const columns = {
+    trackingNumber: findColumn(headers, ["كود الطرد", "رقم التتبع", "الكود"], -1),
     name: findColumn(headers, ["الاسم", "اسم المستلم"], 0),
     phone: findColumn(headers, ["رقم الجوال", "الجوال", "الهاتف"], 1),
     governorate: layout === "governorate-city" ? governorateColumn : -1,
@@ -99,6 +101,7 @@ export function parseParcelImportCsv(input: string): ParsedParcelImportCsv {
 
   const valueAt = (row: string[], index: number) => index >= 0 ? row[index]?.trim() ?? "" : "";
   const rows = table.slice(1, 1_001).map((row): ParcelImportRow => ({
+    trackingNumber: valueAt(row, columns.trackingNumber),
     name: valueAt(row, columns.name),
     phone: valueAt(row, columns.phone),
     governorate: valueAt(row, columns.governorate),

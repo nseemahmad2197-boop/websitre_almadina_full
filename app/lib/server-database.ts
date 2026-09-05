@@ -8,7 +8,7 @@ import {
   type Base64URLString,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, isOrderInvoicedForCurrentShipment, normalizeMembership, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, RETURN_PRICING_VERSION, uid, type CollectionInvoice, type Database, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
+import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, isOrderInvoicedForCurrentShipment, normalizeMembership, normalizeParcelCode, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, RETURN_PRICING_VERSION, uid, type CollectionInvoice, type Database, type ParcelCodeClaim, type ParcelCodeBatch, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
 import { generateVapidKeyPair, sendWebPushNotification, WebPushDeliveryError, type VapidKeyPair, type WebPushMessage, type WebPushSubscriptionRecord } from "./web-push";
@@ -2058,6 +2058,7 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
 
   const accountsById = new Map(users.map((entry) => [entry.id, entry]));
   const existingOrders = new Map(current.orders.map((order) => [order.id, order]));
+  const parcelCodeClaims = { ...current.parcelCodeClaims };
   const addedTrackingNotes: Array<{ orderId: string; trackingNumber: string; merchantId: string; note: string }> = [];
   const addedStatusUpdates: Array<{ orderId: string; trackingNumber: string; merchantId: string; status: OrderStatus; note: string }> = [];
   const orders = submitted.orders.map((candidate) => {
@@ -2084,6 +2085,7 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     const protectedOrder = existing ? { ...candidate, notes: existing.notes, privateNotes: existing.privateNotes } : { ...candidate, notes: "", privateNotes: "" };
     return {
       ...protectedOrder,
+      trackingNumber: existing?.trackingNumber ?? claimParcelCode(current, parcelCodeClaims, candidate),
       merchantName: merchant?.name ?? protectedOrder.merchantName,
       merchantStore: merchant?.store ?? protectedOrder.merchantStore,
       courierName: courier?.role === "courier" ? courier.name : protectedOrder.courierName,
@@ -2120,7 +2122,9 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     orders,
     collections,
     notices: [...statusUpdateNotices, ...trackingNoteNotices, ...submitted.notices],
-    nextOrder: Math.max(current.nextOrder, submitted.nextOrder || current.nextOrder),
+    parcelCodeBatches: current.parcelCodeBatches ?? [],
+    parcelCodeClaims,
+    nextOrder: current.nextOrder,
     nextCollection: Math.max(current.nextCollection, submitted.nextCollection || current.nextCollection),
   });
 }
@@ -2308,7 +2312,8 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
   const createdOrders: Order[] = [];
   const addedTrackingNotes: Array<{ orderId: string; trackingNumber: string; note: string }> = [];
 
-  let nextOrder = current.nextOrder;
+  const nextOrder = current.nextOrder;
+  const parcelCodeClaims = { ...current.parcelCodeClaims };
 
   const orders = mergeMerchantRecords<Order>(current.orders, submitted.orders, account.id, (candidate, existing) => {
     if (existing) {
@@ -2347,7 +2352,7 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
       merchantId: account.id,
       merchantName: savedAccount.name,
       merchantStore: savedAccount.store,
-      trackingNumber: `ALX-${nextOrder++}`,
+      trackingNumber: claimParcelCode(current, parcelCodeClaims, candidate),
       recipientName,
       recipientPhone,
       governorate: candidate.governorate?.trim().slice(0, 120),
@@ -2441,6 +2446,8 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     preferences,
     nextOrder,
     nextCollection,
+    parcelCodeBatches: current.parcelCodeBatches ?? [],
+    parcelCodeClaims,
   });
 }
 
@@ -2460,6 +2467,109 @@ function mergeCourierDatabase(current: Database, submitted: Database, account: U
     notices: [...myNotices, ...otherNotices],
     preferences,
   });
+}
+
+function claimParcelCode(current: Database, claims: Record<string, ParcelCodeClaim>, order: Order): string {
+  const code = normalizeParcelCode(order.trackingNumber);
+  if (!/^ALX-\d{6,20}$/.test(code)) throw new ApiRequestError("أدخل كود الطرد المطبوع على الملصق.", 400);
+  if (claims[code] || current.orders.some((saved) => normalizeParcelCode(saved.trackingNumber) === code)) {
+    throw new ApiRequestError("كود الطرد مستخدم بالفعل. استخدم ملصقًا جديدًا.", 409);
+  }
+  const number = Number(code.slice(4));
+  const issued = Number.isSafeInteger(number) && code === `ALX-${number}` && (current.parcelCodeBatches ?? [])
+    .some((batch) => number >= batch.startNumber && number < batch.startNumber + batch.count);
+  if (!issued) throw new ApiRequestError("هذا الكود غير صادر من الشركة. تحقق من الملصق المطبوع.", 400);
+  claims[code] = { orderId: order.id, claimedAt: new Date().toISOString() };
+  return code;
+}
+
+async function generateParcelCodeBatch(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  if (session.account.role !== "admin") return json({ error: "إنشاء دفعات الأكواد متاح للمسؤول فقط." }, 403);
+  const payload = await request.json() as { requestId?: unknown; count?: unknown; label?: unknown } | null;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return json({ error: "بيانات الدفعة غير صالحة." }, 400);
+  const requestId = typeof payload.requestId === "string" ? payload.requestId.trim() : "";
+  const count = payload.count;
+  const label = typeof payload.label === "string" ? payload.label.trim() : "";
+  if (!/^[a-zA-Z0-9_-]{8,120}$/.test(requestId) || typeof count !== "number" || !Number.isInteger(count) || count < 1 || count > 500 || label.length > 80) {
+    return json({ error: "اختر عددًا من 1 إلى 500 كود، واسم دفعة لا يتجاوز 80 حرفًا." }, 400);
+  }
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const state = await readState(database);
+    const administrator = state.database.users.find((entry) => entry.id === session.account.id && entry.role === "admin");
+    if (!administrator) return json({ error: "هذه الميزة متاحة للمسؤول فقط." }, 403);
+    const batches = state.database.parcelCodeBatches ?? [];
+    const prior = batches.find((batch) => batch.id === requestId);
+    if (prior) {
+      if (prior.count !== count || prior.label !== label || prior.createdById !== administrator.id) return json({ error: "معرّف الدفعة مستخدم لطلب مختلف." }, 409);
+      return json({ ...snapshot(state, administrator), batchId: prior.id });
+    }
+    let startNumber = state.database.nextOrder;
+    for (const batch of batches) startNumber = Math.max(startNumber, batch.startNumber + batch.count);
+    for (const code of Object.keys(state.database.parcelCodeClaims ?? {})) {
+      const number = Number(code.slice(4));
+      if (Number.isSafeInteger(number)) startNumber = Math.max(startNumber, number + 1);
+    }
+    if (!Number.isSafeInteger(startNumber + count)) return json({ error: "تعذّر تخصيص أرقام إضافية." }, 409);
+    const batch: ParcelCodeBatch = { id: requestId, label, startNumber, count, createdAt: new Date().toISOString(), createdById: administrator.id };
+    const next: Database = { ...state.database, nextOrder: startNumber + count, parcelCodeBatches: [batch, ...batches] };
+    if (!await saveState(database, next, state.revision)) continue;
+    return json({ ...snapshot({ database: next, revision: state.revision + 1 }, administrator), batchId: batch.id }, 201);
+  }
+  return json({ error: "البيانات مشغولة الآن. أعد محاولة إنشاء الدفعة نفسها." }, 409);
+}
+
+function parcelCreationDetails(order: Order): string {
+  return JSON.stringify([
+    order.recipientName.trim().slice(0, 120), normalizeAccountPhone(order.recipientPhone),
+    order.governorate?.trim().slice(0, 120) ?? "", order.city.trim().slice(0, 120),
+    order.address.trim().slice(0, 240), order.pickupAddress.trim().slice(0, 240),
+    order.amount, order.content.trim().slice(0, 500), order.reference.trim().slice(0, 120),
+    order.type.trim().slice(0, 120) || "طرد عادي", normalizeWeightOption(order.weight),
+    getOrderDimensions(order), order.preferredDeliveryDate ?? "",
+    order.notes.trim().slice(0, 500), order.privateNotes.trim().slice(0, 1000),
+  ]);
+}
+
+async function createParcels(database: D1Database, request: Request, session: AuthenticatedSession, config: AlmadinaApiConfig): Promise<Response> {
+  if (session.account.role !== "merchant") return json({ error: "إنشاء الطرود متاح لحساب المستخدم فقط." }, 403);
+  const payload = await request.json() as { orders?: unknown; recipients?: unknown } | null;
+  if (!payload || !Array.isArray(payload.orders) || payload.orders.length < 1 || payload.orders.length > 1000 || (payload.recipients !== undefined && !Array.isArray(payload.recipients))) {
+    return json({ error: "بيانات الطرود غير صالحة." }, 400);
+  }
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const state = await readState(database);
+    const account = state.database.users.find((entry) => entry.id === session.account.id && entry.role === "merchant");
+    if (!account) return json({ error: "لم يعد الحساب متاحًا." }, 401);
+    const current = scopeDatabase(state.database, account);
+    const input = { ...current, orders: payload.orders, recipients: payload.recipients ?? [] };
+    if (!isValidDatabase(input)) return json({ error: "بيانات الطرود غير صالحة." }, 400);
+    if (input.orders.some((order) => order.merchantId !== account.id) || input.recipients.some((recipient) => recipient.merchantId !== account.id)) return json({ error: "لا يمكنك إنشاء طرد لحساب آخر." }, 403);
+    for (const order of input.orders) {
+      const existing = state.database.orders.find((saved) => saved.id === order.id);
+      if (existing && (existing.merchantId !== account.id || existing.trackingNumber !== normalizeParcelCode(order.trackingNumber) || parcelCreationDetails(existing) !== parcelCreationDetails(order))) {
+        return json({ error: "تم حفظ هذا الطرد سابقًا ببيانات مختلفة. افتح الطرد المحفوظ للتحقق قبل إنشاء طرد آخر." }, 409);
+      }
+    }
+    const fresh = input.orders.filter((order) => !state.database.orders.some((saved) => saved.id === order.id));
+    // Repeating the same committed request cannot allocate or claim another label.
+    if (!fresh.length) return json(snapshot(state, account));
+    const recipients = [...current.recipients];
+    for (const recipient of input.recipients) {
+      if (!recipients.some((saved) => saved.id === recipient.id || saved.phone === recipient.phone)) recipients.push(recipient);
+    }
+    const next = mergeMerchantDatabase(state.database, { ...current, orders: [...fresh, ...current.orders], recipients }, account);
+    next.notices.unshift(...fresh.map((order): Notice => ({
+      id: uid("notice"), userId: account.id, orderId: order.id,
+      title: "تم إنشاء الطرد", message: `تم إنشاء الطرد ${normalizeParcelCode(order.trackingNumber)} بنجاح.`,
+      icon: "package", read: false, createdAt: new Date().toISOString(),
+    })));
+    const existingNoticeIds = new Set(state.database.notices.map((notice) => notice.id));
+    const newNotices = next.notices.filter((notice) => !existingNoticeIds.has(notice.id));
+    if (!await saveState(database, next, state.revision)) continue;
+    scheduleWebPushNotices(database, next, newNotices, new URL(request.url).origin, config);
+    return json(snapshot({ database: next, revision: state.revision + 1 }, account), 201);
+  }
+  return json({ error: "تعذّر حفظ الطرد بسبب تحديث متزامن. أعد المحاولة." }, 409);
 }
 
 async function broadcastNotice(database: D1Database, request: Request, session: AuthenticatedSession, config: AlmadinaApiConfig): Promise<Response> {
@@ -3641,6 +3751,14 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
 
     if (url.pathname === "/api/almadina/collections/prepare" && request.method === "POST") {
       return await prepareCollection(database, request, session, config);
+    }
+
+    if (url.pathname === "/api/almadina/parcel-code-batches" && request.method === "POST") {
+      return await generateParcelCodeBatch(database, request, session);
+    }
+
+    if (url.pathname === "/api/almadina/orders" && request.method === "POST") {
+      return await createParcels(database, request, session, config);
     }
 
     if (url.pathname === "/api/almadina/orders/scan" && request.method === "POST") {
