@@ -2314,7 +2314,7 @@ function mergeMerchantCollections(current: CollectionInvoice[], submitted: Colle
 function mergeMerchantDatabase(current: Database, submitted: Database, account: User): Database {
   const savedAccount = account;
   const createdOrders: Order[] = [];
-  const addedTrackingNotes: Array<{ orderId: string; trackingNumber: string; note: string }> = [];
+  const addedTrackingNotes: Array<{ orderId: string; trackingNumber: string; courierId?: string; note: string }> = [];
 
   const nextOrder = current.nextOrder;
   const parcelCodeClaims = { ...current.parcelCodeClaims };
@@ -2324,7 +2324,7 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
       const trackedOrder = mergeMerchantTrackingNote(existing, candidate, savedAccount);
       const savedEventIds = new Set(getOrderTrackingEvents(existing).map((event) => event.id));
       const addedNote = getOrderTrackingEvents(trackedOrder).find((event) => event.kind === "note" && !savedEventIds.has(event.id));
-      if (addedNote?.note) addedTrackingNotes.push({ orderId: existing.id, trackingNumber: existing.trackingNumber, note: addedNote.note });
+      if (addedNote?.note) addedTrackingNotes.push({ orderId: existing.id, trackingNumber: existing.trackingNumber, courierId: existing.courierId, note: addedNote.note });
       return {
         ...existing,
         deleted: candidate.deleted === true,
@@ -2415,12 +2415,16 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
   const otherNotices = current.notices.filter((notice) => notice.userId !== account.id);
   const myNotices = submitted.notices.filter((notice) => notice.userId === account.id).map((notice): Notice => ({ ...notice, userId: account.id }));
   const administrators = current.users.filter((entry) => entry.role === "admin");
-  const trackingNoteNotices = addedTrackingNotes.flatMap((entry) => administrators.map((administrator): Notice => ({
+  // Resolve the assignment from saved server data, never a submitted courier ID
+  // or display name. An unassigned parcel only notifies the administrators.
+  const trackingNoteNotices = addedTrackingNotes.flatMap((entry) => current.users
+    .filter((recipient) => recipient.role === "admin" || (recipient.role === "courier" && recipient.id === entry.courierId))
+    .map((recipient): Notice => ({
     id: uid("notice"),
-    userId: administrator.id,
+    userId: recipient.id,
     orderId: entry.orderId,
     title: "ملاحظة جديدة على الطرد",
-    message: `أضاف ${savedAccount.name} ملاحظة على الطرد ${entry.trackingNumber}: ${entry.note}`,
+    message: `أضاف ${savedAccount.name} ملاحظة على الطرد ${entry.trackingNumber || "بانتظار إضافة كود QR"}: ${entry.note}`,
     icon: "message",
     read: false,
     createdAt: new Date().toISOString(),

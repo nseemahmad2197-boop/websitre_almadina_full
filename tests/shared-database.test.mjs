@@ -2428,6 +2428,7 @@ test("shares accounts and orders across devices while isolating customers and pr
         orders: deliveredForMerchant.body.database.orders.map((item) => item.id === order.id ? {
           ...item,
           status: "returned",
+          courierId: sameNameEmployeeAccount.id,
           trackingEvents: [...(item.trackingEvents ?? []), {
             id: "forged-note-id",
             kind: "note",
@@ -2447,6 +2448,7 @@ test("shares accounts and orders across devices while isolating customers and pr
   const savedMerchantOrder = merchantNote.body.database.orders.find((item) => item.id === order.id);
   const savedMerchantNote = savedMerchantOrder.trackingEvents.at(-1);
   assert.equal(savedMerchantOrder.status, "delivered");
+  assert.equal(savedMerchantOrder.courierId, employeeAccount.id);
   assert.equal(savedMerchantNote.kind, "note");
   assert.equal(savedMerchantNote.status, "delivered");
   assert.equal(savedMerchantNote.actor, "التاجر الأول");
@@ -2462,6 +2464,15 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(merchantNoteNotice.title, "ملاحظة جديدة على الطرد");
   assert.equal(merchantNoteNotice.read, false);
   assert.equal(merchantNote.body.database.notices.some((notice) => notice.message.includes(merchantNoteText)), false);
+
+  const assignedCourierAfterNote = await call(worker, database, "database", { cookie: employeeCookie });
+  const assignedNoteNotices = assignedCourierAfterNote.body.database.notices.filter((notice) => notice.orderId === order.id && notice.message.includes(merchantNoteText));
+  assert.equal(assignedNoteNotices.length, 1);
+  assert.equal(assignedNoteNotices[0].userId, employeeAccount.id);
+  assert.equal(assignedNoteNotices[0].title, "ملاحظة جديدة على الطرد");
+  assert.equal(assignedNoteNotices[0].read, false);
+  const sameNameCourierAfterNote = await call(worker, database, "database", { cookie: sameNameEmployeeCookie });
+  assert.equal(sameNameCourierAfterNote.body.database.notices.some((notice) => notice.message.includes(merchantNoteText)), false);
 
   const otherMerchantAfterMerchantNote = await call(worker, database, "database", { cookie: otherCookie });
   assert.equal(otherMerchantAfterMerchantNote.body.database.notices.some((notice) => notice.message.includes(merchantNoteText)), false);
@@ -2543,14 +2554,14 @@ test("shares accounts and orders across devices while isolating customers and pr
   const otherMerchantAfterAdminStatusUpdate = await call(worker, database, "database", { cookie: otherCookie });
   assert.equal(otherMerchantAfterAdminStatusUpdate.body.database.notices.some((notice) => notice.message.includes(adminStatusNoteText)), false);
 
-  const courierDoesNotSeeMerchantNote = await call(worker, database, "database", { cookie: employeeCookie });
-  assert.equal(courierDoesNotSeeMerchantNote.status, 200);
-  const courierOrderAfterNote = courierDoesNotSeeMerchantNote.body.database.orders.find((item) => item.id === order.id);
+  const courierSeesStatusNoteNotice = await call(worker, database, "database", { cookie: employeeCookie });
+  assert.equal(courierSeesStatusNoteNotice.status, 200);
+  const courierOrderAfterNote = courierSeesStatusNoteNotice.body.database.orders.find((item) => item.id === order.id);
   assert.equal(courierOrderAfterNote.notes, courierInstructions);
   assert.ok(courierOrderAfterNote.trackingEvents.every((event) => event.kind !== "note"));
-  assert.ok(!JSON.stringify(courierDoesNotSeeMerchantNote.body).includes(merchantNoteText));
-  assert.ok(!JSON.stringify(courierDoesNotSeeMerchantNote.body).includes(adminNoteText));
-  assert.equal(courierDoesNotSeeMerchantNote.body.database.notices.some((notice) => notice.orderId === order.id), false);
+  assert.ok(JSON.stringify(courierSeesStatusNoteNotice.body.database.notices).includes(merchantNoteText));
+  assert.ok(!JSON.stringify(courierSeesStatusNoteNotice.body).includes(adminNoteText));
+  assert.equal(courierSeesStatusNoteNotice.body.database.notices.filter((notice) => notice.orderId === order.id && notice.message.includes(merchantNoteText)).length, 1);
 
   const outdatedWrite = await call(worker, database, "database", {
     method: "PUT",
@@ -4866,6 +4877,42 @@ test("reserves disjoint printable batches atomically and retries the same batch 
   assert.equal(merchant.body.database.parcelCodeBatches, undefined);
   assert.equal(merchant.body.database.parcelCodeClaims, undefined);
   assert.equal((await call(worker, database, "parcel-code-batches", { method: "POST", cookie: sessionFrom(merchant), payload: { requestId: "merchant-denied", count: 5 } })).status, 403);
+});
+
+test("unassigned parcel notes notify all administrators and cannot be redirected by the merchant", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  await reserveCodes(worker, database, 1);
+  const merchant = await call(worker, database, "register", { method: "POST", payload: accountPayload("تاجر ملاحظة", "note-routing@example.test", "0591000092") });
+  const cookie = sessionFrom(merchant);
+  const created = await call(worker, database, "orders", { method: "POST", cookie, payload: {
+    orders: [printedParcel(merchant.body.userId, "unassigned-note-parcel", "")],
+  } });
+  assert.equal(created.status, 201, created.body.error);
+  // Additional recipients are fixtures in the in-memory database only.
+  const raw = JSON.parse(database.state.payload);
+  const template = raw.users.find((user) => user.role === "admin");
+  raw.users.push({ ...template, id: "second-note-admin", email: "second-note-admin@example.test", name: "مسؤول آخر" });
+  raw.users.push({ ...template, id: "unassigned-note-courier", role: "courier", email: "unassigned-note-courier@example.test", name: "مندوب آخر" });
+  database.state.payload = JSON.stringify(raw);
+  const current = await call(worker, database, "database", { cookie });
+  const note = "ملاحظة الحالة لطرد دون مندوب";
+  const result = await call(worker, database, "database", { method: "PUT", cookie, payload: {
+    revision: current.body.revision,
+    database: { ...current.body.database, orders: current.body.database.orders.map((order) => ({
+      ...order, courierId: "unassigned-note-courier",
+      trackingEvents: [...order.trackingEvents, { id: "new-unassigned-note", kind: "note", status: order.status, title: "ملاحظة", location: "مع المرسل", actor: "المرسل", note, createdAt: new Date().toISOString() }],
+    })) },
+  } });
+  assert.equal(result.status, 200, result.body.error);
+  assert.equal(result.body.database.orders[0].courierId, undefined);
+  const notices = JSON.parse(database.state.payload).notices.filter((notice) => notice.message.includes(note));
+  assert.deepEqual(notices.map((notice) => notice.userId).sort(), raw.users.filter((user) => user.role === "admin").map((user) => user.id).sort());
+  assert.ok(notices.every((notice) => notice.orderId === "unassigned-note-parcel" && !notice.read));
+  // Saving the acknowledged snapshot again must not repeat either notification.
+  const repeat = await call(worker, database, "database", { method: "PUT", cookie, payload: { revision: result.body.revision, database: result.body.database } });
+  assert.equal(repeat.status, 200, repeat.body.error);
+  assert.equal(JSON.parse(database.state.payload).notices.filter((notice) => notice.message.includes(note)).length, notices.length);
 });
 
 test("requires an issued code, normalizes printed digits, and rejects conflicting parcel retries", async () => {

@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "bash scripts/build-verified.sh",
     "start": "vinext start",
-    "test": "npm run build && node --experimental-strip-types --test tests/postgres-adapter.test.mjs tests/rendered-html.test.mjs tests/shared-database.test.mjs tests/web-push.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/postgres-adapter.test.mjs tests/rendered-html.test.mjs tests/shared-database.test.mjs tests/web-push.test.mjs tests/browser-permissions.test.mjs",
     "typecheck": "tsc --noEmit --incremental false",
     "test:swipe": "node tests/swipe-delete.browser.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",

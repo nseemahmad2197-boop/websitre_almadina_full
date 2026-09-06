@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IScannerControls } from "@zxing/browser";
+import { readBrowserPermission } from "./lib/browser-permissions";
 import { AppLockScreen } from "./components/app-lock-screen";
 import { ApplicationShell } from "./components/application-shell";
 import { Authentication } from "./components/auth";
@@ -175,6 +176,13 @@ export function ScannerOverlay({ employeeMode = false, purpose = "lookup", onClo
       }
       try {
         if (!video) return;
+        const permission = await readBrowserPermission("camera");
+        if (!active) return;
+        if (permission === "denied") {
+          setCameraFailed(true);
+          setMessage("إذن الكاميرا مرفوض. اسمح به من إعدادات الموقع في المتصفح ثم عد إلى الماسح.");
+          return;
+        }
         const { BrowserQRCodeReader } = await import("@zxing/browser");
         if (!active) return;
 
@@ -228,6 +236,28 @@ export function ScannerOverlay({ employeeMode = false, purpose = "lookup", onClo
     };
   }, [employeeMode, cameraOnly, cameraAttempt]);
 
+  useEffect(() => {
+    if (!cameraFailed) return;
+    let active = true;
+    let restarted = false;
+    const checkAfterSettings = async () => {
+      if (document.visibilityState !== "visible") return;
+      const permission = await readBrowserPermission("camera");
+      if (!active || restarted || permission !== "granted") return;
+      restarted = true;
+      setCameraFailed(false);
+      setMessage("جارٍ تشغيل الكاميرا...");
+      setCameraAttempt((attempt) => attempt + 1);
+    };
+    window.addEventListener("focus", checkAfterSettings);
+    document.addEventListener("visibilitychange", checkAfterSettings);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", checkAfterSettings);
+      document.removeEventListener("visibilitychange", checkAfterSettings);
+    };
+  }, [cameraFailed]);
+
   return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2 aria-live="polite">{message}</h2><p>{cameraOnly ? "وجّه الكاميرا إلى ملصق الأكواد الذي استلمته من الشركة. سيُحفظ الكود لهذا الطرد بعد التحقق منه." : employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام الطرود الجاهزة للإرسال والطرود الراجعة." : "ضع رمز QR داخل الإطار ليُقرأ تلقائيًا."}</p>{cameraFailed && <Button icon="camera" onClick={() => { setCameraFailed(false); setMessage("جارٍ تشغيل الكاميرا..."); setCameraAttempt((attempt) => attempt + 1); }}>إعادة تشغيل الكاميرا</Button>}{!cameraOnly && <div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetectedRef.current(manual.trim())}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div>}</div></div>;
 }
 
@@ -257,6 +287,8 @@ export default function AlmadinaApplication() {
   const [view, setViewState] = useState<View>("home");
   const [anonymousPreferences, setAnonymousPreferences] = useState<Preferences>(defaultPreferences);
   const [phoneNotifications, setPhoneNotifications] = useState<PhoneNotificationState>(initialPhoneNotificationState);
+  const notificationStateVersion = useRef(0);
+  const notificationPermissionAction = useRef(false);
   const [activeTheme, setActiveTheme] = useState<ThemePreference>(defaultPreferences.theme);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
@@ -418,10 +450,24 @@ export default function AlmadinaApplication() {
     }
 
     let active = true;
-    void inspectPhoneNotifications(true).then((state) => {
-      if (active) setPhoneNotifications(state);
-    });
-    return () => { active = false; };
+    let checking = false;
+    const refreshPermission = async () => {
+      if (checking || notificationPermissionAction.current || document.visibilityState !== "visible") return;
+      checking = true;
+      const version = notificationStateVersion.current;
+      try {
+        const state = await inspectPhoneNotifications(true);
+        if (active && version === notificationStateVersion.current) setPhoneNotifications(state);
+      } finally { checking = false; }
+    };
+    void refreshPermission();
+    window.addEventListener("focus", refreshPermission);
+    document.addEventListener("visibilitychange", refreshPermission);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshPermission);
+      document.removeEventListener("visibilitychange", refreshPermission);
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -1305,6 +1351,9 @@ export default function AlmadinaApplication() {
   }
 
   async function enablePhoneNotifications(): Promise<boolean> {
+    if (notificationPermissionAction.current) return false;
+    notificationPermissionAction.current = true;
+    notificationStateVersion.current += 1;
     try {
       const state = await enableSystemNotifications();
       setPhoneNotifications(state);
@@ -1314,10 +1363,16 @@ export default function AlmadinaApplication() {
     } catch (error) {
       showToast(error instanceof PhoneNotificationError ? error.message : "تعذّر تفعيل إشعارات الهاتف.", "error");
       return false;
+    } finally {
+      notificationPermissionAction.current = false;
+      notificationStateVersion.current += 1;
     }
   }
 
   async function disablePhoneNotifications(): Promise<boolean> {
+    if (notificationPermissionAction.current) return false;
+    notificationPermissionAction.current = true;
+    notificationStateVersion.current += 1;
     try {
       const state = await disableSystemNotifications();
       setPhoneNotifications(state);
@@ -1326,6 +1381,9 @@ export default function AlmadinaApplication() {
     } catch (error) {
       showToast(error instanceof PhoneNotificationError ? error.message : "تعذّر إيقاف إشعارات الهاتف.", "error");
       return false;
+    } finally {
+      notificationPermissionAction.current = false;
+      notificationStateVersion.current += 1;
     }
   }
 

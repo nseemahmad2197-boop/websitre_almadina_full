@@ -4,6 +4,7 @@
 
 import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Icon } from "./icon";
+import { readBrowserPermission } from "../lib/browser-permissions";
 
 type MapPoint = { latitude: number; longitude: number };
 
@@ -213,6 +214,10 @@ export function RegistrationLocationMap({
     }
     setLocating(true);
     try {
+      if (await readBrowserPermission("geolocation") === "denied") {
+        onError("إذن الموقع مرفوض. اسمح به من إعدادات الموقع في المتصفح أو حدّد العنوان يدويًا.");
+        return;
+      }
       let position: GeolocationPosition;
       try {
         // الوضع المتوازن ينجح بصورة أفضل على الحواسيب والأجهزة التي لا تتوفر فيها إشارة GPS.

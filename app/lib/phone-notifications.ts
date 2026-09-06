@@ -28,6 +28,21 @@ export class PhoneNotificationError extends Error {
 
 type PushConfiguration = { configured: boolean; publicKey: string; error?: string };
 
+const pushPreferenceKey = "almadina-phone-push-enabled";
+let subscriptionWork: Promise<unknown> = Promise.resolve();
+function withSubscriptionLock<T>(work: () => Promise<T>): Promise<T> {
+  const next = subscriptionWork.then(work, work);
+  subscriptionWork = next.catch(() => undefined);
+  return next;
+}
+function pushWasEnabled(): boolean {
+  try { return localStorage.getItem(pushPreferenceKey) === "true"; } catch { return false; }
+}
+function rememberPushEnabled(enabled: boolean) {
+  // This stores the user's subscription choice, never a system permission.
+  try { localStorage.setItem(pushPreferenceKey, String(enabled)); } catch { /* Storage may be unavailable. */ }
+}
+
 function isIosDevice(): boolean {
   return /iPad|iPhone|iPod/i.test(navigator.userAgent)
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -184,41 +199,54 @@ export async function inspectPhoneNotifications(syncCurrentAccount = true): Prom
   const current = capabilities();
   if (!current.supported) return { ...initialPhoneNotificationState, ...current, ready: true };
 
-  try {
-    const worker = await registration();
-    const config = await configuration();
-    let subscription = await worker.pushManager.getSubscription();
-    if (subscription && !subscriptionUsesKey(subscription, config.publicKey)) {
-      await subscription.unsubscribe();
-      subscription = null;
+  return withSubscriptionLock(async (): Promise<PhoneNotificationState> => {
+    try {
+      const worker = await registration();
+      const config = await configuration();
+      let subscription = await worker.pushManager.getSubscription();
+      if (syncCurrentAccount && subscription && Notification.permission === "granted") rememberPushEnabled(true);
+      if (subscription && !subscriptionUsesKey(subscription, config.publicKey)) {
+        await subscription.unsubscribe();
+        subscription = null;
+      }
+      if (syncCurrentAccount && Notification.permission === "granted" && !subscription && pushWasEnabled()) {
+        subscription = await worker.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: toArrayBuffer(decodeBase64Url(config.publicKey)),
+        });
+      }
+      if (syncCurrentAccount && Notification.permission === "granted" && subscription) {
+        await api("push/subscribe", { method: "POST", body: JSON.stringify(subscriptionPayload(subscription)) });
+        rememberPushEnabled(true);
+      }
+      return {
+        ready: true,
+        supported: true,
+        configured: true,
+        subscribed: Boolean(subscription && Notification.permission === "granted"),
+        requiresHomeScreen: false,
+        permission: Notification.permission,
+      };
+    } catch (error) {
+      const failure = notificationFailure(error, "تعذّر التحقق من خدمة إشعارات الهاتف.");
+      return {
+        ready: true,
+        supported: true,
+        configured: false,
+        subscribed: false,
+        requiresHomeScreen: false,
+        permission: Notification.permission,
+        error: failure.message,
+      };
     }
-    if (syncCurrentAccount && current.permission === "granted" && subscription) {
-      await api("push/subscribe", { method: "POST", body: JSON.stringify(subscriptionPayload(subscription)) });
-    }
-    return {
-      ready: true,
-      supported: true,
-      configured: true,
-      subscribed: Boolean(subscription && current.permission === "granted"),
-      requiresHomeScreen: false,
-      permission: Notification.permission,
-    };
-  } catch (error) {
-    const failure = notificationFailure(error, "تعذّر التحقق من خدمة إشعارات الهاتف.");
-    return {
-      ready: true,
-      supported: true,
-      configured: false,
-      subscribed: false,
-      requiresHomeScreen: false,
-      permission: Notification.permission,
-      error: failure.message,
-    };
-  }
+  });
 }
 
 export async function enablePhoneNotifications(): Promise<PhoneNotificationState> {
   requireCapabilities();
+  if (Notification.permission === "denied") {
+    throw new PhoneNotificationError("denied", "إذن الإشعارات مرفوض. فعّله من إعدادات الهاتف أو المتصفح ثم عد إلى التطبيق.");
+  }
   // iOS requires the permission prompt to be opened directly from the user's
   // tap. Do this before any network or service-worker await so WebKit keeps the
   // transient user activation for the prompt.
@@ -235,17 +263,20 @@ export async function enablePhoneNotifications(): Promise<PhoneNotificationState
   }
 
   try {
-    const [worker, config] = await Promise.all([registration(), configuration()]);
-    let subscription = await worker.pushManager.getSubscription();
-    if (subscription && !subscriptionUsesKey(subscription, config.publicKey)) {
-      await subscription.unsubscribe();
-      subscription = null;
-    }
-    subscription ??= await worker.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: toArrayBuffer(decodeBase64Url(config.publicKey)),
+    await withSubscriptionLock(async () => {
+      const [worker, config] = await Promise.all([registration(), configuration()]);
+      let subscription = await worker.pushManager.getSubscription();
+      if (subscription && !subscriptionUsesKey(subscription, config.publicKey)) {
+        await subscription.unsubscribe();
+        subscription = null;
+      }
+      subscription ??= await worker.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: toArrayBuffer(decodeBase64Url(config.publicKey)),
     });
     await api("push/subscribe", { method: "POST", body: JSON.stringify(subscriptionPayload(subscription)) });
+    rememberPushEnabled(true);
+    });
   } catch (error) {
     throw notificationFailure(error, "تعذّر ربط هذا الهاتف بخدمة الإشعارات. أغلق التطبيق وافتحه من أيقونة الشاشة الرئيسية ثم حاول مجددًا.");
   }
@@ -261,13 +292,15 @@ export async function enablePhoneNotifications(): Promise<PhoneNotificationState
 
 export async function disablePhoneNotifications(): Promise<PhoneNotificationState> {
   const current = requireCapabilities();
-  const worker = await registration();
-  const subscription = await worker.pushManager.getSubscription();
-  await api("push/unsubscribe", {
-    method: "POST",
-    body: JSON.stringify(subscription ? { endpoint: subscription.endpoint } : {}),
+  return withSubscriptionLock(async (): Promise<PhoneNotificationState> => {
+    const worker = await registration();
+    const subscription = await worker.pushManager.getSubscription();
+    await api("push/unsubscribe", {
+      method: "POST",
+      body: JSON.stringify(subscription ? { endpoint: subscription.endpoint } : {}),
   });
   if (subscription) await subscription.unsubscribe();
+  rememberPushEnabled(false);
   return {
     ready: true,
     supported: true,
@@ -276,6 +309,7 @@ export async function disablePhoneNotifications(): Promise<PhoneNotificationStat
     requiresHomeScreen: false,
     permission: current.permission,
   };
+  });
 }
 
 export async function sendPhoneNotificationTest(): Promise<void> {
