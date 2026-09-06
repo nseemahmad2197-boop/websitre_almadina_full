@@ -1,10 +1,58 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { canHideCollection, hiddenCollectionIds, normalizeCollectionVisibility, setCollectionHidden } from "../app/lib/collection-visibility.ts";
 import { createSeedDatabase, isOrderInvoicedForCurrentShipment, removeLegacyDemoData } from "../app/lib/data.ts";
 import { matchRegistrationMapAddress } from "../app/lib/registration-map-address.ts";
 import { reverseGeocode } from "../app/lib/reverse-geocoding.ts";
 
 const TEST_ADMIN_PASSWORD = "Admin@Test-2026!";
+
+test("invoice list deletion preserves settlement, respects roles, and restores without duplicate billing", () => {
+  const database = createSeedDatabase();
+  database.users = [
+    { id: "owner", role: "merchant" }, { id: "other", role: "merchant" },
+    { id: "courier", role: "courier" }, { id: "admin", role: "admin" },
+  ];
+  const order = { id: "o1", status: "delivered", shippedAt: "2026-09-01T00:00:00Z" };
+  const invoice = { id: "i1", merchantId: "owner", status: "paid", paidAt: "2026-09-05T00:00:00Z", orderIds: ["o1"], netAmount: 85 };
+  database.orders = [order];
+  database.collections = [invoice];
+  database.preferences = { owner: { sounds: false, custom: "preserve" }, other: { hiddenCollectionIds: ["i2"] } };
+  const hidden = setCollectionHidden(database, "owner", "i1", true);
+  assert.deepEqual([...hiddenCollectionIds(hidden, "owner")], ["i1"]);
+  assert.strictEqual(hidden.collections, database.collections);
+  assert.strictEqual(hidden.orders, database.orders);
+  assert.equal(isOrderInvoicedForCurrentShipment(order, hidden.collections), true);
+  assert.deepEqual(hidden.preferences.other, database.preferences.other);
+  assert.equal(hidden.preferences.owner.sounds, false);
+  assert.equal(hidden.preferences.owner.custom, "preserve");
+  assert.deepEqual(setCollectionHidden(hidden, "owner", "i1", true), hidden);
+  const restored = setCollectionHidden(hidden, "owner", "i1", false);
+  assert.equal(hiddenCollectionIds(restored, "owner").size, 0);
+  assert.equal(isOrderInvoicedForCurrentShipment(order, restored.collections), true);
+  for (const id of ["other", "courier", "missing"]) assert.strictEqual(setCollectionHidden(database, id, "i1", true), database);
+  assert.strictEqual(setCollectionHidden(database, "owner", "missing", true), database);
+  assert.equal(hiddenCollectionIds(setCollectionHidden(database, "admin", "i1", true), "admin").has("i1"), true);
+  assert.equal(hiddenCollectionIds(database, "owner").size, 0);
+});
+
+test("outstanding invoices cannot be hidden, regardless of amount, and old hidden entries reappear", () => {
+  for (const role of ["merchant", "admin"]) for (const status of ["pending", "ready", "unknown"]) for (const netAmount of [-75, 0, 75]) {
+    const db = createSeedDatabase();
+    db.users = [{ id: "owner", role }];
+    db.collections = [{ id: "due", merchantId: "owner", status, netAmount }];
+    db.preferences = { owner: { sounds: false, hiddenCollectionIds: ["due", "missing"] } };
+    assert.equal(canHideCollection(db.users[0], db.collections[0]), false);
+    assert.strictEqual(setCollectionHidden(db, "owner", "due", true), db);
+    assert.deepEqual([...hiddenCollectionIds(db, "owner")], []);
+    const normalized = normalizeCollectionVisibility(db);
+    assert.deepEqual(normalized.preferences.owner.hiddenCollectionIds, []);
+    assert.equal(normalized.preferences.owner.sounds, false);
+    assert.strictEqual(normalized.collections, db.collections);
+    assert.deepEqual(setCollectionHidden(db, "owner", "due", false).preferences.owner.hiddenCollectionIds, []);
+    for (const amount of [-75, 0, 75]) assert.equal(canHideCollection(db.users[0], { ...db.collections[0], status: "paid", netAmount: amount }), true);
+  }
+});
 
 test("matches a reverse-geocoded pin to the supported registration address", () => {
   assert.deepEqual(matchRegistrationMapAddress({
@@ -2565,6 +2613,81 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(revoked.status, 401);
   const stillSignedIn = await call(worker, database, "database", { cookie: firstCookie });
   assert.equal(stillSignedIn.status, 200);
+});
+
+test("invoice list deletion synchronizes for its account and keeps paid records on the server", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const first = await call(worker, database, "register", { method: "POST", payload: accountPayload("صاحب الفاتورة", "swipe-owner@example.test", "0594433221") });
+  const second = await call(worker, database, "register", { method: "POST", payload: accountPayload("حساب آخر", "swipe-other@example.test", "0594433222") });
+  assert.equal(first.status, 201); assert.equal(second.status, 201);
+  const ownerId = first.body.userId, otherId = second.body.userId;
+  const time = "2026-01-01T00:00:00.000Z";
+  const invoice = {
+    id: "swipe-paid-invoice", merchantId: ownerId, merchantName: "صاحب الفاتورة", invoiceNumber: "#618900",
+    orderIds: [], grossAmount: 100, deliveryFees: 25, returnFees: 0, netAmount: 75, deliveredCount: 1, returnedCount: 0,
+    status: "paid", verificationCode: "1234", authorizedRecipient: "", createdAt: time, updatedAt: time, scheduledAt: time, paidAt: time,
+    returnPricingVersion: 1, returnPricingMembership: "standard", returnFeeDetails: [],
+  };
+  const seed = JSON.parse(database.state.payload);
+  seed.collections = [invoice, { ...invoice, id: "other-private-entry", merchantId: otherId, invoiceNumber: "#618901" }];
+  seed.preferences[otherId] = { ...seed.preferences[otherId], hiddenCollectionIds: ["other-private-entry"] };
+  database.state.payload = JSON.stringify(seed);
+  const cookie = sessionFrom(first);
+  const current = await call(worker, database, "database", { cookie });
+  assert.equal(current.status, 200);
+  const next = setCollectionHidden(current.body.database, ownerId, invoice.id, true);
+  // Simulate an untrusted client attempting to alter a second account's list.
+  next.preferences[otherId] = { hiddenCollectionIds: ["tampered"] };
+  const saved = await call(worker, database, "database", { method: "PUT", cookie, payload: { revision: current.body.revision, database: next } });
+  assert.equal(saved.status, 200);
+  assert.equal(hiddenCollectionIds(saved.body.database, ownerId).has(invoice.id), true);
+  assert.equal(saved.body.database.collections.find((item) => item.id === invoice.id).status, "paid");
+  const other = await call(worker, database, "database", { cookie: sessionFrom(second) });
+  assert.deepEqual(other.body.database.preferences[otherId].hiddenCollectionIds, ["other-private-entry"]);
+  const secondDevice = await call(worker, database, "login", { method: "POST", payload: { email: "swipe-owner@example.test", password: "Customer@123" } });
+  assert.equal(hiddenCollectionIds(secondDevice.body.database, ownerId).has(invoice.id), true);
+  const restored = await call(worker, database, "database", { method: "PUT", cookie: sessionFrom(secondDevice), payload: { revision: secondDevice.body.revision, database: setCollectionHidden(secondDevice.body.database, ownerId, invoice.id, false) } });
+  assert.equal(restored.status, 200);
+  assert.equal(hiddenCollectionIds(restored.body.database, ownerId).size, 0);
+  assert.equal(JSON.parse(database.state.payload).collections.find((item) => item.id === invoice.id).netAmount, 75);
+});
+
+test("server blocks hiding outstanding invoices for merchants and admins, repairs old visibility and retains omitted invoices", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const owner = await call(worker, database, "register", { method: "POST", payload: accountPayload("صاحب المستحقات", "due-owner@example.test", "0594433291") });
+  const admin = await call(worker, database, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  assert.equal(owner.status, 201); assert.equal(admin.status, 200);
+  const seed = JSON.parse(database.state.payload);
+  const time = "2026-01-01T00:00:00.000Z";
+  seed.collections = ["pending", "ready", "paid"].map((status, index) => ({
+    id: `due-${status}`, merchantId: owner.body.userId, merchantName: "صاحب المستحقات", invoiceNumber: `#61900${index}`,
+    orderIds: [], grossAmount: 0, deliveryFees: 0, returnFees: 0, netAmount: 0, deliveredCount: 0, returnedCount: 0,
+    status, verificationCode: "1234", authorizedRecipient: "", createdAt: time, updatedAt: time, scheduledAt: time,
+    returnPricingVersion: 1, returnPricingMembership: "standard", returnFeeDetails: [],
+  }));
+  seed.preferences[owner.body.userId] = { ...seed.preferences[owner.body.userId], hiddenCollectionIds: ["due-pending", "due-ready", "due-paid"] };
+  database.state.payload = JSON.stringify(seed);
+  for (const session of [owner, admin]) {
+    const cookie = sessionFrom(session), userId = session.body.userId;
+    let current = await call(worker, database, "database", { cookie });
+    assert.equal(current.status, 200);
+    if (session === owner) assert.deepEqual(current.body.database.preferences[userId].hiddenCollectionIds, ["due-paid"]);
+    for (const status of ["pending", "ready"]) {
+      const submitted = structuredClone(current.body.database);
+      submitted.preferences[userId] = { ...submitted.preferences[userId], hiddenCollectionIds: [`due-${status}`] };
+      // Hiding and forging a paid status in one request cannot bypass the check.
+      submitted.collections.find((invoice) => invoice.id === `due-${status}`).status = "paid";
+      const result = await call(worker, database, "database", { method: "PUT", cookie, payload: { revision: current.body.revision, database: submitted } });
+      assert.equal(result.status, 403); assert.match(result.body.error, /مستحقة/);
+    }
+    const omitted = structuredClone(current.body.database); omitted.collections = [];
+    const result = await call(worker, database, "database", { method: "PUT", cookie, payload: { revision: current.body.revision, database: omitted } });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.database.collections.map((invoice) => invoice.id).sort(), ["due-paid", "due-pending", "due-ready"]);
+    assert.equal(result.body.database.collections.find((invoice) => invoice.id === "due-ready").status, "ready");
+  }
 });
 
 test("preserves a settled return invoice and bills a later delivery once after a courier rescan", async () => {

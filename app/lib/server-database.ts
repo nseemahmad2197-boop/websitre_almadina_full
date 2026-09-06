@@ -10,6 +10,7 @@ import {
 } from "@simplewebauthn/server";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, isOrderInvoicedForCurrentShipment, normalizeMembership, normalizeParcelCode, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, RETURN_PRICING_VERSION, uid, type CollectionInvoice, type Database, type ParcelCodeClaim, type ParcelCodeBatch, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
+import { canHideCollection, normalizeCollectionVisibility } from "./collection-visibility";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
 import { generateVapidKeyPair, sendWebPushNotification, WebPushDeliveryError, type VapidKeyPair, type WebPushMessage, type WebPushSubscriptionRecord } from "./web-push";
 
@@ -686,11 +687,11 @@ async function readState(database: D1Database): Promise<StoredState> {
   const row = await database.prepare("SELECT payload, revision FROM almadina_state WHERE id = ?").bind("main").first<StateRow>();
   if (!row) throw new Error("The shared application state was not initialized.");
   const cleaned = removeLegacyDemoData(JSON.parse(row.payload) as Database);
-  return { database: normalizeCollectionInvoices(cleaned), revision: row.revision };
+  return { database: normalizeCollectionVisibility(normalizeCollectionInvoices(cleaned)), revision: row.revision };
 }
 
 async function saveState(database: D1Database, state: Database, revision: number): Promise<boolean> {
-  const normalized = normalizeCollectionInvoices(removeLegacyDemoData(state));
+  const normalized = normalizeCollectionVisibility(normalizeCollectionInvoices(removeLegacyDemoData(state)));
   const result = await database.prepare("UPDATE almadina_state SET payload = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?")
     .bind(JSON.stringify(normalized), new Date().toISOString(), "main", revision).run();
   return (result.meta?.changes ?? 0) === 1;
@@ -2091,7 +2092,9 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
       courierName: courier?.role === "courier" ? courier.name : protectedOrder.courierName,
     };
   });
-  const collections = submitted.collections.map((invoice) => ({
+  const submittedInvoiceIds = new Set(submitted.collections.map((invoice) => invoice.id));
+  // Deleting a list item never removes an invoice from the financial ledger.
+  const collections = [...submitted.collections, ...current.collections.filter((invoice) => !submittedInvoiceIds.has(invoice.id))].map((invoice) => ({
     ...invoice,
     merchantName: accountsById.get(invoice.merchantId)?.name ?? invoice.merchantName,
   }));
@@ -2122,6 +2125,7 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     orders,
     collections,
     notices: [...statusUpdateNotices, ...trackingNoteNotices, ...submitted.notices],
+    preferences: { ...current.preferences, ...(submitted.preferences[account.id] ? { [account.id]: submitted.preferences[account.id] } : {}) },
     parcelCodeBatches: current.parcelCodeBatches ?? [],
     parcelCodeClaims,
     nextOrder: current.nextOrder,
@@ -3812,11 +3816,21 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
         return json({ error: "تم تحديث البيانات من جهاز آخر.", ...snapshot(session.state, session.account) }, 409);
       }
 
-      const next = session.account.role === "admin"
+      const requestedHidden = payload.database.preferences[session.account.id]?.hiddenCollectionIds;
+      if (Array.isArray(requestedHidden)) {
+        const invoices = new Map(session.state.database.collections.map((invoice) => [invoice.id, invoice]));
+        if (requestedHidden.some((id) => {
+          const invoice = invoices.get(id);
+          return !invoice || !canHideCollection(session.account, invoice);
+        })) return json({ error: "لا يمكن حذف فاتورة مستحقة. يُسمح بالحذف من القائمة بعد تسليم التحصيل فقط." }, 403);
+      }
+
+      const merged = session.account.role === "admin"
         ? await mergeAdminDatabase(session.state.database, payload.database, session.account)
         : session.account.role === "merchant"
           ? mergeMerchantDatabase(session.state.database, payload.database, session.account)
           : mergeCourierDatabase(session.state.database, payload.database, session.account);
+      const next = normalizeCollectionVisibility(merged);
       const existingNoticeIds = new Set(session.state.database.notices.map((notice) => notice.id));
       const newNotices = next.notices.filter((notice) => !existingNoticeIds.has(notice.id));
 

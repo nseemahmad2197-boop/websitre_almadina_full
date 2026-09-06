@@ -1614,3 +1614,14 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 .order-detail-actions > button:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-width: 500px) { .parcel-code-entry .button { width: 100%; } }
 @media print { .parcel-code-entry { display: none; } }
+
+/* Physical left swipe; this intentionally does not reverse with document RTL. */
+.swipe-row { position: relative; min-width: 0; overflow: hidden; border-radius: 16px; isolation: isolate; }
+.swipe-row__content { position: relative; z-index: 1; transform: translateX(var(--swipe-offset, 0px)); transition: transform .18s ease-out; touch-action: pan-y pinch-zoom; background: var(--surface); border-radius: inherit; }
+.swipe-row.is-dragging .swipe-row__content { transition: none; user-select: none; cursor: grabbing; }
+.swipe-row__delete { position: absolute; top: 0; bottom: 0; right: 0; width: 88px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 0; background: #b42335; color: white; font: inherit; cursor: pointer; }
+.swipe-row__keyboard { position: absolute; z-index: 2; left: 4px; top: 4px; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.swipe-row__keyboard:focus-visible { width: auto; height: auto; padding: 10px; clip-path: none; background: var(--surface); color: var(--text); border: 2px solid var(--green); border-radius: 8px; }
+.swipe-row__delete:focus-visible { outline: 3px solid white; outline-offset: -5px; }
+@media (prefers-reduced-motion: reduce) { .swipe-row__content { transition: none; } }
+@media print { .swipe-row { overflow: visible; } .swipe-row__content { transform: none; } .swipe-row__delete, .swipe-row__keyboard { display: none; } }

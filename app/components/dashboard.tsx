@@ -5,16 +5,19 @@ import { useApp } from "../lib/app-context";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, normalizeMembership, normalizeParcelCode, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
 import { createQrMatrix } from "../lib/qr-code";
 import { Icon } from "./icon";
+import { DeleteParcelRow } from "./swipe-delete";
 import { TrackingHistory, TrackingNoteComposer } from "./tracking-history";
 import { Button, EmptyState, Field, IconButton, Modal, PageHeader, SectionCard, Segmented, StatusPill } from "./ui";
 
 export function OrderCard({ order, showMerchant = false, compact = false }: { order: Order; showMerchant?: boolean; compact?: boolean }) {
   const { setView, setSelectedOrderId } = useApp();
   return (
+    <DeleteParcelRow order={order}>
     <button className={`order-card ${compact ? "order-card--compact" : ""}`} onClick={() => { setSelectedOrderId(order.id); setView("order-detail"); }}>
       <div className="order-card__top"><div className="order-card__identity"><span className="order-card__icon"><Icon name="package" size={21} /></span><div><strong>{showMerchant ? order.merchantName : order.recipientName}</strong><span dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إضافة كود QR"}</span></div></div><StatusPill status={order.status} /></div>
       <div className="order-card__details"><span><Icon name="mapPin" size={15} />{order.city}</span><span><Icon name="wallet" size={15} />{money(order.amount)} ₪</span><span><Icon name="clock" size={15} />{relativeDate(order.createdAt)}</span></div>
     </button>
+    </DeleteParcelRow>
   );
 }
 

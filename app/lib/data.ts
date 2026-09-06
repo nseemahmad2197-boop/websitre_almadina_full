@@ -167,6 +167,7 @@ export type Notice = {
 };
 
 export type Preferences = {
+  hiddenCollectionIds?: string[];
   theme: "light" | "dark" | "system";
   notifications: boolean;
   sounds: boolean;

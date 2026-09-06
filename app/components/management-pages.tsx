@@ -7,6 +7,8 @@ import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, ge
 import { parseParcelImportCsv, type ParcelImportCsvLayout, type ParcelImportRow } from "../lib/import-csv";
 import { OrderCard } from "./dashboard";
 import { Icon } from "./icon";
+import { DeleteInvoiceRow } from "./swipe-delete";
+import { canHideCollection, hiddenCollectionIds, setCollectionHidden } from "../lib/collection-visibility";
 import { Avatar, Button, CollectionAmount, EmptyState, Field, IconButton, Modal, PageHeader, SectionCard } from "./ui";
 
 export function ReturnsPage() {
@@ -43,6 +45,8 @@ export function CollectionsPage() {
   const [codeInvoiceId, setCodeInvoiceId] = useState<string | null>(null);
   const [authorizedRecipient, setAuthorizedRecipient] = useState("");
   const invoices = database.collections.filter((invoice) => invoice.merchantId === user?.id);
+  const hiddenIds = hiddenCollectionIds(database, user?.id ?? "");
+  const visibleInvoices = invoices.filter((invoice) => !hiddenIds.has(invoice.id));
   const eligibleOrders = database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && (order.status === "delivered" || order.status === "returned") && !isOrderInvoicedForCurrentShipment(order, invoices));
   const returnFeeForOrder = (order: Order) => getReturnFee(resolveDeliveryRegion(order.governorate ?? "", order.city), user?.membership);
   const selectedInvoice = invoices.find((invoice) => invoice.id === selectedId) ?? null;
@@ -160,12 +164,12 @@ export function CollectionsPage() {
         <article><span><Icon name="check" size={18} /></span><strong><CollectionAmount amount={deliveredAmount} /></strong><small>تم التسليم</small></article>
       </div>
 
-      {invoices.length ? <div className="collection-list">{invoices.map((invoice) => {
+      {visibleInvoices.length ? <div className="collection-list">{visibleInvoices.map((invoice) => {
         const status = collectionStatus[invoice.status];
-        return <button type="button" className="collection-card" key={invoice.id} onClick={() => setSelectedId(invoice.id)}>
+        return <DeleteInvoiceRow key={invoice.id} invoice={invoice}><button type="button" className="collection-card" onClick={() => setSelectedId(invoice.id)}>
           <div className="collection-card__main"><strong dir="ltr">{invoice.invoiceNumber}</strong><span className={`collection-status collection-status--${invoice.status}`}><Icon name={status.icon} size={13} />{status.label}</span><dl><div><dt><Icon name="calendar" size={13} />تاريخ الإنشاء</dt><dd>{formatDate(invoice.createdAt)}</dd></div><div><dt><Icon name="calendar" size={13} />موعد التسليم</dt><dd>{formatDate(invoice.paidAt ?? invoice.scheduledAt)}</dd></div></dl></div>
           <div className="collection-card__numbers"><strong><CollectionAmount amount={invoice.netAmount} /></strong><span><Icon name="check" size={13} />{invoice.deliveredCount} واصل</span><span><Icon name="return" size={13} />{invoice.returnedCount} راجع</span></div>
-        </button>;
+        </button></DeleteInvoiceRow>;
       })}</div> : <EmptyState icon="receipt" title="لا توجد فواتير تحصيل" description="بعد وصول الطرود ستتمكن من جمعها في فاتورة ومتابعة تحويل المبلغ." action={eligibleOrders.length ? "إنشاء فاتورة" : undefined} onAction={createInvoice} />}
 
       {selectedInvoice && <Modal title="تفاصيل فاتورة التحصيل" onClose={() => setSelectedId(null)} className="collection-detail-modal" sheet>
@@ -275,9 +279,23 @@ export function NotificationsPage() {
 }
 
 export function TrashPage() {
-  const { database, user, updateDatabase, setView, confirm, showToast } = useApp();
-  const deleted = database.orders.filter((order) => order.deleted && (user?.role === "admin" || order.merchantId === user?.id));
-  return <div className="page-content animate-page"><PageHeader title="الطرود المحذوفة" subtitle="يمكنك استعادة الطرود المحذوفة أو حذفها نهائيًا" onBack={() => setView(user?.role === "admin" ? "admin" : "home")} />{deleted.length ? <div className="trash-list">{deleted.map((order) => <SectionCard key={order.id}><div className="trash-item"><div><strong dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إضافة كود QR"}</strong><span>{order.recipientName} · {order.city}</span></div><div><IconButton name="refresh" label="استعادة الطرد" onClick={() => { updateDatabase((current) => ({ ...current, orders: current.orders.map((item) => item.id === order.id ? { ...item, deleted: false } : item) })); showToast("تمت استعادة الطرد."); }} /><IconButton name="trash" label="حذف نهائي" className="is-danger" onClick={() => confirm({ title: "حذف الطرد نهائيًا؟", message: "لن تتمكن من استعادة الطرد بعد حذفه نهائيًا.", danger: true, confirmLabel: "حذف نهائي", onConfirm: () => { updateDatabase((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== order.id) })); showToast("تم حذف الطرد نهائيًا."); } })} /></div></div></SectionCard>)}</div> : <EmptyState icon="trash" title="لا توجد طرود محذوفة" description="أي طرد تنقله إلى سلة المحذوفات سيظهر هنا." />}</div>;
+  const { database, user, updateDatabase, setView, confirm } = useApp();
+  const deleted = database.orders.filter((order) => order.deleted && (user?.role === "admin" || (user?.role === "merchant" && order.merchantId === user.id)));
+  const hiddenIds = hiddenCollectionIds(database, user?.id ?? "");
+  const invoices = database.collections.filter((invoice) => hiddenIds.has(invoice.id) && canHideCollection(user, invoice));
+  return <div className="page-content animate-page">
+    <PageHeader title="المحذوفات" subtitle="استعادة الطرود والفواتير المحذوفة من قائمتك" onBack={() => setView(user?.role === "admin" ? "admin" : "home")} />
+    {!!deleted.length && <SectionCard><h2>الطرود المحذوفة</h2><p>تُحذف الطرود نهائيًا بعد 30 يومًا من نقلها إلى المحذوفات.</p><div className="trash-list">{deleted.map((order) => <div className="trash-item" key={order.id}>
+      <div><strong dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إضافة كود QR"}</strong><span>{order.recipientName} · {order.city}</span></div>
+      <div><IconButton name="refresh" label="استعادة الطرد" onClick={() => updateDatabase((current) => ({ ...current, orders: current.orders.map((item) => item.id === order.id ? { ...item, deleted: false, deletedAt: undefined, updatedAt: new Date().toISOString() } : item) }))} />
+      <IconButton name="trash" label="حذف نهائي" className="is-danger" onClick={() => confirm({ title: "حذف الطرد نهائيًا؟", message: "لن تتمكن من استعادة الطرد بعد حذفه نهائيًا.", danger: true, confirmLabel: "حذف نهائي", onConfirm: () => updateDatabase((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== order.id) })) })} /></div>
+    </div>)}</div></SectionCard>}
+    {!!invoices.length && <SectionCard><h2>الفواتير المحذوفة من قائمتك</h2><div className="trash-list">{invoices.map((invoice) => <div className="trash-item" key={invoice.id}>
+      <div><strong dir="ltr">{invoice.invoiceNumber}</strong><span>{invoice.merchantName}</span></div>
+      <Button variant="secondary" icon="refresh" onClick={() => { if (user) updateDatabase((current) => setCollectionHidden(current, user.id, invoice.id, false)); }}>استعادة الفاتورة</Button>
+    </div>)}</div></SectionCard>}
+    {!deleted.length && !invoices.length && <EmptyState icon="trash" title="المحذوفات فارغة" description="ستظهر هنا الطرود والفواتير التي تحذفها من قائمتك." />}
+  </div>;
 }
 
 export function ImportPage() {
