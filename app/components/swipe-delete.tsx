@@ -16,7 +16,7 @@ export function SwipeDelete({ children, enabled = true, label = "حذف", onDele
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ pointer: number; x: number; y: number; start: number; axis: "pending" | "x" | "y" } | null>(null);
-  const ignoreClickUntil = useRef(0);
+  const suppressDragClick = useRef(false);
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const open = offset <= -actionWidth / 2;
@@ -31,7 +31,10 @@ export function SwipeDelete({ children, enabled = true, label = "حذف", onDele
 
   function reveal() { document.dispatchEvent(new CustomEvent("almadina-swipe-open", { detail: id })); setOffset(-actionWidth); }
   function down(event: PointerEvent<HTMLDivElement>) {
-    if (!event.isPrimary || event.button !== 0 || (event.target as HTMLElement).closest("input,textarea,select,a,[data-no-swipe]")) return;
+    if (!event.isPrimary || event.button !== 0) return;
+    // A fresh press is intentional, even immediately after a completed swipe.
+    suppressDragClick.current = false;
+    if ((event.target as HTMLElement).closest("input,textarea,select,a,[data-no-swipe]")) return;
     gesture.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, start: offset, axis: "pending" };
   }
   function move(event: PointerEvent<HTMLDivElement>) {
@@ -53,7 +56,7 @@ export function SwipeDelete({ children, enabled = true, label = "حذف", onDele
     const current = gesture.current;
     if (!current || current.pointer !== event.pointerId) return;
     if (current.axis === "x") {
-      ignoreClickUntil.current = performance.now() + 300;
+      suppressDragClick.current = true;
       const finalOffset = current.start + event.clientX - current.x;
       setOffset(cancelled ? current.start : finalOffset < -actionWidth / 2 ? -actionWidth : 0);
     }
@@ -65,7 +68,15 @@ export function SwipeDelete({ children, enabled = true, label = "حذف", onDele
     onKeyDown={(event) => { if (event.key === "Escape") setOffset(0); }}>
     <button type="button" data-no-swipe className="swipe-row__delete" tabIndex={open ? 0 : -1} aria-hidden={!open} aria-label={label} onClick={() => { setOffset(0); onDelete(); }}><Icon name="trash" size={22} /><span>حذف</span></button>
     <div className="swipe-row__content" onPointerDown={down} onPointerMove={move} onPointerUp={(event) => end(event)} onPointerCancel={(event) => end(event, true)} onLostPointerCapture={(event) => end(event, true)}
-      onClickCapture={(event) => { if (performance.now() < ignoreClickUntil.current || open) { event.preventDefault(); event.stopPropagation(); setOffset(0); } }}>
+      onClickCapture={(event) => {
+        // Browsers can emit click after pointerup, even after a captured drag.
+        // Consume that click without undoing the settled open/closed position.
+        if (suppressDragClick.current && event.detail > 0) {
+          suppressDragClick.current = false;
+          event.preventDefault(); event.stopPropagation(); return;
+        }
+        if (open) { event.preventDefault(); event.stopPropagation(); setOffset(0); }
+      }}>
       {children}
     </div>
     <button type="button" data-no-swipe className="swipe-row__keyboard" aria-label={`إظهار ${label}`} onClick={reveal}>إظهار الحذف</button>
