@@ -1248,6 +1248,32 @@ export default function AlmadinaApplication() {
     }
   }
 
+  async function submitDeletionOperation(path: "account/deletion-request" | "admin/deletion-requests", payload: Record<string, unknown>): Promise<unknown> {
+    if (!await waitForPendingUpdates()) throw new Error("انتظر اكتمال حفظ التغييرات ثم أعد المحاولة.");
+    const operationEpoch = sessionEpoch.current;
+    remoteMutationInFlight.current = true;
+    try {
+      const response = await fetch(`/api/almadina/${path}`, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "تعذّر حفظ الطلب.");
+      if (operationEpoch !== sessionEpoch.current) throw new Error("تغيّر الحساب. افتح حالة الطلب في حسابه.");
+      // The request endpoint uses the same CAS state as parcels; sync its new revision before further writes.
+      try {
+        const snapshot = await sharedRequest("database");
+        if (operationEpoch === sessionEpoch.current) {
+          authoritativeDatabase.current = snapshot.database;
+          serverRevision.current = snapshot.revision;
+          visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), snapshot.database);
+          setDatabase(visibleDatabase.current);
+        }
+      } catch { /* A committed deletion request remains successful if the follow-up snapshot is offline. */ }
+      return result;
+    } finally {
+      remoteMutationInFlight.current = false;
+      if (pendingUpdates.current.length) void savePendingUpdates();
+    }
+  }
+
   async function deleteAccount(password: string, confirmation: string): Promise<boolean> {
     if (!user || user.role === "admin") {
       showToast("لا يمكن حذف حساب المسؤول من داخل التطبيق.", "error");
@@ -1444,7 +1470,7 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, purgeTrash, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, purgeTrash, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, submitDeletionOperation, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

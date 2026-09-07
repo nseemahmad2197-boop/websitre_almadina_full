@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useApp, type View } from "../lib/app-context";
+import { DeletionRequestsAdminPage } from "./deletion-admin";
 import { AdminDashboard } from "./admin";
 import { Dashboard, OrderDetail, Shipments } from "./dashboard";
 import { EmployeeDashboard } from "./employee";
@@ -19,6 +20,7 @@ function NavigationDrawer({ onClose }: { onClose: () => void }) {
   const employee = user.role === "courier";
   const links: { icon: IconName; label: string; view: View }[] = admin ? [
     { icon: "home", label: "لوحة التحكم", view: "admin" },
+    { icon: "shield", label: "طلبات حذف الحسابات", view: "deletion-requests" },
     { icon: "qrCode", label: "أكواد الطرود للطباعة", view: "parcel-codes" },
     { icon: "bell", label: "الإشعارات", view: "notifications" },
     { icon: "trash", label: "الطرود المحذوفة", view: "trash" },
@@ -76,6 +78,7 @@ function CurrentPage() {
     case "security": return <SecurityPage />;
     case "change-password": return <ChangePasswordPage />;
     case "linked-devices": return <LinkedDevicesPage />;
+    case "deletion-requests": return <DeletionRequestsAdminPage />;
     case "delete-account": return <DeleteAccountPage />;
     case "notification-settings": return <NotificationSettings />;
     case "preferences": return <PreferencesPage />;

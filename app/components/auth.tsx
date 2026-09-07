@@ -6,6 +6,7 @@ import { detectBiometricAvailability } from "../lib/app-lock-client";
 import { AVAILABLE_ACCOUNTS_EVENT, AVAILABLE_ACCOUNTS_STORAGE_KEY, forgetAvailableAccount, readAvailableAccounts, type AvailableAccount } from "../lib/available-accounts";
 import type { TrackableOrder } from "../lib/data";
 import { Icon } from "./icon";
+import { PublicServiceLinks } from "./public-service";
 import { PasswordRecovery } from "./password-recovery";
 import { RegistrationFlow } from "./registration-flow";
 import { TrackingHistory } from "./tracking-history";
@@ -187,7 +188,7 @@ export function Authentication() {
             </>
           )}
         </section>
-        <footer className="auth-footer">توصيل أسرع، متابعة أسهل — إلى كل فلسطين</footer>
+        <footer className="auth-footer">توصيل أسرع، متابعة أسهل — إلى كل فلسطين<PublicServiceLinks /></footer>
       </div>
 
       {trackedOrder && <Modal onClose={() => setTrackedOrder(null)} title="تتبّع الطرد" className="tracking-modal"><div className="tracking-modal__number"><Icon name="package" size={32} /><div><strong dir="ltr">{trackedOrder.trackingNumber}</strong><span>بيانات المستلم محمية</span></div><StatusPill status={trackedOrder.status} /></div><TrackingHistory order={trackedOrder} compact /><Button full onClick={() => setTrackedOrder(null)}>حسنًا</Button></Modal>}

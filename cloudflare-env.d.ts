@@ -27,6 +27,8 @@ interface PasswordResetDeliveryBindings {
   BREVO_FROM_EMAIL?: string;
   BREVO_FROM_NAME?: string;
   GEOAPIFY_API_KEY?: string;
+  ALMADINA_SUPPORT_PHONE?: string;
+  ALMADINA_SUPPORT_EMAIL?: string;
   ALMADINA_ADMIN_EMAIL?: string;
   ALMADINA_ADMIN_PASSWORD?: string;
   ALMADINA_ADMIN_PHONE?: string;
@@ -43,7 +45,9 @@ declare namespace NodeJS {
     BREVO_FROM_EMAIL?: string;
     BREVO_FROM_NAME?: string;
     GEOAPIFY_API_KEY?: string;
-    ALMADINA_ADMIN_EMAIL?: string;
+    ALMADINA_SUPPORT_PHONE?: string;
+  ALMADINA_SUPPORT_EMAIL?: string;
+  ALMADINA_ADMIN_EMAIL?: string;
     ALMADINA_ADMIN_PASSWORD?: string;
     ALMADINA_ADMIN_PHONE?: string;
     ALMADINA_ADMIN_NAME?: string;

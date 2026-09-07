@@ -1633,3 +1633,24 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 .trash-select input { width: 22px; height: 22px; margin: 11px; flex: 0 0 auto; accent-color: var(--green); }
 .trash-select > span { display: grid; gap: 5px; overflow-wrap: anywhere; }
 .trash-select small { color: var(--muted); }
+
+/* Public service routes remain readable without signing in or installing an app. */
+.public-service-page { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; line-height: 1.85; overflow-wrap: anywhere; }
+.public-service-page header { margin-bottom: 28px; }
+.public-service-page section, .public-service-page .section-card { margin: 20px 0; padding: 24px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); }
+.public-service-page article + article { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 16px; }
+.public-service-page h1 { font-size: clamp(24px, 5vw, 36px); }
+.public-service-page a, .public-service-links a, .support-contacts a, .deletion-request-panel a { color: var(--green); text-decoration: underline; text-underline-offset: 4px; }
+.public-service-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; margin-top: 24px; }
+.deletion-request-panel { margin-bottom: 24px; line-height: 1.8; }
+.deletion-request-form { display: grid; gap: 18px; margin: 20px 0; }
+.deletion-request-status { padding: 18px 0; }
+.deletion-reference { overflow-wrap: anywhere; }
+.deletion-message { white-space: pre-wrap; }
+.deletion-error { color: var(--danger); font-weight: 600; }
+.deletion-request-panel details { margin-top: 22px; }
+.deletion-request-panel summary { cursor: pointer; font-weight: 700; }
+.deletion-admin-page > .section-card { margin-top: 20px; line-height: 1.8; overflow-wrap: anywhere; }
+.deletion-admin-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.deletion-request-form textarea { width: 100%; min-height: 110px; padding: 12px; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; font: inherit; }
+@media (max-width: 520px) { .public-service-page { padding: 20px 12px 40px; } .public-service-page section, .public-service-page .section-card { padding: 18px; } }

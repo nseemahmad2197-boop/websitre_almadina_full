@@ -1,4 +1,7 @@
 "use client";
+import { DeletionRequestPanel } from "./deletion-request";
+import type { DeletionResponse } from "../lib/account-deletion";
+import { SupportContacts } from "./public-service";
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useApp, type View } from "../lib/app-context";
@@ -214,24 +217,14 @@ export function ChangePasswordPage() {
 }
 
 export function DeleteAccountPage() {
-  const { database, user, setView, deleteAccount } = useApp();
+  const { user, setView, deleteAccount, submitDeletionOperation } = useApp();
+  const [requestStatus, setRequestStatus] = useState<DeletionResponse | null>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const accountId = user?.id ?? "";
-  const assignedOrders = database.orders.filter((order) => !order.deleted && (
-    user?.role === "merchant" ? order.merchantId === accountId : order.courierId === accountId
-  ));
-  const activeOrderCount = assignedOrders.filter((order) => order.status !== "delivered" && order.status !== "returned").length;
-  const merchantCollections = user?.role === "merchant" ? database.collections.filter((invoice) => invoice.merchantId === accountId) : [];
-  const paidOrderIds = new Set(merchantCollections.filter((invoice) => invoice.status === "paid").flatMap((invoice) => invoice.orderIds));
-  const unsettledCollectionCount = merchantCollections.filter((invoice) => invoice.status !== "paid").length;
-  const unsettledOrderCount = user?.role === "merchant" ? assignedOrders.filter((order) => (
-    (order.status === "delivered" || order.status === "returned") && !paidOrderIds.has(order.id)
-  )).length : 0;
-  const eligible = Boolean(user && user.role !== "admin" && activeOrderCount === 0 && unsettledCollectionCount === 0 && unsettledOrderCount === 0);
+  const { activeOrderCount = 0, unsettledCollectionCount = 0, unsettledOrderCount = 0, eligible = false } = requestStatus?.eligibility ?? {};
 
   async function submitDeletion(event: FormEvent) {
     event.preventDefault();
@@ -254,10 +247,11 @@ export function DeleteAccountPage() {
 
   return <div className="page-content delete-account-page animate-page">
     <PageHeader title="حذف الحساب" onBack={() => setView("security")} />
+    <DeletionRequestPanel onStatus={setRequestStatus} submitRequest={async (password, confirmation) => await submitDeletionOperation("account/deletion-request", { password, confirmation }) as DeletionResponse} />
     <section className="delete-account-panel">
       <header className="delete-account-intro">
         <span><Icon name="trash" size={26} /></span>
-        <div><h2>قبل حذف حسابك</h2><p>نحترم حقك في التحكم ببياناتك. قبل حذف الحساب نهائيًا، تأكد من استكمال الخطوات التالية:</p></div>
+        <div><h2>الحذف الفوري بعد التسوية</h2><p>نحترم حقك في التحكم ببياناتك. قبل حذف الحساب نهائيًا، تأكد من استكمال الخطوات التالية:</p></div>
       </header>
       <ol className="delete-account-requirements">
         <li className={unsettledCollectionCount === 0 ? "is-complete" : "is-blocked"}><span><Icon name={unsettledCollectionCount === 0 ? "check" : "alert"} size={18} /></span><p>إكمال جميع معاملات التحصيل والحسابات المالية المعلّقة.</p></li>
@@ -268,11 +262,11 @@ export function DeleteAccountPage() {
       </ol>
       <div className={`delete-account-status ${eligible ? "is-ready" : "is-blocked"}`} role="status">
         <Icon name={eligible ? "check" : "alert"} size={20} />
-        <div>{eligible ? <><strong>يمكنك حذف الحساب الآن</strong><small>ستحتاج إلى كلمة المرور وكتابة عبارة التأكيد.</small></> : <><strong>لا يمكن حذف الحساب الآن</strong><small>{activeOrderCount > 0 && `${activeOrderCount} طرد نشط`}{activeOrderCount > 0 && (unsettledCollectionCount > 0 || unsettledOrderCount > 0) ? " · " : ""}{unsettledCollectionCount > 0 && `${unsettledCollectionCount} فاتورة غير مدفوعة`}{unsettledCollectionCount > 0 && unsettledOrderCount > 0 ? " · " : ""}{unsettledOrderCount > 0 && `${unsettledOrderCount} طرد بلا تحصيل مكتمل`}</small></>}</div>
+        <div>{eligible ? <><strong>يمكنك حذف الحساب الآن</strong><small>ستحتاج إلى كلمة المرور وكتابة عبارة التأكيد.</small></> : <><strong>{requestStatus ? "يلزم إتمام التسوية للحذف الفوري؛ يمكنك تقديم الطلب أعلاه" : "جارٍ التحقق من أهلية الحذف الفوري"}</strong><small>{activeOrderCount > 0 && `${activeOrderCount} طرد نشط`}{activeOrderCount > 0 && (unsettledCollectionCount > 0 || unsettledOrderCount > 0) ? " · " : ""}{unsettledCollectionCount > 0 && `${unsettledCollectionCount} فاتورة غير مدفوعة`}{unsettledCollectionCount > 0 && unsettledOrderCount > 0 ? " · " : ""}{unsettledOrderCount > 0 && `${unsettledOrderCount} طرد بلا تحصيل مكتمل`}</small></>}</div>
       </div>
     </section>
     <div className="delete-account-actions">
-      <Button variant="danger" icon="trash" full disabled={!eligible} onClick={() => setConfirmationOpen(true)}>حذف الحساب</Button>
+      <Button variant="danger" icon="trash" full disabled={!eligible} onClick={() => setConfirmationOpen(true)}>حذف الحساب فورًا بعد التسوية</Button>
       <Button variant="outline" icon="phone" full onClick={() => setView("help")}>اتصل بنا</Button>
     </div>
     {confirmationOpen && <Modal title="تأكيد حذف الحساب" className="delete-account-confirmation-modal" closeDisabled={submitting} onClose={closeConfirmation}>
@@ -367,9 +361,9 @@ const faqs = [
 ];
 
 export function HelpPage() {
-  const { setView, showToast } = useApp();
+  const { setView } = useApp();
   const [active, setActive] = useState(0);
-  return <div className="page-content animate-page"><PageHeader title="مركز المساعدة" subtitle="إجابات عن أكثر الأسئلة شيوعًا" onBack={() => setView("settings")} /><section className="help-hero"><Icon name="help" size={38} /><h2>كيف نقدر نساعدك؟</h2><p>تصفح الأسئلة الشائعة أو تواصل مع فريق الدعم على مدار الساعة.</p><Button variant="secondary" icon="phone" onClick={() => showToast("رقم الدعم: 0599000000", "info")}>اتصل بالدعم — 0599000000</Button></section><div className="faq-list">{faqs.map((faq, index) => <article className={`faq-item ${active === index ? "is-open" : ""}`} key={faq.question}><button onClick={() => setActive(active === index ? -1 : index)}><Icon name="help" size={19} /><span>{faq.question}</span><Icon name="chevronDown" size={18} /></button>{active === index && <p>{faq.answer}</p>}</article>)}</div></div>;
+  return <div className="page-content animate-page"><PageHeader title="مركز المساعدة" subtitle="إجابات عن أكثر الأسئلة شيوعًا" onBack={() => setView("settings")} /><section className="help-hero"><Icon name="help" size={38} /><h2>كيف نقدر نساعدك؟</h2><p>تصفح الأسئلة الشائعة أو تواصل مع فريق الشركة.</p><SupportContacts /></section><div className="faq-list">{faqs.map((faq, index) => <article className={`faq-item ${active === index ? "is-open" : ""}`} key={faq.question}><button onClick={() => setActive(active === index ? -1 : index)}><Icon name="help" size={19} /><span>{faq.question}</span><Icon name="chevronDown" size={18} /></button>{active === index && <p>{faq.answer}</p>}</article>)}</div></div>;
 }
 
 export function PrivacyPage() {

@@ -1,3 +1,4 @@
+import { deletionPolicy, type AccountDeletionRequestRecord } from "./account-deletion";
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -171,6 +172,8 @@ type BootstrapAdministratorConfig = {
 
 export type AlmadinaApiConfig = PasswordResetDeliveryConfig & ReverseGeocodingConfig & BootstrapAdministratorConfig & {
   webPushEnabled?: boolean;
+  supportPhone?: string;
+  supportEmail?: string;
 };
 
 class ApiRequestError extends Error {
@@ -1911,6 +1914,7 @@ function scopeDatabase(database: Database, account: User): Database {
   if (account.role === "admin") {
     return {
       ...database,
+      accountDeletionRequests: undefined,
       users: database.users.map(publicAccount),
       orders: database.orders.map((order) => orderWithoutCourierInstructions(order, true)),
     };
@@ -2057,6 +2061,11 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     if (!users.some((entry) => entry.id === administrator.id)) users.push(administrator);
   }
 
+  for (const entry of current.accountDeletionRequests ?? []) {
+    if (entry.status !== "completed" && !users.some((candidate) => candidate.id === entry.userId)) {
+      throw new ApiRequestError("عالج طلب حذف هذا الحساب من صفحة طلبات حذف الحسابات.", 409);
+    }
+  }
   const accountsById = new Map(users.map((entry) => [entry.id, entry]));
   const existingOrders = new Map(current.orders.map((order) => [order.id, order]));
   const parcelCodeClaims = { ...current.parcelCodeClaims };
@@ -2126,6 +2135,7 @@ async function mergeAdminDatabase(current: Database, submitted: Database, accoun
     collections,
     notices: [...statusUpdateNotices, ...trackingNoteNotices, ...submitted.notices],
     preferences: { ...current.preferences, ...(submitted.preferences[account.id] ? { [account.id]: submitted.preferences[account.id] } : {}) },
+    accountDeletionRequests: current.accountDeletionRequests ?? [],
     parcelCodeBatches: current.parcelCodeBatches ?? [],
     parcelCodeClaims,
     nextOrder: current.nextOrder,
@@ -2454,6 +2464,7 @@ function mergeMerchantDatabase(current: Database, submitted: Database, account: 
     preferences,
     nextOrder,
     nextCollection,
+    accountDeletionRequests: current.accountDeletionRequests ?? [],
     parcelCodeBatches: current.parcelCodeBatches ?? [],
     parcelCodeClaims,
   });
@@ -2768,6 +2779,182 @@ function accountDeletionEligibility(database: Database, account: User): AccountD
   return { activeOrderCount, unsettledCollectionCount, unsettledOrderCount };
 }
 
+function databaseWithoutAccount(current: Database, account: User): Database {
+    const deletionIds = new Set((current.accountDeletionRequests ?? []).filter((entry) => entry.userId === account.id).map((entry) => entry.id));
+    const isMerchant = account.role === "merchant";
+    const ownedOrderIds = isMerchant
+      ? new Set(current.orders.filter((order) => order.merchantId === account.id).map((order) => order.id))
+      : new Set<string>();
+    return removeLegacyDemoData({
+      ...current,
+      accountDeletionRequests: (current.accountDeletionRequests ?? []).map((entry) => entry.userId === account.id ? {
+        ...entry, userId: "", status: "completed", completedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        message: "اكتمل حذف الحساب وبياناته المرتبطة. ينتهي رابط المتابعة بعد 30 يومًا من الإتمام.",
+      } : entry),
+      users: current.users.filter((entry) => entry.id !== account.id),
+      orders: isMerchant
+        ? current.orders.filter((order) => order.merchantId !== account.id)
+        : current.orders.map((order) => order.courierId === account.id ? {
+          ...order,
+          courierId: undefined,
+          courierName: "مندوب سابق",
+          trackingEvents: order.trackingEvents?.map((event) => event.actor === account.name ? { ...event, actor: "مندوب سابق" } : event),
+        } : order),
+      recipients: isMerchant ? current.recipients.filter((recipient) => recipient.merchantId !== account.id) : current.recipients,
+      collections: isMerchant ? current.collections.filter((invoice) => invoice.merchantId !== account.id) : current.collections,
+      notices: current.notices.filter((notice) => (
+        notice.userId !== account.id && (!notice.deletionRequestId || !deletionIds.has(notice.deletionRequestId)) && (!isMerchant || !notice.orderId || !ownedOrderIds.has(notice.orderId))
+      )),
+      preferences: Object.fromEntries(Object.entries(current.preferences).filter(([accountId]) => accountId !== account.id)),
+    });
+
+}
+
+async function removeAccountCredentials(database: D1Database, account: User): Promise<void> {
+    const normalizedEmail = account.email.trim().toLowerCase();
+    const registrationCooldownKey = await sha256(`registration:request-cooldown:${normalizedEmail}`);
+    const registrationEmailKey = await sha256(`registration:request-email:${normalizedEmail}`);
+
+    await database.batch([
+      database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_webauthn_credentials WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_passkey_login_credentials WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_webauthn_challenges WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_app_locks WHERE user_id = ?").bind(account.id),
+      database.prepare("DELETE FROM almadina_password_reset_requests WHERE user_id = ?").bind(account.id),
+      database.prepare(`DELETE FROM almadina_registration_locations WHERE request_hash IN
+        (SELECT request_hash FROM almadina_registration_requests WHERE email = ?)`).bind(normalizedEmail),
+      database.prepare("DELETE FROM almadina_registration_requests WHERE email = ?").bind(normalizedEmail),
+      database.prepare("DELETE FROM almadina_rate_limits WHERE key_hash = ?").bind(registrationCooldownKey),
+      database.prepare("DELETE FROM almadina_rate_limits WHERE key_hash = ?").bind(registrationEmailKey),
+    ]);
+}
+
+function deletionEligibility(database: Database, account: User) {
+  const counts = accountDeletionEligibility(database, account);
+  return { ...counts, eligible: account.role !== "admin" && Object.values(counts).every((count) => count === 0) };
+}
+
+function deletionRequestDetails(entry: AccountDeletionRequestRecord) {
+  return { id: entry.id, status: entry.status, createdAt: entry.createdAt, updatedAt: entry.updatedAt,
+    reviewDueAt: entry.reviewDueAt, ...(entry.completedAt ? { completedAt: entry.completedAt } : {}), message: entry.message };
+}
+
+function deletionResponse(database: Database, account: User, origin: string) {
+  const entry = (database.accountDeletionRequests ?? []).find((item) => item.userId === account.id && item.status !== "completed");
+  return {
+    request: entry ? { ...deletionRequestDetails(entry), receiptUrl: `${origin}/delete-account#receipt=${entry.receiptToken}` } : null,
+    account: { name: account.name, email: account.email },
+    eligibility: deletionEligibility(database, account), policy: deletionPolicy,
+  };
+}
+
+async function deletionPayload(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const value: unknown = await request.json();
+    if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  } catch { /* Return a bounded validation error, never echo a submitted password. */ }
+  throw new ApiRequestError("بيانات الطلب غير صالحة.", 400);
+}
+
+async function requestAccountDeletion(database: D1Database, request: Request, session: AuthenticatedSession, config: AlmadinaApiConfig): Promise<Response> {
+  if (session.account.role === "admin") return json({ error: "طلبات حسابات العملاء والموظفين فقط." }, 403);
+  const payload = await deletionPayload(request);
+  if (typeof payload.password !== "string" || !payload.password || payload.password.length > 256 || payload.confirmation !== "حذف حسابي") {
+    return json({ error: "أدخل كلمة المرور واكتب «حذف حسابي» لتأكيد تقديم الطلب." }, 400);
+  }
+  await enforceEndpointRateLimit(database, "account-deletion-request", session.account.id, ACCOUNT_DELETE_ATTEMPT_LIMIT,
+    ACCOUNT_DELETE_RATE_LIMIT_WINDOW, "محاولات كثيرة. انتظر عشر دقائق ثم أعد المحاولة.");
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const account = state.database.users.find((entry) => entry.id === session.account.id);
+    if (!account) return json({ error: "لم يعد الحساب متاحًا." }, 401);
+    if (!await verifyPassword(payload.password, account.password)) return json({ error: "كلمة المرور غير صحيحة." }, 403);
+    const origin = new URL(request.url).origin;
+    if ((state.database.accountDeletionRequests ?? []).some((entry) => entry.userId === account.id && entry.status !== "completed")) {
+      return json(deletionResponse(state.database, account, origin));
+    }
+    const now = new Date();
+    const entry: AccountDeletionRequestRecord = {
+      id: uid("DEL"), userId: account.id, status: "pending", createdAt: now.toISOString(), updatedAt: now.toISOString(),
+      reviewDueAt: new Date(now.getTime() + 7 * 86400_000).toISOString(),
+      receiptToken: Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+      message: "تم تسجيل طلبك. ستراجع الإدارة الالتزامات وتوضح إجراءات التسوية هنا. تقديم الطلب لا يُسقط المبالغ المستحقة ولا يحذف الطرود النشطة.",
+    };
+    const notices: Notice[] = state.database.users.filter((user) => user.role === "admin" || user.id === account.id).map((user) => ({
+      id: uid("notice"), userId: user.id, deletionRequestId: entry.id, title: "طلب حذف حساب", icon: "shield", read: false, createdAt: entry.createdAt,
+      message: user.id === account.id ? `تم تسجيل طلب حذف حسابك: ${entry.id}. راجع حالته من إعدادات حذف الحساب.` : `طلب ${account.name} حذف حسابه. راجع طلبات حذف الحسابات: ${entry.id}.`,
+    }));
+    const next: Database = { ...state.database, accountDeletionRequests: [...(state.database.accountDeletionRequests ?? []), entry], notices: [...notices, ...state.database.notices] };
+    if (!await saveState(database, next, state.revision)) continue;
+    scheduleWebPushNotices(database, next, notices, origin, config);
+    return json(deletionResponse(next, account, origin), 201);
+  }
+  return json({ error: "تغيّرت البيانات أثناء تقديم الطلب. حدّث الحالة ثم أعد المحاولة." }, 409);
+}
+
+async function deletionReceipt(database: D1Database, request: Request): Promise<Response> {
+  await enforceEndpointRateLimit(database, "deletion-receipt", requestClientAddress(request), 30, 600, "طلبات متابعة كثيرة. حاول بعد قليل.");
+  const payload = await deletionPayload(request);
+  if (typeof payload.receiptToken !== "string" || !/^[a-f0-9]{64}$/.test(payload.receiptToken)) return json({ error: "رابط المتابعة غير صالح أو انتهت صلاحيته." }, 404);
+  const state = await readState(database);
+  const entry = state.database.accountDeletionRequests?.find((item) => item.receiptToken === payload.receiptToken);
+  if (!entry) return json({ error: "رابط المتابعة غير صالح أو انتهت صلاحيته." }, 404);
+  return json({ request: deletionRequestDetails(entry), policy: deletionPolicy });
+}
+
+function publicConfiguration(config: AlmadinaApiConfig, origin: string) {
+  const phone = config.supportPhone?.trim().replace(/[ ()-]/g, "") ?? "";
+  const email = config.supportEmail?.trim() ?? "";
+  return { supportPhone: /^\+?\d{7,15}$/.test(phone) ? phone : "", supportEmail: validEmail(email) ? email : "",
+    privacyUrl: `${origin}/privacy`, deletionUrl: `${origin}/delete-account`, supportUrl: `${origin}/support`, policy: deletionPolicy };
+}
+
+async function manageDeletionRequests(database: D1Database, request: Request, session: AuthenticatedSession, config: AlmadinaApiConfig): Promise<Response> {
+  if (session.account.role !== "admin") return json({ error: "هذه الصفحة متاحة للمسؤول فقط." }, 403);
+  if (request.method === "GET") {
+    const state = await readState(database);
+    return json({ requests: (state.database.accountDeletionRequests ?? []).map((entry) => {
+      const account = state.database.users.find((user) => user.id === entry.userId);
+      return { request: deletionRequestDetails(entry), account: account ? { id: account.id, name: account.name, email: account.email, role: account.role } : null,
+        eligibility: account ? deletionEligibility(state.database, account) : null };
+    }).reverse(), policy: deletionPolicy });
+  }
+  const payload = await deletionPayload(request);
+  if (typeof payload.id !== "string" || !["review", "complete"].includes(String(payload.action))) return json({ error: "اختر طلبًا وإجراءً صحيحًا." }, 400);
+  if (payload.action === "complete" && payload.confirmation !== "إتمام الحذف") return json({ error: "أكد إتمام الحذف النهائي لهذا الحساب." }, 400);
+  const message = typeof payload.message === "string" ? payload.message.trim() : "";
+  const due = typeof payload.reviewDueAt === "string" ? Date.parse(payload.reviewDueAt) : NaN;
+  if (payload.action === "review" && (!message || message.length > 1500 || !Number.isFinite(due) || due <= Date.now() || due > Date.now() + 30 * 86400_000)) {
+    return json({ error: "اكتب إجراءات التسوية وحدد موعد متابعة قادمًا خلال 30 يومًا." }, 400);
+  }
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const state = await readState(database);
+    const entry = state.database.accountDeletionRequests?.find((item) => item.id === payload.id);
+    if (!entry) return json({ error: "الطلب غير موجود أو انتهت مدة متابعته." }, 404);
+    if (entry.status === "completed") return json({ success: true, request: deletionRequestDetails(entry) });
+    const account = state.database.users.find((user) => user.id === entry.userId);
+    if (!account || account.role === "admin") return json({ error: "حساب الطلب غير متاح للمعالجة." }, 409);
+    if (payload.action === "complete") {
+      const eligibility = deletionEligibility(state.database, account);
+      if (!eligibility.eligible) return json({ error: "أكمل تسوية الطرود والفواتير قبل تنفيذ الحذف. يمكنك تحديث إجراءات المتابعة الآن.", eligibility }, 409);
+      const next = databaseWithoutAccount(state.database, account);
+      if (!await saveState(database, next, state.revision)) continue;
+      await removeAccountCredentials(database, account);
+      return json({ success: true, request: deletionRequestDetails(next.accountDeletionRequests!.find((item) => item.id === entry.id)!) });
+    }
+    const updated: AccountDeletionRequestRecord = { ...entry, status: "processing", updatedAt: new Date().toISOString(), reviewDueAt: new Date(due).toISOString(), message };
+    const notice: Notice = { id: uid("notice"), userId: account.id, deletionRequestId: entry.id, title: "تحديث طلب حذف الحساب", message: "حدّثت الإدارة حالة طلب الحذف وإجراءات المتابعة. راجع صفحة حذف الحساب.", icon: "shield", read: false, createdAt: updated.updatedAt };
+    const next: Database = { ...state.database, accountDeletionRequests: state.database.accountDeletionRequests!.map((item) => item.id === entry.id ? updated : item), notices: [notice, ...state.database.notices] };
+    if (!await saveState(database, next, state.revision)) continue;
+    scheduleWebPushNotices(database, next, [notice], new URL(request.url).origin, config);
+    return json({ success: true, request: deletionRequestDetails(updated) });
+  }
+  return json({ error: "تغيّرت بيانات الطلب. حدّث القائمة وأعد المحاولة." }, 409);
+}
+
 async function deleteOwnAccount(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
   if (session.account.role === "admin") return json({ error: "لا يمكن حذف حساب المسؤول من داخل التطبيق." }, 403);
 
@@ -2807,50 +2994,11 @@ async function deleteOwnAccount(database: D1Database, request: Request, session:
       }, 409);
     }
 
-    const isMerchant = account.role === "merchant";
-    const ownedOrderIds = isMerchant
-      ? new Set(state.database.orders.filter((order) => order.merchantId === account.id).map((order) => order.id))
-      : new Set<string>();
-    const next: Database = removeLegacyDemoData({
-      ...state.database,
-      users: state.database.users.filter((entry) => entry.id !== account.id),
-      orders: isMerchant
-        ? state.database.orders.filter((order) => order.merchantId !== account.id)
-        : state.database.orders.map((order) => order.courierId === account.id ? {
-          ...order,
-          courierId: undefined,
-          courierName: "مندوب سابق",
-          trackingEvents: order.trackingEvents?.map((event) => event.actor === account.name ? { ...event, actor: "مندوب سابق" } : event),
-        } : order),
-      recipients: isMerchant ? state.database.recipients.filter((recipient) => recipient.merchantId !== account.id) : state.database.recipients,
-      collections: isMerchant ? state.database.collections.filter((invoice) => invoice.merchantId !== account.id) : state.database.collections,
-      notices: state.database.notices.filter((notice) => (
-        notice.userId !== account.id && (!isMerchant || !notice.orderId || !ownedOrderIds.has(notice.orderId))
-      )),
-      preferences: Object.fromEntries(Object.entries(state.database.preferences).filter(([accountId]) => accountId !== account.id)),
-    });
+    const next = databaseWithoutAccount(state.database, account);
 
     if (!await saveState(database, next, state.revision)) continue;
 
-    const normalizedEmail = account.email.trim().toLowerCase();
-    const registrationCooldownKey = await sha256(`registration:request-cooldown:${normalizedEmail}`);
-    const registrationEmailKey = await sha256(`registration:request-email:${normalizedEmail}`);
-
-    await database.batch([
-      database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE user_id = ?").bind(account.id),
-      database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(account.id),
-      database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(account.id),
-      database.prepare("DELETE FROM almadina_webauthn_credentials WHERE user_id = ?").bind(account.id),
-      database.prepare("DELETE FROM almadina_passkey_login_credentials WHERE user_id = ?").bind(account.id),
-      database.prepare("DELETE FROM almadina_webauthn_challenges WHERE user_id = ?").bind(account.id),
-      database.prepare("DELETE FROM almadina_app_locks WHERE user_id = ?").bind(account.id),
-      database.prepare("DELETE FROM almadina_password_reset_requests WHERE user_id = ?").bind(account.id),
-      database.prepare(`DELETE FROM almadina_registration_locations WHERE request_hash IN
-        (SELECT request_hash FROM almadina_registration_requests WHERE email = ?)`).bind(normalizedEmail),
-      database.prepare("DELETE FROM almadina_registration_requests WHERE email = ?").bind(normalizedEmail),
-      database.prepare("DELETE FROM almadina_rate_limits WHERE key_hash = ?").bind(registrationCooldownKey),
-      database.prepare("DELETE FROM almadina_rate_limits WHERE key_hash = ?").bind(registrationEmailKey),
-    ]);
+    await removeAccountCredentials(database, account);
     return json({ success: true }, 200, { "Set-Cookie": sessionCookie(request, "", 0) });
   }
 
@@ -3695,6 +3843,8 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     if (validatedRequest instanceof Response) return validatedRequest;
     request = validatedRequest;
 
+    if (url.pathname === "/api/almadina/public/config" && request.method === "GET") return json(publicConfiguration(config, url.origin));
+
     await ensureDatabase(database, config);
 
     if (url.pathname === "/api/almadina/login" && request.method === "POST") return await login(database, request, config);
@@ -3708,6 +3858,8 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     if (url.pathname === "/api/almadina/passkey/login/options" && request.method === "POST") return await publicPasskeyLoginOptions(database, request);
     if (url.pathname === "/api/almadina/passkey/login/verify" && request.method === "POST") return await verifyPublicPasskeyLogin(database, request);
     if (url.pathname === "/api/almadina/track" && request.method === "GET") return await publicTracking(database, request);
+
+    if (url.pathname === "/api/almadina/account/deletion-receipt" && request.method === "POST") return await deletionReceipt(database, request);
 
     const session = await authenticate(database, request);
 
@@ -3798,6 +3950,12 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     if (url.pathname === "/api/almadina/trash/purge" && request.method === "POST") {
       return await purgeTrash(database, request, session);
     }
+
+    if (url.pathname === "/api/almadina/account/deletion-request") {
+      if (request.method === "GET") return json(deletionResponse(session.state.database, session.account, url.origin));
+      if (request.method === "POST") return await requestAccountDeletion(database, request, session, config);
+    }
+    if (url.pathname === "/api/almadina/admin/deletion-requests" && (request.method === "GET" || request.method === "POST")) return await manageDeletionRequests(database, request, session, config);
 
     if (url.pathname === "/api/almadina/account/delete" && request.method === "POST") {
       return await deleteOwnAccount(database, request, session);

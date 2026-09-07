@@ -1,3 +1,4 @@
+import { retainDeletionRequests, type AccountDeletionRequestRecord } from "./account-deletion.ts";
 import type { IconName } from "../components/icon";
 import { INTERIOR_LOCALITIES, WEST_BANK_LOCALITIES } from "./palestine-locations.generated.ts";
 
@@ -163,6 +164,7 @@ export type Notice = {
   createdAt: string;
   orderId?: string;
   broadcastId?: string;
+  deletionRequestId?: string;
   audience?: NoticeAudience;
 };
 
@@ -214,6 +216,7 @@ export type Database = {
   nextCollection: number;
   parcelCodeBatches?: ParcelCodeBatch[];
   parcelCodeClaims?: Record<string, ParcelCodeClaim>;
+  accountDeletionRequests?: AccountDeletionRequestRecord[];
 };
 
 export const defaultPreferences: Preferences = {
@@ -558,6 +561,7 @@ export function removeLegacyDemoData(database: Database & { compensations?: unkn
     nextCollection: Math.max(618000, database.nextCollection || 618000),
     parcelCodeBatches: database.parcelCodeBatches ?? [],
     parcelCodeClaims,
+    accountDeletionRequests: retainDeletionRequests(database.accountDeletionRequests),
   };
 }
 
