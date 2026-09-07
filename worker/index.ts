@@ -26,6 +26,8 @@ function passwordResetDeliveryConfig(env: Env, ctx: ExecutionContext): AlmadinaA
     brevoFromEmail: env.BREVO_FROM_EMAIL,
     brevoFromName: env.BREVO_FROM_NAME,
     geoapifyApiKey: env.GEOAPIFY_API_KEY,
+    supportPhone: env.ALMADINA_SUPPORT_PHONE,
+    supportEmail: env.ALMADINA_SUPPORT_EMAIL,
     bootstrapAdminEmail: env.ALMADINA_ADMIN_EMAIL,
     bootstrapAdminPassword: env.ALMADINA_ADMIN_PASSWORD,
     bootstrapAdminPhone: env.ALMADINA_ADMIN_PHONE,

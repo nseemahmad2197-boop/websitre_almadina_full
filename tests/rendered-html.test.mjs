@@ -1529,7 +1529,7 @@ test("shows a reference-style account deletion page and performs deletion only t
   assert.match(shell, /const showCreate = user\?\.role === "merchant" && \(view === "home" \|\| view === "shipments"\)/);
   assert.doesNotMatch(shell, /BottomNavigation/);
   assert.match(settings, /export function DeleteAccountPage\(\)/);
-  assert.match(settings, /قبل حذف حسابك/);
+  assert.match(settings, /الحذف الفوري بعد التسوية/);
   assert.match(settings, /إكمال جميع معاملات التحصيل/);
   assert.match(settings, /ألا توجد طرود نشطة/);
   assert.match(settings, /إدراج كل طرد مكتمل في فاتورة تحصيل تم تسليمها/);
@@ -1776,5 +1776,19 @@ test("renders camera-only QR assignment on parcel details without manual code en
   } finally {
     await bundled.close();
     await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test("serves privacy, deletion and support pages without an app session", async () => {
+  const { default: worker } = await import(new URL("../dist/server/index.js", import.meta.url));
+  for (const [path, title] of [["/privacy", "الخصوصية وشروط الخدمة"], ["/delete-account", "حذف حساب المدينة إكسبرس"], ["/support", "دعم المدينة إكسبرس"]]) {
+    const response = await worker.fetch(new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+    assert.equal(response.status, 200, path);
+    assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+    const html = await response.text();
+    assert.ok(html.includes(title), path);
+    assert.match(html, /href="\/delete-account"/);
+    assert.doesNotMatch(html, /session-loading/);
+    assert.doesNotMatch(html, /0599000000/);
   }
 });

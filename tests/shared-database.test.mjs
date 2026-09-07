@@ -763,6 +763,8 @@ async function loadWorker() {
     const { handleAlmadinaApi } = await import(process.env.ALMADINA_SERVER_TEST_MODULE);
     return {
       fetch: (request, environment, context) => handleAlmadinaApi(request, environment.DB, {
+        supportPhone: environment.ALMADINA_SUPPORT_PHONE,
+        supportEmail: environment.ALMADINA_SUPPORT_EMAIL,
         geoapifyApiKey: environment.GEOAPIFY_API_KEY,
         reverseGeocoder: environment.REVERSE_GEOCODER,
         sender: environment.PASSWORD_RESET_SENDER,
@@ -5221,4 +5223,118 @@ test("purged invoices retain billing protection and become visible if payment is
   assert.equal(canPurgeOrder(reopened, db.users[0], db.orders[0]), false);
   assert.equal(hiddenCollectionIds(reopened, "owner").size, 0);
   assert.equal(purgedCollectionIds(reopened, "owner").size, 0);
+});
+
+test("account deletion requests preserve obligations, prevent spoofing, and complete with a private expiring receipt", async () => {
+  const worker = await loadWorker();
+  const db = new FakeD1Database();
+  const merchant = await call(worker, db, "register", { method: "POST", payload: accountPayload("صاحب طلب الحذف", "request-delete@example.test", "0591231234") });
+  assert.equal(merchant.status, 201);
+  const cookie = sessionFrom(merchant), id = merchant.body.userId;
+  const other = await call(worker, db, "register", { method: "POST", payload: accountPayload("حساب مستقل", "request-other@example.test", "0591231235") });
+  const otherCookie = sessionFrom(other);
+  const admin = await call(worker, db, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  const adminCookie = sessionFrom(admin);
+  const now = new Date().toISOString();
+  const seed = JSON.parse(db.state.payload);
+  seed.orders.push({ id: "deletion-request-order", address: "عنوان", pickupAddress: "عنوان استلام", content: "اختبار", dimensions: "20 × 20 × 20 سم", notes: "", privateNotes: "", reference: "", type: "طرد عادي", weight: "0 - 5 كغم", merchantId: id, status: "ready", trackingNumber: "ALX-1000001", createdAt: now, updatedAt: now, courierName: "", amount: 100, deliveryFee: 20, returnFee: 0, merchantName: "صاحب طلب الحذف", merchantStore: "متجر", recipientName: "مستلم", recipientPhone: "0591231234", city: "نابلس", deleted: true });
+  seed.collections.push({ id: "deletion-request-invoice", authorizedRecipient: "", merchantId: id, merchantName: "صاحب طلب الحذف", invoiceNumber: "#800001", orderIds: ["deletion-request-order"], status: "pending", netAmount: 80, grossAmount: 100, deliveryFees: 20, returnFees: 0, createdAt: now, updatedAt: now, scheduledAt: now, verificationCode: "4728", deliveredCount: 0, returnedCount: 0 });
+  db.state.payload = JSON.stringify(seed);
+  const credentials = { password: "Customer@123", confirmation: "حذف حسابي" };
+  assert.equal((await call(worker, db, "account/deletion-request", { method: "POST", payload: credentials })).status, 401);
+  assert.equal((await call(worker, db, "account/deletion-request", { method: "POST", cookie, payload: { ...credentials, password: "invalid" } })).status, 403);
+  assert.equal((await call(worker, db, "account/deletion-request", { method: "POST", cookie, payload: { ...credentials, confirmation: "نعم" } })).status, 400);
+  const created = await call(worker, db, "account/deletion-request", { method: "POST", cookie, payload: { ...credentials, userId: other.body.userId, status: "completed", eligible: true } });
+  assert.equal(created.status, 201, created.body.error);
+  assert.equal(created.body.request.status, "pending");
+  assert.equal(created.body.eligibility.activeOrderCount, 1, "soft-deleting a parcel must not bypass settlement");
+  assert.equal(created.body.eligibility.unsettledCollectionCount, 1);
+  assert.equal(created.body.eligibility.eligible, false);
+  assert.equal(Date.parse(created.body.request.reviewDueAt) - Date.parse(created.body.request.createdAt), 7 * 86400_000);
+  const receiptUrl = new URL(created.body.request.receiptUrl);
+  assert.equal(receiptUrl.pathname, "/delete-account");
+  assert.equal(receiptUrl.search, "");
+  const receiptToken = new URLSearchParams(receiptUrl.hash.slice(1)).get("receipt");
+  assert.match(receiptToken, /^[a-f0-9]{64}$/);
+  assert.equal(created.body.request.receiptToken, undefined);
+  const stored = JSON.parse(db.state.payload);
+  assert.equal(stored.accountDeletionRequests.length, 1);
+  assert.equal(stored.accountDeletionRequests[0].userId, id);
+  assert.deepEqual(stored.orders.map((order) => order.id), seed.orders.map((order) => order.id));
+  assert.equal(stored.collections[0].status, "pending");
+  assert.equal((await call(worker, db, "database", { cookie })).status, 200, "submitting a request keeps the account session active");
+  const duplicate = await call(worker, db, "account/deletion-request", { method: "POST", cookie, payload: credentials });
+  assert.equal(duplicate.status, 200);
+  assert.deepEqual(duplicate.body.request, created.body.request);
+  assert.equal(JSON.parse(db.state.payload).notices.length, stored.notices.length);
+  assert.equal((await call(worker, db, "account/deletion-request", { cookie: otherCookie })).body.request, null);
+  assert.equal((await call(worker, db, "admin/deletion-requests", { cookie })).status, 403);
+  const adminSnapshot = await call(worker, db, "database", { cookie: adminCookie });
+  assert.equal(adminSnapshot.body.database.accountDeletionRequests, undefined);
+  assert.equal(JSON.stringify(adminSnapshot.body).includes(receiptToken), false);
+  const changed = await call(worker, db, "database", { method: "PUT", cookie: adminCookie, payload: { revision: adminSnapshot.body.revision, database: { ...adminSnapshot.body.database, accountDeletionRequests: [] } } });
+  assert.equal(changed.status, 200, changed.body.error);
+  assert.equal((await call(worker, db, "account/deletion-request", { cookie })).body.request.id, created.body.request.id);
+  const userSnapshot = await call(worker, db, "database", { cookie });
+  const forged = await call(worker, db, "database", { method: "PUT", cookie, payload: { revision: userSnapshot.body.revision, database: { ...userSnapshot.body.database, accountDeletionRequests: [{ ...stored.accountDeletionRequests[0], status: "completed" }] } } });
+  assert.equal(forged.status, 200, forged.body.error);
+  assert.equal((await call(worker, db, "account/deletion-request", { cookie })).body.request.status, "pending");
+  const queue = await call(worker, db, "admin/deletion-requests", { cookie: adminCookie });
+  assert.equal(queue.status, 200);
+  assert.equal(queue.body.requests[0].account.id, id);
+  assert.equal(JSON.stringify(queue.body).includes(receiptToken), false);
+  const action = { id: created.body.request.id, action: "complete", confirmation: "إتمام الحذف" };
+  assert.equal((await call(worker, db, "admin/deletion-requests", { method: "POST", cookie: otherCookie, payload: action })).status, 403);
+  assert.equal((await call(worker, db, "admin/deletion-requests", { method: "POST", cookie: adminCookie, payload: action })).status, 409);
+  assert.equal((await call(worker, db, "account/delete", { method: "POST", cookie, payload: credentials })).status, 409);
+  const reviewDueAt = new Date(Date.now() + 2 * 86400_000).toISOString();
+  const reviewed = await call(worker, db, "admin/deletion-requests", { method: "POST", cookie: adminCookie, payload: { id: action.id, action: "review", message: "تسليم الطرد ثم إدراجه في فاتورة وتسوية قيمتها.", reviewDueAt } });
+  assert.equal(reviewed.status, 200, reviewed.body.error);
+  const status = await call(worker, db, "account/deletion-request", { cookie });
+  assert.equal(status.body.request.status, "processing");
+  assert.equal(status.body.request.reviewDueAt, reviewDueAt);
+  assert.match(status.body.request.message, /تسليم الطرد/);
+  const receipt = await call(worker, db, "account/deletion-receipt", { method: "POST", payload: { receiptToken } });
+  assert.equal(receipt.status, 200);
+  assert.equal(receipt.body.request.status, "processing");
+  for (const secret of ["request-delete@example.test", "0591231234", "userId", "receiptToken", "eligibility"]) assert.equal(JSON.stringify(receipt.body).includes(secret), false);
+  assert.equal((await call(worker, db, "account/deletion-receipt", { method: "POST", payload: { receiptToken: "a".repeat(64) } })).status, 404);
+  const settled = JSON.parse(db.state.payload);
+  settled.orders[0].status = "delivered";
+  settled.collections[0].status = "paid"; settled.collections[0].paidAt = now;
+  db.state.payload = JSON.stringify(settled);
+  assert.equal((await call(worker, db, "account/deletion-request", { cookie })).body.eligibility.eligible, true);
+  assert.equal((await call(worker, db, "admin/deletion-requests", { method: "POST", cookie: adminCookie, payload: { ...action, confirmation: "" } })).status, 400);
+  const completed = await call(worker, db, "admin/deletion-requests", { method: "POST", cookie: adminCookie, payload: action });
+  assert.equal(completed.status, 200, completed.body.error);
+  assert.equal(completed.body.request.status, "completed");
+  assert.equal((await call(worker, db, "database", { cookie })).status, 401);
+  assert.equal((await call(worker, db, "database", { cookie: otherCookie })).status, 200);
+  const finished = JSON.parse(db.state.payload);
+  assert.equal(finished.users.some((user) => user.id === id), false);
+  assert.equal(finished.orders.some((order) => order.merchantId === id), false);
+  assert.equal(finished.collections.some((invoice) => invoice.merchantId === id), false);
+  assert.equal(finished.accountDeletionRequests[0].userId, "");
+  assert.equal(finished.notices.some((notice) => notice.deletionRequestId === action.id), false);
+  assert.equal([...db.sessions.values()].some((entry) => entry.user_id === id), false);
+  const receiptAfter = await call(worker, db, "account/deletion-receipt", { method: "POST", payload: { receiptToken } });
+  assert.equal(receiptAfter.status, 200);
+  assert.equal(receiptAfter.body.request.status, "completed");
+  finished.accountDeletionRequests[0].completedAt = new Date(Date.now() - 31 * 86400_000).toISOString();
+  db.state.payload = JSON.stringify(finished);
+  assert.equal((await call(worker, db, "account/deletion-receipt", { method: "POST", payload: { receiptToken } })).status, 404);
+});
+
+test("public service configuration exposes only explicitly configured contacts and deletion URLs", async () => {
+  const worker = await loadWorker(), db = new FakeD1Database();
+  const empty = await call(worker, db, "public/config");
+  assert.equal(empty.status, 200);
+  assert.equal(empty.body.supportPhone, "");
+  assert.equal(empty.body.supportEmail, "");
+  assert.equal(empty.body.privacyUrl, "http://almadina.test/privacy");
+  assert.equal(empty.body.deletionUrl, "http://almadina.test/delete-account");
+  const configured = await call(worker, db, "public/config", { environment: { ALMADINA_SUPPORT_PHONE: "+970 59 123 4567", ALMADINA_SUPPORT_EMAIL: "support@example.test" } });
+  assert.equal(configured.body.supportPhone, "+970591234567");
+  assert.equal(configured.body.supportEmail, "support@example.test");
+  assert.equal(Object.hasOwn(configured.body, "bootstrapAdminEmail"), false);
 });

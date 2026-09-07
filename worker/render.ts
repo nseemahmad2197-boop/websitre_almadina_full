@@ -99,6 +99,8 @@ function passwordResetDeliveryConfig(env: Env | undefined, ctx: ExecutionContext
     brevoFromEmail: process.env.BREVO_FROM_EMAIL,
     brevoFromName: process.env.BREVO_FROM_NAME,
     geoapifyApiKey: process.env.GEOAPIFY_API_KEY,
+    supportPhone: process.env.ALMADINA_SUPPORT_PHONE,
+    supportEmail: process.env.ALMADINA_SUPPORT_EMAIL,
     bootstrapAdminEmail: process.env.ALMADINA_ADMIN_EMAIL,
     bootstrapAdminPassword: process.env.ALMADINA_ADMIN_PASSWORD,
     bootstrapAdminPhone: process.env.ALMADINA_ADMIN_PHONE,
