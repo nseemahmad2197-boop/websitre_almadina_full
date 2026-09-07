@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { Icon } from "./icon";
+import { Button } from "./ui";
 import { useApp } from "../lib/app-context";
 import { canHideCollection, setCollectionHidden } from "../lib/collection-visibility";
 import type { CollectionInvoice, Order } from "../lib/data";
@@ -86,8 +87,16 @@ export function DeleteParcelRow({ order, children }: { order: Order; children: R
 
 export function DeleteInvoiceRow({ invoice, children }: { invoice: CollectionInvoice; children: ReactNode }) {
   const { user, updateDatabase, confirm } = useApp();
-  return <SwipeDelete enabled={canHideCollection(user, invoice)} label={`حذف الفاتورة ${invoice.invoiceNumber}`} onDelete={() => confirm({
-    title: "حذف الفاتورة من قائمتك؟", message: "يمكن استعادتها من المحذوفات. يبقى سجل التسوية محفوظًا ولا تتغير مبالغ التحصيل.", confirmLabel: "حذف من قائمتي", danger: true,
+  const allowed = canHideCollection(user, invoice);
+  const requestRemoval = () => confirm({
+    title: "إزالة الفاتورة من قائمتك؟", message: "ستُنقل الفاتورة إلى المحذوفات ويمكن استعادتها. يبقى سجل التسوية محفوظًا ولا تتغير مبالغ التحصيل.", confirmLabel: "نقل إلى المحذوفات", danger: true,
     onConfirm: () => { if (user) updateDatabase((current) => setCollectionHidden(current, user.id, invoice.id, true)); },
-  })}>{children}</SwipeDelete>;
+  });
+  if (!allowed) return <>{children}</>;
+  return <div className="invoice-row">
+    <SwipeDelete label={`حذف الفاتورة ${invoice.invoiceNumber}`} onDelete={requestRemoval}>{children}</SwipeDelete>
+    <div className="invoice-row__actions">
+      <Button type="button" variant="danger" icon="trash" aria-label={`إزالة الفاتورة ${invoice.invoiceNumber}`} onClick={requestRemoval}>إزالة الفاتورة</Button>
+    </div>
+  </div>;
 }

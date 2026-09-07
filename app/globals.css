@@ -707,6 +707,9 @@ html[data-theme="dark"] .alert-banner { background: #30271a; }
 .collection-card__numbers > strong small { font-size: 9px; }
 .collection-card__numbers > span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
 .collection-card__numbers > span > svg { color: var(--green); }
+.invoice-row { display: grid; gap: 8px; min-width: 0; }
+.invoice-row__actions { display: flex; justify-content: flex-end; }
+.invoice-row__actions > .button { min-height: 44px; max-width: 100%; white-space: normal; font-size: 0.875rem; }
 .collection-amount { display: inline-flex; max-width: 100%; align-items: center; gap: 5px; direction: rtl; vertical-align: middle; }
 .collection-amount > bdi { overflow: hidden; color: inherit; font: inherit; text-overflow: ellipsis; white-space: nowrap; }
 .collection-amount--due > bdi { color: #c35a52; }
@@ -1624,7 +1627,7 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 .swipe-row__keyboard:focus-visible { width: auto; height: auto; padding: 10px; clip-path: none; background: var(--surface); color: var(--text); border: 2px solid var(--green); border-radius: 8px; }
 .swipe-row__delete:focus-visible { outline: 3px solid white; outline-offset: -5px; }
 @media (prefers-reduced-motion: reduce) { .swipe-row__content { transition: none; } }
-@media print { .swipe-row { overflow: visible; } .swipe-row__content { transform: none; } .swipe-row__delete, .swipe-row__keyboard { display: none; } }
+@media print { .swipe-row { overflow: visible; } .swipe-row__content { transform: none; } .swipe-row__delete, .swipe-row__keyboard, .invoice-row__actions { display: none; } }
 
 /* Trash selection keeps touch targets and actions readable on narrow screens. */
 .trash-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
