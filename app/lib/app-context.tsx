@@ -60,6 +60,7 @@ export type AppContextValue = {
   createParcels: (orders: Order[], recipients?: Recipient[]) => Promise<boolean>;
   assignParcelCode: (orderId: string, trackingNumber: string) => Promise<boolean>;
   generateParcelCodes: (requestId: string, count: number, label: string) => Promise<boolean>;
+  purgeTrash: (orderIds: string[], invoiceIds: string[]) => Promise<boolean>;
   updatePreferences: (values: Partial<Preferences>) => void;
   setNotificationSounds: (enabled: boolean) => Promise<boolean>;
   enablePhoneNotifications: () => Promise<boolean>;

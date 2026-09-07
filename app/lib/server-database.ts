@@ -10,7 +10,7 @@ import {
 } from "@simplewebauthn/server";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, createTrackingEvent, getDeliveryFee, getOrderDimensions, getOrderOversizeFee, getOrderTrackingEvents, getReturnFee, getStatus, getWeightFee, isOrderInvoicedForCurrentShipment, normalizeMembership, normalizeParcelCode, normalizeWeightOption, removeLegacyDemoData, resolveDeliveryRegion, RETURN_PRICING_VERSION, uid, type CollectionInvoice, type Database, type ParcelCodeClaim, type ParcelCodeBatch, type LinkedDevice, type LinkedDeviceType, type Notice, type Order, type OrderStatus, type Preferences, type Recipient, type User } from "./data";
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
-import { canHideCollection, normalizeCollectionVisibility } from "./collection-visibility";
+import { canHideCollection, normalizeCollectionVisibility, preservePurgedCollections, purgeSelectedTrash } from "./collection-visibility";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
 import { generateVapidKeyPair, sendWebPushNotification, WebPushDeliveryError, type VapidKeyPair, type WebPushMessage, type WebPushSubscriptionRecord } from "./web-push";
 
@@ -2691,6 +2691,26 @@ async function broadcastNotice(database: D1Database, request: Request, session: 
     : json({ error: "لم يعد حساب المسؤول متاحًا." }, 403);
 }
 
+async function purgeTrash(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  let payload: { revision?: unknown; orderIds?: unknown; invoiceIds?: unknown };
+  try { payload = await request.json(); } catch { return json({ error: "بيانات الحذف غير صالحة." }, 400); }
+  const validIds = (value: unknown): value is string[] => Array.isArray(value) && value.length <= 5_000 && value.every((id) => typeof id === "string" && id.length > 0 && id.length <= 160 && id === id.trim());
+  if (!payload || !Number.isSafeInteger(payload.revision) || !validIds(payload.orderIds) || !validIds(payload.invoiceIds) || payload.orderIds.length + payload.invoiceIds.length === 0) {
+    return json({ error: "اختر الطرود أو الفواتير المطلوب حذفها من السلة." }, 400);
+  }
+  if (session.account.role !== "admin" && session.account.role !== "merchant") return json({ error: "لا تملك صلاحية الحذف من سلة المحذوفات." }, 403);
+  if (payload.revision !== session.state.revision) return json({ error: "تغيّرت المحذوفات من جهاز آخر. حدّث القائمة وراجع التحديد قبل الحذف.", ...snapshot(session.state, session.account) }, 409);
+  let next: Database;
+  try { next = purgeSelectedTrash(session.state.database, session.account.id, [...new Set(payload.orderIds)], [...new Set(payload.invoiceIds)]); }
+  catch (error) { return json({ error: error instanceof Error ? error.message : "لا يمكن حذف العناصر المحددة." }, 403); }
+  if (!await saveState(database, next, session.state.revision)) {
+    const latest = await readState(database);
+    const account = latest.database.users.find((entry) => entry.id === session.account.id);
+    return account ? json({ error: "تغيّرت البيانات أثناء الحذف. حدّث القائمة وأعد اختيار العناصر.", ...snapshot(latest, account) }, 409) : json({ error: "لم يعد الحساب متاحًا." }, 401);
+  }
+  return json(snapshot({ database: next, revision: session.state.revision + 1 }, session.account));
+}
+
 async function clearNotices(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
   const submitted = await request.json() as unknown;
   if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) return json({ error: "بيانات مسح الإشعارات غير صالحة." }, 400);
@@ -3775,6 +3795,10 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
       return await clearNotices(database, request, session);
     }
 
+    if (url.pathname === "/api/almadina/trash/purge" && request.method === "POST") {
+      return await purgeTrash(database, request, session);
+    }
+
     if (url.pathname === "/api/almadina/account/delete" && request.method === "POST") {
       return await deleteOwnAccount(database, request, session);
     }
@@ -3834,7 +3858,7 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
         : session.account.role === "merchant"
           ? mergeMerchantDatabase(session.state.database, payload.database, session.account)
           : mergeCourierDatabase(session.state.database, payload.database, session.account);
-      const next = normalizeCollectionVisibility(merged);
+      const next = normalizeCollectionVisibility(preservePurgedCollections(session.state.database, merged));
       const existingNoticeIds = new Set(session.state.database.notices.map((notice) => notice.id));
       const newNotices = next.notices.filter((notice) => !existingNoticeIds.has(notice.id));
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
 import { downloadDocument, importTemplate, ordersCsv } from "../lib/download";
 import { createTrackingEvent, deliveryLocalities, formatDate, getDeliveryFee, getOversizeFee, getReturnFee, getReturnMembershipPrices, getWeightFee, governorates, isOrderInvoicedForCurrentShipment, money, normalizeWeightOption, parseDimensionCm, relativeDate, resolveDeliveryRegion, uid, type CollectionInvoice, type Notice, type Order } from "../lib/data";
@@ -8,7 +8,7 @@ import { parseParcelImportCsv, type ParcelImportCsvLayout, type ParcelImportRow 
 import { OrderCard } from "./dashboard";
 import { Icon } from "./icon";
 import { DeleteInvoiceRow } from "./swipe-delete";
-import { canHideCollection, hiddenCollectionIds, setCollectionHidden } from "../lib/collection-visibility";
+import { canHideCollection, canPurgeOrder, hiddenCollectionIds, purgedCollectionIds, setCollectionHidden } from "../lib/collection-visibility";
 import { Avatar, Button, CollectionAmount, EmptyState, Field, IconButton, Modal, PageHeader, SectionCard } from "./ui";
 
 export function ReturnsPage() {
@@ -279,20 +279,59 @@ export function NotificationsPage() {
 }
 
 export function TrashPage() {
-  const { database, user, updateDatabase, setView, confirm } = useApp();
+  const { database, user, updateDatabase, purgeTrash, setView, confirm } = useApp();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [purging, setPurging] = useState(false);
   const deleted = database.orders.filter((order) => order.deleted && (user?.role === "admin" || (user?.role === "merchant" && order.merchantId === user.id)));
   const hiddenIds = hiddenCollectionIds(database, user?.id ?? "");
-  const invoices = database.collections.filter((invoice) => hiddenIds.has(invoice.id) && canHideCollection(user, invoice));
+  const purgedIds = purgedCollectionIds(database, user?.id ?? "");
+  const invoices = database.collections.filter((invoice) => hiddenIds.has(invoice.id) && !purgedIds.has(invoice.id) && canHideCollection(user, invoice));
+  const eligibleKeys = [...deleted.filter((order) => canPurgeOrder(database, user, order)).map((order) => `order:${order.id}`), ...invoices.map((invoice) => `invoice:${invoice.id}`)];
+  const orderIds = deleted.filter((order) => selected.has(`order:${order.id}`) && canPurgeOrder(database, user, order)).map((order) => order.id);
+  const invoiceIds = invoices.filter((invoice) => selected.has(`invoice:${invoice.id}`)).map((invoice) => invoice.id);
+  const count = orderIds.length + invoiceIds.length;
+  useEffect(() => { setSelected(new Set()); }, [user?.id]);
+  useEffect(() => {
+    const account = database.users.find((entry) => entry.id === user?.id) ?? null;
+    const hidden = hiddenCollectionIds(database, user?.id ?? "");
+    const purged = purgedCollectionIds(database, user?.id ?? "");
+    const allowed = new Set([
+      ...database.orders.filter((order) => canPurgeOrder(database, account, order)).map((order) => `order:${order.id}`),
+      ...database.collections.filter((invoice) => hidden.has(invoice.id) && !purged.has(invoice.id)).map((invoice) => `invoice:${invoice.id}`),
+    ]);
+    setSelected((previous) => {
+      const next = new Set([...previous].filter((key) => allowed.has(key)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [database, user?.id]);
+  function toggle(key: string) {
+    setSelected((previous) => { const next = new Set(previous); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  }
+  function deleteSelected() {
+    if (!count || purging) return;
+    confirm({ title: "حذف المحدد نهائيًا؟", message: `سيتم حذف ${orderIds.length} طرد و${invoiceIds.length} فاتورة من سلة محذوفاتك. لن تتمكن من استعادتها.`, danger: true, confirmLabel: `حذف المحدد (${count})`, onConfirm: async () => {
+      setPurging(true);
+      try {
+        const saved = await purgeTrash(orderIds, invoiceIds);
+        // Close the confirmation on a conflict so the updated selection can be reviewed.
+        if (saved) setSelected(new Set());
+      } finally { setPurging(false); }
+    } });
+  }
   return <div className="page-content animate-page">
     <PageHeader title="المحذوفات" subtitle="استعادة الطرود والفواتير المحذوفة من قائمتك" onBack={() => setView(user?.role === "admin" ? "admin" : "home")} />
-    {!!deleted.length && <SectionCard><h2>الطرود المحذوفة</h2><p>تُحذف الطرود نهائيًا بعد 30 يومًا من نقلها إلى المحذوفات.</p><div className="trash-list">{deleted.map((order) => <div className="trash-item" key={order.id}>
-      <div><strong dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إضافة كود QR"}</strong><span>{order.recipientName} · {order.city}</span></div>
-      <div><IconButton name="refresh" label="استعادة الطرد" onClick={() => updateDatabase((current) => ({ ...current, orders: current.orders.map((item) => item.id === order.id ? { ...item, deleted: false, deletedAt: undefined, updatedAt: new Date().toISOString() } : item) }))} />
-      <IconButton name="trash" label="حذف نهائي" className="is-danger" onClick={() => confirm({ title: "حذف الطرد نهائيًا؟", message: "لن تتمكن من استعادة الطرد بعد حذفه نهائيًا.", danger: true, confirmLabel: "حذف نهائي", onConfirm: () => updateDatabase((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== order.id) })) })} /></div>
+    {!!eligibleKeys.length && <SectionCard><div className="trash-actions">
+      <Button variant="secondary" disabled={purging} onClick={() => setSelected(count === eligibleKeys.length ? new Set() : new Set(eligibleKeys))}>{count === eligibleKeys.length ? "إلغاء التحديد" : "تحديد الكل"}</Button>
+      <Button variant="danger" icon="trash" loading={purging} disabled={!count} onClick={deleteSelected}>حذف المحدد ({count})</Button>
+      <span role="status">{orderIds.length} طرد · {invoiceIds.length} فاتورة</span>
+    </div></SectionCard>}
+    {!!deleted.length && <SectionCard><h2>الطرود المحذوفة</h2><p>تُحذف الطرود نهائيًا بعد 30 يومًا من نقلها إلى المحذوفات.</p><div className="trash-list">{deleted.map((order) => <div className="trash-item trash-selectable" key={order.id}>
+      <label className="trash-select"><input type="checkbox" checked={selected.has(`order:${order.id}`)} disabled={purging || !canPurgeOrder(database, user, order)} onChange={() => toggle(`order:${order.id}`)} aria-label={`تحديد الطرد ${order.trackingNumber || order.recipientName}`} /><span><strong dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إضافة كود QR"}</strong><small>{order.recipientName} · {order.city}</small>{!canPurgeOrder(database, user, order) && <small>الطرد مرتبط بفاتورة مستحقة</small>}</span></label>
+      <Button variant="secondary" icon="refresh" disabled={purging} onClick={() => updateDatabase((current) => ({ ...current, orders: current.orders.map((item) => item.id === order.id ? { ...item, deleted: false, deletedAt: undefined, updatedAt: new Date().toISOString() } : item) }))}>استعادة الطرد</Button>
     </div>)}</div></SectionCard>}
-    {!!invoices.length && <SectionCard><h2>الفواتير المحذوفة من قائمتك</h2><div className="trash-list">{invoices.map((invoice) => <div className="trash-item" key={invoice.id}>
-      <div><strong dir="ltr">{invoice.invoiceNumber}</strong><span>{invoice.merchantName}</span></div>
-      <Button variant="secondary" icon="refresh" onClick={() => { if (user) updateDatabase((current) => setCollectionHidden(current, user.id, invoice.id, false)); }}>استعادة الفاتورة</Button>
+    {!!invoices.length && <SectionCard><h2>الفواتير المحذوفة من قائمتك</h2><p>يبقى سجل التسوية محفوظًا بعد حذف الفاتورة من سلة محذوفاتك.</p><div className="trash-list">{invoices.map((invoice) => <div className="trash-item trash-selectable" key={invoice.id}>
+      <label className="trash-select"><input type="checkbox" checked={selected.has(`invoice:${invoice.id}`)} disabled={purging} onChange={() => toggle(`invoice:${invoice.id}`)} aria-label={`تحديد الفاتورة ${invoice.invoiceNumber}`} /><span><strong dir="ltr">{invoice.invoiceNumber}</strong><small>{invoice.merchantName}</small></span></label>
+      <Button variant="secondary" icon="refresh" disabled={purging} onClick={() => { if (user) updateDatabase((current) => setCollectionHidden(current, user.id, invoice.id, false)); }}>استعادة الفاتورة</Button>
     </div>)}</div></SectionCard>}
     {!deleted.length && !invoices.length && <EmptyState icon="trash" title="المحذوفات فارغة" description="ستظهر هنا الطرود والفواتير التي تحذفها من قائمتك." />}
   </div>;

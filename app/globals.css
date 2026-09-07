@@ -1625,3 +1625,12 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 .swipe-row__delete:focus-visible { outline: 3px solid white; outline-offset: -5px; }
 @media (prefers-reduced-motion: reduce) { .swipe-row__content { transition: none; } }
 @media print { .swipe-row { overflow: visible; } .swipe-row__content { transform: none; } .swipe-row__delete, .swipe-row__keyboard { display: none; } }
+
+/* Trash selection keeps touch targets and actions readable on narrow screens. */
+.trash-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.trash-actions > span { color: var(--muted); font-size: 12px; }
+.trash-selectable { gap: 12px; flex-wrap: wrap; padding-block: 10px; }
+.trash-select { display: flex; flex: 1 1 190px; align-items: center; gap: 10px; min-width: 0; cursor: pointer; }
+.trash-select input { width: 22px; height: 22px; margin: 11px; flex: 0 0 auto; accent-color: var(--green); }
+.trash-select > span { display: grid; gap: 5px; overflow-wrap: anywhere; }
+.trash-select small { color: var(--muted); }

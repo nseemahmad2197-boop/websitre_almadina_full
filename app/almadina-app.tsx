@@ -699,7 +699,7 @@ export default function AlmadinaApplication() {
     return !savingUpdates.current && !remoteMutationInFlight.current && pendingUpdates.current.length === 0;
   }
 
-  async function saveParcelRequest(path: string, payload: unknown): Promise<boolean> {
+  async function saveParcelRequest(path: string, payload: unknown | (() => unknown)): Promise<boolean> {
     if (!await waitForPendingUpdates()) {
       showToast("انتظر اكتمال الحفظ ثم أعد المحاولة.", "error");
       return false;
@@ -707,7 +707,7 @@ export default function AlmadinaApplication() {
     const operationEpoch = sessionEpoch.current;
     remoteMutationInFlight.current = true;
     try {
-      const snapshot = await sharedRequest(path, { method: "POST", body: JSON.stringify(payload) });
+      const snapshot = await sharedRequest(path, { method: "POST", body: JSON.stringify(typeof payload === "function" ? payload() : payload) });
       if (operationEpoch !== sessionEpoch.current) return false;
       authoritativeDatabase.current = snapshot.database;
       serverRevision.current = snapshot.revision;
@@ -717,6 +717,12 @@ export default function AlmadinaApplication() {
     } catch (error) {
       if (operationEpoch !== sessionEpoch.current) return false;
       if (error instanceof SharedApiError && error.status === 401) clearLocalSession();
+      if (error instanceof SharedApiError && error.status === 409 && error.snapshot) {
+        authoritativeDatabase.current = error.snapshot.database;
+        serverRevision.current = error.snapshot.revision;
+        visibleDatabase.current = pendingUpdates.current.reduce((current, update) => update(current), error.snapshot!.database);
+        setDatabase(visibleDatabase.current);
+      }
       showToast(error instanceof Error ? error.message : "تعذّر حفظ البيانات. أعد المحاولة.", "error");
       return false;
     } finally {
@@ -727,6 +733,12 @@ export default function AlmadinaApplication() {
 
   async function createParcels(orders: Order[], recipients: Recipient[] = []): Promise<boolean> {
     return saveParcelRequest("orders", { orders, recipients });
+  }
+
+  async function purgeTrash(orderIds: string[], invoiceIds: string[]): Promise<boolean> {
+    const saved = await saveParcelRequest("trash/purge", () => ({ revision: serverRevision.current, orderIds, invoiceIds }));
+    if (saved) showToast("تم حذف العناصر المحددة من سلة المحذوفات.");
+    return saved;
   }
 
   async function assignParcelCode(orderId: string, trackingNumber: string): Promise<boolean> {
@@ -1432,7 +1444,7 @@ export default function AlmadinaApplication() {
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, purgeTrash, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, deleteAccount, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

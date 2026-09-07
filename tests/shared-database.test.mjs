@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canHideCollection, hiddenCollectionIds, normalizeCollectionVisibility, setCollectionHidden } from "../app/lib/collection-visibility.ts";
+import { canHideCollection, canPurgeOrder, hiddenCollectionIds, normalizeCollectionVisibility, purgedCollectionIds, purgeSelectedTrash, setCollectionHidden } from "../app/lib/collection-visibility.ts";
 import { createSeedDatabase, isOrderInvoicedForCurrentShipment, removeLegacyDemoData } from "../app/lib/data.ts";
 import { matchRegistrationMapAddress } from "../app/lib/registration-map-address.ts";
 import { reverseGeocode } from "../app/lib/reverse-geocoding.ts";
@@ -5092,4 +5092,133 @@ test("links a QR from an administrator's printed batch to the selected blank par
   assert.equal(database.state.revision, revision);
   const anotherParcel = await call(worker, database, "orders/assign-code", { method: "POST", cookie, payload: { orderId: "qr-unselected", trackingNumber: scanned } });
   assert.equal(anotherParcel.status, 409);
+});
+
+// These integration fixtures use FakeD1Database and never change customer data.
+async function trashFixture() {
+  const worker = await loadWorker(), database = new FakeD1Database();
+  const owner = await call(worker, database, "register", { method: "POST", payload: accountPayload("صاحب السلة", "trash-owner@example.test", "0596633210") });
+  const other = await call(worker, database, "register", { method: "POST", payload: accountPayload("حساب آخر", "trash-other@example.test", "0596633211") });
+  const admin = await call(worker, database, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  assert.equal(owner.status, 201); assert.equal(other.status, 201); assert.equal(admin.status, 200);
+  const seed = JSON.parse(database.state.payload), time = new Date().toISOString();
+  const order = (id, merchantId = owner.body.userId, deleted = true) => ({
+    id, merchantId, merchantName: "صاحب السلة", merchantStore: "متجر", trackingNumber: "", recipientName: "مستلم", recipientPhone: "0591122334",
+    governorate: "نابلس", city: "نابلس", address: "رفيديا", pickupAddress: "نابلس", amount: 100, deliveryFee: 25, content: "ملابس",
+    weight: "0 - 5 كغم", dimensions: "20 × 20 × 20 سم", notes: "", privateNotes: "", reference: "", type: "طرد عادي", status: "delivered",
+    courierName: "بانتظار تعيين المندوب", createdAt: time, updatedAt: time, deleted, deletedAt: deleted ? time : undefined,
+  });
+  const invoice = (id, status = "paid", orderIds = [], merchantId = owner.body.userId) => ({
+    id, merchantId, merchantName: "صاحب السلة", invoiceNumber: "#" + id, orderIds, grossAmount: 100, deliveryFees: 25, returnFees: 0, netAmount: 75,
+    deliveredCount: 1, returnedCount: 0, status, verificationCode: "1234", authorizedRecipient: "", createdAt: time, updatedAt: time, scheduledAt: time,
+    ...(status === "paid" ? { paidAt: time } : {}), returnPricingVersion: 1, returnPricingMembership: "standard", returnFeeDetails: [],
+  });
+  seed.orders = [order("remove"), order("keep"), order("linked"), order("active", owner.body.userId, false), order("foreign", other.body.userId)];
+  seed.orders[0].trackingNumber = "ALX-20880111";
+  seed.parcelCodeClaims = { ...seed.parcelCodeClaims, "ALX-20880111": { orderId: "remove", claimedAt: time } };
+  seed.collections = [invoice("paid-selected", "paid", ["remove"]), invoice("paid-keep"), invoice("paid-visible"), invoice("due", "pending", ["linked"]), invoice("foreign-invoice", "paid", [], other.body.userId)];
+  seed.preferences[owner.body.userId] = { ...seed.preferences[owner.body.userId], hiddenCollectionIds: ["paid-selected", "paid-keep"] };
+  seed.preferences[other.body.userId] = { ...seed.preferences[other.body.userId], hiddenCollectionIds: ["foreign-invoice"] };
+  database.state.payload = JSON.stringify(seed);
+  const cookie = sessionFrom(owner), current = await call(worker, database, "database", { cookie });
+  return { worker, database, owner, other, admin, cookie, current };
+}
+
+test("purging selected trash removes only selected records, retains ledger/codes and syncs per account", async () => {
+  const { worker, database, owner, other, cookie, current } = await trashFixture();
+  const before = structuredClone(current.body.database);
+  const beforeClaims = JSON.parse(database.state.payload).parcelCodeClaims;
+  const result = await call(worker, database, "trash/purge", { method: "POST", cookie, payload: { revision: current.body.revision, orderIds: ["remove", "remove"], invoiceIds: ["paid-selected"] } });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const db = result.body.database;
+  assert.equal(db.orders.some((order) => order.id === "remove"), false);
+  assert.equal(db.orders.some((order) => order.id === "keep"), true);
+  assert.deepEqual(db.collections, before.collections);
+  assert.deepEqual(JSON.parse(database.state.payload).parcelCodeClaims, beforeClaims);
+  assert.deepEqual([...purgedCollectionIds(db, owner.body.userId)], ["paid-selected"]);
+  const trashInvoices = [...hiddenCollectionIds(db, owner.body.userId)].filter((id) => !purgedCollectionIds(db, owner.body.userId).has(id));
+  assert.deepEqual(trashInvoices, ["paid-keep"]);
+  assert.strictEqual(setCollectionHidden(db, owner.body.userId, "paid-selected", false), db);
+  const otherView = await call(worker, database, "database", { cookie: sessionFrom(other) });
+  assert.deepEqual(otherView.body.database.preferences[other.body.userId].hiddenCollectionIds, ["foreign-invoice"]);
+  const device2 = await call(worker, database, "login", { method: "POST", payload: { email: "trash-owner@example.test", password: "Customer@123" } });
+  assert.equal(purgedCollectionIds(device2.body.database, owner.body.userId).has("paid-selected"), true);
+  assert.deepEqual(device2.body.database.collections, before.collections);
+  // An older client does not know the new preference and tries to restore all invoices.
+  const oldClient = structuredClone(device2.body.database);
+  delete oldClient.preferences[owner.body.userId].purgedCollectionIds;
+  oldClient.preferences[owner.body.userId].hiddenCollectionIds = [];
+  const saved = await call(worker, database, "database", { method: "PUT", cookie, payload: { revision: device2.body.revision, database: oldClient } });
+  assert.equal(saved.status, 200);
+  assert.equal(hiddenCollectionIds(saved.body.database, owner.body.userId).has("paid-selected"), true);
+  assert.equal(purgedCollectionIds(saved.body.database, owner.body.userId).has("paid-selected"), true);
+  assert.deepEqual(saved.body.database.collections.filter((invoice) => invoice.status === "paid"), before.collections.filter((invoice) => invoice.status === "paid"));
+  const financialRecords = (invoices) => invoices.map(({ updatedAt, ...record }) => record);
+  assert.deepEqual(financialRecords(saved.body.database.collections), financialRecords(before.collections));
+  assert.deepEqual(JSON.parse(database.state.payload).parcelCodeClaims, beforeClaims);
+});
+
+test("trash purge rejects empty, missing, active, foreign, outstanding and mixed invalid selections atomically", async () => {
+  const { worker, database, owner, cookie, current } = await trashFixture();
+  const revision = current.body.revision;
+  for (const [orderIds, invoiceIds, status] of [
+    [[], [], 400], [["missing"], [], 403], [["active"], [], 403], [["foreign"], [], 403], [["linked"], [], 403],
+    [[], ["due"], 403], [[], ["foreign-invoice"], 403], [[], ["paid-visible"], 403], [["remove", "active"], ["paid-selected"], 403],
+    [["remove"], ["paid-selected", "due"], 403], [[" "], [], 400], [null, [], 400],
+  ]) {
+    const result = await call(worker, database, "trash/purge", { method: "POST", cookie, payload: { revision, orderIds, invoiceIds } });
+    assert.equal(result.status, status, JSON.stringify({ orderIds, invoiceIds, result }));
+    assert.equal(database.state.revision, revision);
+    assert.equal(JSON.parse(database.state.payload).orders.some((order) => order.id === "remove"), true);
+    assert.deepEqual(purgedCollectionIds(JSON.parse(database.state.payload), owner.body.userId).size, 0);
+  }
+  const seed = JSON.parse(database.state.payload);
+  seed.users.find((entry) => entry.id === owner.body.userId).role = "courier";
+  database.state.payload = JSON.stringify(seed);
+  const courier = await call(worker, database, "trash/purge", { method: "POST", cookie, payload: { revision, orderIds: ["remove"], invoiceIds: [] } });
+  assert.equal(courier.status, 403);
+  const unsigned = await call(worker, database, "trash/purge", { method: "POST", payload: { revision, orderIds: ["remove"], invoiceIds: [] } });
+  assert.equal(unsigned.status, 401);
+});
+
+test("a restore from another device invalidates a pending purge and returns a fresh snapshot", async () => {
+  const { worker, database, cookie, current } = await trashFixture();
+  const db = structuredClone(current.body.database);
+  db.orders.find((order) => order.id === "remove").deleted = false;
+  const restored = await call(worker, database, "database", { method: "PUT", cookie, payload: { revision: current.body.revision, database: db } });
+  assert.equal(restored.status, 200);
+  const result = await call(worker, database, "trash/purge", { method: "POST", cookie, payload: { revision: current.body.revision, orderIds: ["remove"], invoiceIds: ["paid-selected"] } });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.revision, restored.body.revision);
+  assert.equal(result.body.database.orders.find((order) => order.id === "remove").deleted, false);
+  assert.equal(result.body.database.preferences[current.body.userId].purgedCollectionIds?.length ?? 0, 0);
+});
+
+test("purge preferences cannot be forged through general saves and admins can purge authorized trash", async () => {
+  const { worker, database, admin, cookie, current } = await trashFixture();
+  const db = structuredClone(current.body.database);
+  db.preferences[current.body.userId].purgedCollectionIds = ["paid-visible", "due"];
+  const saved = await call(worker, database, "database", { method: "PUT", cookie, payload: { revision: current.body.revision, database: db } });
+  assert.equal(saved.status, 200);
+  assert.equal(purgedCollectionIds(saved.body.database, current.body.userId).size, 0);
+  const adminCookie = sessionFrom(admin);
+  const latest = await call(worker, database, "database", { cookie: adminCookie });
+  const result = await call(worker, database, "trash/purge", { method: "POST", cookie: adminCookie, payload: { revision: latest.body.revision, orderIds: ["foreign"], invoiceIds: [] } });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.database.orders.some((order) => order.id === "foreign"), false);
+});
+
+test("purged invoices retain billing protection and become visible if payment is reopened", () => {
+  const db = createSeedDatabase(); db.users = [{ id: "owner", role: "merchant" }];
+  db.orders = [{ id: "o", merchantId: "owner", status: "delivered", deleted: true }];
+  db.collections = [{ id: "i", merchantId: "owner", status: "paid", orderIds: ["o"], netAmount: 75 }];
+  db.preferences = { owner: { hiddenCollectionIds: ["i"] } };
+  const purged = purgeSelectedTrash(db, "owner", [], ["i"]);
+  assert.equal(isOrderInvoicedForCurrentShipment(db.orders[0], purged.collections), true);
+  assert.equal(canPurgeOrder(purged, db.users[0], db.orders[0]), true);
+  purged.collections = [{ ...purged.collections[0], status: "pending" }];
+  const reopened = normalizeCollectionVisibility(purged);
+  assert.equal(canPurgeOrder(reopened, db.users[0], db.orders[0]), false);
+  assert.equal(hiddenCollectionIds(reopened, "owner").size, 0);
+  assert.equal(purgedCollectionIds(reopened, "owner").size, 0);
 });

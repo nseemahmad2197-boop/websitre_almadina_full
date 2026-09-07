@@ -168,6 +168,8 @@ export type Notice = {
 
 export type Preferences = {
   hiddenCollectionIds?: string[];
+  /** Removed from this account's trash; settlement records remain authoritative. */
+  purgedCollectionIds?: string[];
   theme: "light" | "dark" | "system";
   notifications: boolean;
   sounds: boolean;
