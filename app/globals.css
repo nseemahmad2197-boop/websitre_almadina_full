@@ -291,7 +291,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .avatar--large { width: 62px; height: 62px; border-radius: 20px; font-size: 24px; }
 
 /* Application frame */
-.application { min-height: 100svh; padding-bottom: 115px; }
+.application { min-height: 100svh; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
 .application--admin { padding-bottom: 36px; }
 .topbar { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface), transparent 5%); backdrop-filter: blur(13px); }
 .topbar__inner { display: flex; width: min(calc(100% - clamp(28px, 7vw, 104px)), var(--shell-width)); height: 70px; align-items: center; gap: 13px; margin: auto; }
@@ -319,11 +319,11 @@ html[data-theme="dark"] .topbar__import { color: #80d9a8; }
 .section-card__header p { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .animate-page { animation: page-in .25s ease both; }
 
-.bottom-nav { position: fixed; right: 0; bottom: 0; left: 0; z-index: 9; display: grid; width: 100%; min-height: 76px; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: center; padding: 5px max(22px, calc((100% - 1320px) / 2)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface), transparent 3%); box-shadow: 0 -7px 28px rgb(0 0 0 / 6%); backdrop-filter: blur(12px); }
-.bottom-nav > button { display: grid; justify-items: center; gap: 2px; height: 51px; place-content: center; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
-.bottom-nav > button span { font-size: 10px; white-space: nowrap; }
-.bottom-nav > button.is-active { color: var(--green); }
-.bottom-nav > button.bottom-nav__create { position: relative; top: -10px; width: 57px; height: 57px; justify-self: center; border-radius: 16px; background: linear-gradient(145deg, var(--green-bright), var(--green-dark)); color: #fff; box-shadow: 0 10px 20px rgb(8 124 69 / 32%); }
+.application.application--with-create { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+/* Physical left matches the native apps, including Arabic RTL. */
+.new-order-fab { position: fixed; left: max(20px, env(safe-area-inset-left)); bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 9; display: grid; width: 58px; height: 58px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #08cdd3; color: #053839; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); cursor: pointer; touch-action: manipulation; }
+.new-order-fab:focus-visible { outline: 3px solid var(--text); outline-offset: 4px; }
+.new-order-fab:active { background: #06bdc3; }
 
 /* Dashboard */
 .dashboard-page { gap: 19px; }
@@ -1202,7 +1202,6 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .admin-stat--courier { display: none; }
   .topbar__import { display: none; }
   .topbar__brand .brand__words { display: none; }
-  .bottom-nav { padding-right: max(12px, env(safe-area-inset-right)); padding-left: max(12px, env(safe-area-inset-left)); }
   .admin-user-card--merchant .admin-user-card__actions { grid-column: 1 / -1; justify-content: space-between; padding-top: 9px; border-top: 1px solid var(--line); }
   .membership-switch { flex: 1; }
   .membership-switch__option { flex: 1; }
@@ -1338,10 +1337,6 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   .status-card > span { width: 32px; height: 32px; }
   .status-card strong { font-size: 16px; }
   .status-card small { font-size: 8px; }
-  .bottom-nav { min-height: 67px; padding-right: 4px; padding-bottom: max(4px, env(safe-area-inset-bottom)); padding-left: 4px; }
-  .bottom-nav > button span { font-size: 9px; }
-  .bottom-nav > button.bottom-nav__create { top: -12px; width: 53px; height: 53px; }
-  .application { padding-bottom: 92px; }
   .application--admin { padding-bottom: 28px; }
   .application--employee { padding-bottom: 24px; }
   .employee-dashboard { gap: 11px; }
@@ -1554,7 +1549,8 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 }
 
 @media print {
-  .topbar, .bottom-nav, .page-header > .inline-actions, .order-detail-page > .button, .order-detail-actions, .toast-stack { display: none !important; }
+  .topbar, .new-order-fab, .page-header > .inline-actions, .order-detail-page > .button, .order-detail-actions, .toast-stack { display: none !important; }
+  .application.application--with-create { padding-bottom: 0; }
   body, .application { background: #fff; color: #111; }
   .page-content { width: 100%; padding: 0; }
   .section-card { break-inside: avoid; }

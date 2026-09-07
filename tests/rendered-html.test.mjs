@@ -612,20 +612,20 @@ test("keeps Excel importing in the desktop toolbar instead of the navigation dra
   const shell = await readFile(new URL("../app/components/application-shell.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const drawer = shell.split("function NavigationDrawer")[1].split("function GlobalSearch")[0];
-  const toolbar = shell.split("function TopBar")[1].split("function BottomNavigation")[0];
+  const toolbar = shell.split("function TopBar")[1].split("function NewOrderFloatingButton")[0];
 
   assert.doesNotMatch(drawer, /view:\s*"import"/);
   assert.match(toolbar, /className="topbar__import"/);
   assert.match(toolbar, /name="spreadsheet"/);
   assert.match(toolbar, /استيراد Excel/);
   assert.match(styles, /@media \(max-width: 760px\)\s*\{[\s\S]*?\.topbar__import\s*\{\s*display:\s*none/);
-  assert.match(styles, /\.bottom-nav\s*\{[^}]*width:\s*100%/);
+  assert.doesNotMatch(shell, /BottomNavigation|className="bottom-nav"/);
 });
 
 test("shows the notification bell for the administrator, employees, and users", async () => {
   const shell = await readFile(new URL("../app/components/application-shell.tsx", import.meta.url), "utf8");
   const drawer = shell.split("function NavigationDrawer")[1].split("function GlobalSearch")[0];
-  const topbar = shell.split("function TopBar")[1].split("function BottomNavigation")[0];
+  const topbar = shell.split("function TopBar")[1].split("function NewOrderFloatingButton")[0];
 
   assert.equal((topbar.match(/name="bell"/g) ?? []).length, 1);
   assert.match(topbar, /<IconButton name="bell" label="الإشعارات" badge=\{unread\} onClick=\{\(\) => setView\("notifications"\)\} \/>/);
@@ -1196,7 +1196,6 @@ test("uses «الطرود» in visible copy while preserving the internal shipme
 
   assert.doesNotMatch(appSources, /الشحنات|شحنات|الشحنة/);
   assert.match(shell, /label: "الطرود", view: "shipments"/);
-  assert.match(shell, /view: "shipments", label: "الطرود"/);
   assert.match(dashboard, /export function Shipments\(\)/);
   assert.match(dashboard, /title="الطرود"/);
   assert.match(context, /"shipments"/);
@@ -1527,7 +1526,8 @@ test("shows a reference-style account deletion page and performs deletion only t
   assert.match(context, /deleteAccount:\s*\(password: string, confirmation: string\) => Promise<boolean>/);
   assert.match(shell, /case "delete-account": return <DeleteAccountPage \/>/);
   assert.match(shell, /const securityFlow = view === "delete-account" \|\| view === "change-password"/);
-  assert.match(shell, /!securityFlow && <BottomNavigation \/>/);
+  assert.match(shell, /const showCreate = user\?\.role === "merchant" && \(view === "home" \|\| view === "shipments"\)/);
+  assert.doesNotMatch(shell, /BottomNavigation/);
   assert.match(settings, /export function DeleteAccountPage\(\)/);
   assert.match(settings, /قبل حذف حسابك/);
   assert.match(settings, /إكمال جميع معاملات التحصيل/);

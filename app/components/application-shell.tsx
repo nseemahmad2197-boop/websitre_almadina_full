@@ -55,10 +55,9 @@ function TopBar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
   return <header className="topbar"><div className="topbar__inner"><IconButton name="menu" label="فتح القائمة" onClick={onMenu} /><button className="topbar__brand" onClick={() => setView(user?.role === "admin" ? "admin" : "home")}><Brand compact /></button><div className="topbar__actions">{user?.role === "merchant" && <button className="topbar__import" type="button" onClick={() => setView("import")}><Icon name="spreadsheet" size={18} /><span>استيراد Excel</span></button>}{!employee && <IconButton name="search" label="بحث" onClick={onSearch} />}<IconButton name="camera" label={employee ? "مسح كود الطرد بالكاميرا" : "مسح رمز الطرد"} onClick={() => openScanner()} />{!employee && <IconButton name="trash" label="المحذوفات" onClick={() => setView("trash")} />}<IconButton name="bell" label="الإشعارات" badge={unread} onClick={() => setView("notifications")} /></div></div></header>;
 }
 
-function BottomNavigation() {
-  const { view, setView } = useApp();
-  const entries: { view: View; label: string; icon: IconName }[] = [{ view: "home", label: "الرئيسية", icon: "home" }, { view: "shipments", label: "الطرود", icon: "layers" }, { view: "returns", label: "الرواجع", icon: "return" }, { view: "collections", label: "التحصيلات", icon: "receipt" }];
-  return <nav className="bottom-nav" aria-label="التنقل الرئيسي"><button className={view === entries[0].view ? "is-active" : ""} onClick={() => setView(entries[0].view)}><Icon name={entries[0].icon} size={22} /><span>{entries[0].label}</span></button><button className={view === entries[1].view ? "is-active" : ""} onClick={() => setView(entries[1].view)}><Icon name={entries[1].icon} size={22} /><span>{entries[1].label}</span></button><button className="bottom-nav__create" onClick={() => setView("new-order")} aria-label="إنشاء طرد جديد"><Icon name="plus" size={30} /></button><button className={view === entries[2].view ? "is-active" : ""} onClick={() => setView(entries[2].view)}><Icon name={entries[2].icon} size={22} /><span>{entries[2].label}</span></button><button className={view === entries[3].view ? "is-active" : ""} onClick={() => setView(entries[3].view)}><Icon name={entries[3].icon} size={22} /><span>{entries[3].label}</span></button></nav>;
+function NewOrderFloatingButton() {
+  const { setView } = useApp();
+  return <button type="button" className="new-order-fab" aria-label="إنشاء طرد جديد" title="إنشاء طرد جديد" onClick={() => setView("new-order")}><Icon name="plus" size={32} /></button>;
 }
 
 function CurrentPage() {
@@ -95,5 +94,12 @@ export function ApplicationShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const securityFlow = view === "delete-account" || view === "change-password" || view === "linked-devices";
-  return <main className={`application ${user?.role === "admin" ? "application--admin" : ""} ${user?.role === "courier" ? "application--employee" : ""} ${securityFlow ? "application--security-flow" : ""} ${preferences.compact ? "application--compact" : ""}`}><TopBar onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} /><CurrentPage />{user?.role === "merchant" && !securityFlow && <BottomNavigation />}{menuOpen && <NavigationDrawer onClose={() => setMenuOpen(false)} />}{searchOpen && user?.role !== "courier" && <GlobalSearch onClose={() => setSearchOpen(false)} />}</main>;
+  const showCreate = user?.role === "merchant" && (view === "home" || view === "shipments");
+  return <main className={`application ${user?.role === "admin" ? "application--admin" : ""} ${user?.role === "courier" ? "application--employee" : ""} ${securityFlow ? "application--security-flow" : ""} ${showCreate ? "application--with-create" : ""} ${preferences.compact ? "application--compact" : ""}`}>
+    <TopBar onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} />
+    <CurrentPage />
+    {showCreate && !menuOpen && !searchOpen && <NewOrderFloatingButton />}
+    {menuOpen && <NavigationDrawer onClose={() => setMenuOpen(false)} />}
+    {searchOpen && user?.role !== "courier" && <GlobalSearch onClose={() => setSearchOpen(false)} />}
+  </main>;
 }
