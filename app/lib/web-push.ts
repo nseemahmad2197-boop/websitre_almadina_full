@@ -199,14 +199,30 @@ export async function generateVapidKeyPair(): Promise<VapidKeyPair> {
   return { publicKey: bytesToBase64Url(publicKey), privateKey: privateKey.d };
 }
 
+/** User-supplied subscriptions must not turn the server into an HTTP proxy.
+ * Keep the suffix checks label-bound and allow all Apple Push subdomains.
+ * A new browser provider must be reviewed before extending this allowlist.
+ */
+export function trustedWebPushEndpoint(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.hash ||
+        (url.port && url.port !== "443")) return null;
+    const host = url.hostname.toLowerCase();
+    const exact = ["fcm.googleapis.com", "android.googleapis.com"];
+    const domains = ["push.services.mozilla.com", "push.apple.com", "notify.windows.com"];
+    return exact.includes(host) || domains.some(domain => host === domain || host.endsWith("." + domain)) ? url : null;
+  } catch { return null; }
+}
+
 export async function sendWebPushNotification(
   subscription: WebPushSubscriptionRecord,
   message: WebPushMessage,
   keys: VapidKeyPair,
   subject: string,
 ): Promise<void> {
-  const endpoint = new URL(subscription.endpoint);
-  if (endpoint.protocol !== "https:") throw new Error("Web Push endpoint must use HTTPS.");
+  const endpoint = trustedWebPushEndpoint(subscription.endpoint);
+  if (!endpoint) throw new Error("Unsupported Web Push endpoint.");
   const body = await encryptWebPushPayload(subscription, message);
   const authorization = await createVapidAuthorization(endpoint.href, keys, subject);
   const response = await fetch(endpoint.href, {

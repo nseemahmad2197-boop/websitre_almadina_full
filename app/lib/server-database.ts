@@ -1,3 +1,4 @@
+import { logRequestEvent, logServiceEvent } from "./security-events";
 import { deletionPolicy, type AccountDeletionRequestRecord } from "./account-deletion";
 import {
   generateAuthenticationOptions,
@@ -13,7 +14,7 @@ import { appendOrderTrackingEvent, appendOrderTrackingNote, createSeedDatabase, 
 import { deliverPasswordResetCode, deliverRegistrationVerificationCode, isPasswordResetDeliveryConfigured, type PasswordResetDeliveryConfig } from "./password-reset-delivery";
 import { canHideCollection, normalizeCollectionVisibility, preservePurgedCollections, purgeSelectedTrash } from "./collection-visibility";
 import { isReverseGeocodingConfigured, reverseGeocode, type ReverseGeocodingConfig } from "./reverse-geocoding";
-import { generateVapidKeyPair, sendWebPushNotification, WebPushDeliveryError, type VapidKeyPair, type WebPushMessage, type WebPushSubscriptionRecord } from "./web-push";
+import { generateVapidKeyPair, sendWebPushNotification, trustedWebPushEndpoint, WebPushDeliveryError, type VapidKeyPair, type WebPushMessage, type WebPushSubscriptionRecord } from "./web-push";
 
 const SESSION_COOKIE = "almadina_session";
 const PASSKEY_LOGIN_COOKIE = "almadina_passkey_login";
@@ -177,7 +178,7 @@ export type AlmadinaApiConfig = PasswordResetDeliveryConfig & ReverseGeocodingCo
 };
 
 class ApiRequestError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiRequestError";
   }
@@ -186,6 +187,7 @@ class ApiRequestError extends Error {
 function json(payload: unknown, status = 200, headers: HeadersInit = {}): Response {
   const responseHeaders = new Headers(headers);
   responseHeaders.set("Cache-Control", "no-store");
+  if (status === 429 && !responseHeaders.has("Retry-After")) responseHeaders.set("Retry-After", "60");
   responseHeaders.set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
   responseHeaders.set("Referrer-Policy", "no-referrer");
   responseHeaders.set("X-Content-Type-Options", "nosniff");
@@ -246,6 +248,22 @@ async function validateApiRequestEnvelope(request: Request): Promise<Request | R
   for (const chunk of chunks) {
     body.set(chunk, offset);
     offset += chunk.byteLength;
+  }
+  if (totalLength > 0) {
+    try {
+      const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return json({ error: "بيانات الطلب يجب أن تكون كائنًا صالحًا." }, 400);
+      }
+      // Bound nested input before domain validators and serializers traverse it.
+      const pending: { value: unknown; depth: number }[] = [{ value: parsed, depth: 0 }];
+      while (pending.length) {
+        const item = pending.pop()!;
+        if (!item.value || typeof item.value !== "object") continue;
+        if (item.depth > 64) return json({ error: "بنية بيانات الطلب غير صالحة." }, 400);
+        for (const value of Object.values(item.value)) pending.push({ value, depth: item.depth + 1 });
+      }
+    } catch { return json({ error: "بيانات الطلب غير صالحة. تحقق منها وحاول مجددًا." }, 400); }
   }
   return new Request(request, { body });
 }
@@ -713,12 +731,7 @@ function normalizeWebPushSubscription(value: unknown): WebPushSubscriptionRecord
   if (p256dh.length > MAX_PUSH_KEY_LENGTH || auth.length > MAX_PUSH_KEY_LENGTH) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(p256dh) || !/^[A-Za-z0-9_-]+$/.test(auth)) return null;
 
-  try {
-    const url = new URL(endpoint);
-    if (url.protocol !== "https:" || url.username || url.password || url.hash) return null;
-  } catch {
-    return null;
-  }
+  if (!trustedWebPushEndpoint(endpoint)) return null;
   return { endpoint, p256dh, auth };
 }
 
@@ -788,7 +801,7 @@ async function deliverWebPushNotices(
           if (error instanceof WebPushDeliveryError && (error.status === 404 || error.status === 410)) {
             expiredEndpointHashes.add(subscription.endpoint_hash);
           } else {
-            console.warn("Could not deliver an Almadina Web Push notification.", error);
+            logServiceEvent("push_delivery_failed");
           }
         }
       }
@@ -811,7 +824,7 @@ function scheduleWebPushNotices(
 ): void {
   if (!config.webPushEnabled || !notices.length) return;
   const delivery = deliverWebPushNotices(database, state, notices, applicationOrigin)
-    .catch((error) => console.warn("Could not prepare Almadina Web Push notifications.", error));
+    .catch(() => logServiceEvent("push_prepare_failed"));
   if (config.defer) config.defer(delivery);
   else void delivery;
 }
@@ -1164,7 +1177,7 @@ async function enforceEndpointRateLimit(
       reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
     RETURNING request_count, reset_at`)
     .bind(keyHash, namespace, resetAt, now, now).first<RateLimitRow>();
-  if (!rate || rate.request_count > limit) throw new ApiRequestError(message, 429);
+  if (!rate || rate.request_count > limit) throw new ApiRequestError(message, 429, Math.max(1, (rate?.reset_at ?? resetAt) - now));
 }
 
 async function assertEndpointRateLimit(
@@ -1179,7 +1192,7 @@ async function assertEndpointRateLimit(
   await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
   const rate = await database.prepare("SELECT request_count, reset_at FROM almadina_rate_limits WHERE key_hash = ?")
     .bind(keyHash).first<RateLimitRow>();
-  if (rate && rate.reset_at > now && rate.request_count >= limit) throw new ApiRequestError(message, 429);
+  if (rate && rate.reset_at > now && rate.request_count >= limit) throw new ApiRequestError(message, 429, Math.max(1, rate.reset_at - now));
 }
 
 async function clearEndpointRateLimit(database: D1Database, namespace: string, keyMaterial: string): Promise<void> {
@@ -1848,7 +1861,7 @@ async function verifyPublicPasskeyLogin(database: D1Database, request: Request):
       passkeyLoginCookie(request, "", 0),
     ));
   } catch (error) {
-    if (!(error instanceof ApiRequestError)) console.warn("Public passkey login failed.", error);
+    if (!(error instanceof ApiRequestError)) logServiceEvent("passkey_failed");
     return json({ error: genericMessage }, 401, clearCeremonyCookie);
   }
 }
@@ -3132,7 +3145,7 @@ async function requestPasswordReset(
       code: verificationCode,
       expiresInMinutes: Math.floor(PASSWORD_RESET_CODE_DURATION / 60),
     }).catch(async (error) => {
-      console.error("Password reset delivery failed.", error instanceof Error ? error.message : "Unknown delivery error.");
+      logServiceEvent("reset_delivery_failed");
       await database.prepare(`UPDATE almadina_password_reset_requests
         SET user_id = '', code_hash = '', failed_attempts = ?, verified_at = NULL,
           reset_token_hash = NULL, reset_expires_at = NULL
@@ -3386,7 +3399,7 @@ async function reverseGeocodeRegistrationAddress(
     const address = await reverseGeocode(config, { latitude, longitude });
     return json({ success: true, address });
   } catch (error) {
-    console.error("Reverse geocoding failed.", error instanceof Error ? error.message : "Unknown reverse geocoding error.");
+    logServiceEvent("geocoding_failed");
     return json({ error: "تعذّر قراءة العنوان من الخريطة. ثبّت النقطة وأكمل المدينة والمنطقة والشارع يدويًا." }, 502);
   }
 }
@@ -3486,7 +3499,7 @@ async function requestRegistration(
       expiresInMinutes: Math.floor(REGISTRATION_CODE_DURATION / 60),
     });
   } catch (error) {
-    console.error("Registration verification delivery failed.", error instanceof Error ? error.message : "Unknown delivery error.");
+    logServiceEvent("registration_delivery_failed");
     await database.batch([
       database.prepare("DELETE FROM almadina_registration_locations WHERE request_hash = ?").bind(requestHash),
       database.prepare("DELETE FROM almadina_registration_requests WHERE request_hash = ?").bind(requestHash),
@@ -3834,7 +3847,7 @@ async function verifyCollection(database: D1Database, request: Request, session:
   return json({ error: "تم تحديث الفاتورة من جهاز آخر. حاول قراءة الكود مجددًا." }, 409);
 }
 
-export async function handleAlmadinaApi(request: Request, database: D1Database, config: AlmadinaApiConfig = {}): Promise<Response> {
+async function routeAlmadinaApi(request: Request, database: D1Database, config: AlmadinaApiConfig): Promise<Response> {
   try {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
@@ -3878,6 +3891,13 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
     }
 
     if (!session) return json({ error: "يجب تسجيل الدخول أولًا." }, 401, { "Set-Cookie": sessionCookie(request, "", 0) });
+
+    // Account-wide write budget also covers endpoints without a stricter
+    // domain limit. Reads and logout stay available when a device is throttled.
+    if (request.method === "POST" || request.method === "PUT") {
+      await enforceEndpointRateLimit(database, "account-write", session.account.id, 120, 60,
+        "طلبات كثيرة خلال وقت قصير. انتظر قليلًا ثم أعد المحاولة.");
+    }
 
     if (url.pathname === "/api/almadina/push/config" && request.method === "GET") {
       return await webPushConfiguration(database, config);
@@ -4034,8 +4054,19 @@ export async function handleAlmadinaApi(request: Request, database: D1Database, 
 
     return json({ error: "المسار المطلوب غير موجود." }, 404);
   } catch (error) {
-    if (error instanceof ApiRequestError) return json({ error: error.message }, error.status);
-    console.error("Almadina API request failed.", error);
+    if (error instanceof ApiRequestError) return json({ error: error.message }, error.status,
+      error.retryAfterSeconds ? { "Retry-After": String(error.retryAfterSeconds) } : {});
+    if (error instanceof SyntaxError) return json({ error: "بيانات الطلب غير صالحة. تحقق منها وحاول مجددًا." }, 400);
     return json({ error: "تعذّر الاتصال بقاعدة بيانات الموقع. حاول مجددًا بعد قليل." }, 500);
   }
+}
+
+/** Correlate failures across all clients without retaining submitted data. */
+export async function handleAlmadinaApi(request: Request, database: D1Database, config: AlmadinaApiConfig = {}): Promise<Response> {
+  const started = Date.now();
+  const requestId = crypto.randomUUID();
+  const response = await routeAlmadinaApi(request, database, config);
+  response.headers.set("X-Request-ID", requestId);
+  logRequestEvent(request, response.status, Date.now() - started, requestId);
+  return response;
 }

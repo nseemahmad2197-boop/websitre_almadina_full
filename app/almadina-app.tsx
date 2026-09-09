@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { requestApiJSON, validSnapshotEnvelope, canAcceptPolledSnapshot } from "./lib/api-transport";
 import type { IScannerControls } from "@zxing/browser";
 import { readBrowserPermission } from "./lib/browser-permissions";
 import { AppLockScreen } from "./components/app-lock-screen";
@@ -119,22 +120,17 @@ function readableAppLockError(error: unknown, fallback: string): string {
 }
 
 async function sharedRequest(path: string, options: RequestInit = {}): Promise<SharedSnapshot> {
-  const response = await fetch(`/api/almadina/${path}`, {
-    ...options,
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json", ...options.headers },
-  });
-
-  const payload = await response.json() as Partial<SharedSnapshot> & { error?: string };
+  const result = await requestApiJSON(path, options);
+  const response = result.response;
+  const payload = result.payload as Partial<SharedSnapshot> & { error?: string };
   if (!response.ok) {
-    const snapshot = payload.database && typeof payload.revision === "number" && payload.userId
+    const snapshot = validSnapshotEnvelope(payload) && payload.database && typeof payload.revision === "number" && payload.userId
       ? { database: payload.database, revision: payload.revision, userId: payload.userId }
       : undefined;
     throw new SharedApiError(payload.error ?? "تعذّر الاتصال بخادم المدينة إكسبرس.", response.status, snapshot);
   }
 
-  if (!payload.database || typeof payload.revision !== "number" || !payload.userId) {
+  if (!validSnapshotEnvelope(payload) || !payload.database || typeof payload.revision !== "number" || !payload.userId) {
     throw new SharedApiError("استجابة خادم المدينة إكسبرس غير مكتملة.", 500);
   }
 
@@ -577,26 +573,34 @@ export default function AlmadinaApplication() {
   useEffect(() => {
     if (!userId) return;
     let active = true;
+    let inFlight = false;
+    let pendingController: AbortController | null = null;
+    const operationEpoch = sessionEpoch.current;
 
     async function synchronize() {
-      if (!active || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) return;
-
+      if (!active || inFlight || document.visibilityState === "hidden" || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) return;
+      inFlight = true;
+      pendingController = new AbortController();
       try {
-        const snapshot = await sharedRequest("database");
-        if (!active || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length || snapshot.revision === serverRevision.current) return;
+        const snapshot = await sharedRequest("database", { signal: pendingController.signal });
+        if (!active || operationEpoch !== sessionEpoch.current || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length || !canAcceptPolledSnapshot(userId!, serverRevision.current, snapshot)) return;
         rememberSnapshotAccount(snapshot);
         authoritativeDatabase.current = snapshot.database;
         visibleDatabase.current = snapshot.database;
         serverRevision.current = snapshot.revision;
         setDatabase(snapshot.database);
       } catch (error) {
-        if (active && error instanceof SharedApiError && error.status === 401) {
+        if (active && operationEpoch === sessionEpoch.current && error instanceof SharedApiError && error.status === 401) {
+          sessionEpoch.current += 1;
           authoritativeDatabase.current = null;
           pendingUpdates.current = [];
           setUserId(null);
           setViewState("home");
           setSelectedOrderId(null);
         }
+      } finally {
+        inFlight = false;
+        pendingController = null;
       }
     }
 
@@ -608,6 +612,7 @@ export default function AlmadinaApplication() {
 
     return () => {
       active = false;
+      pendingController?.abort();
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
