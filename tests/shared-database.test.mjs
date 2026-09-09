@@ -5338,3 +5338,36 @@ test("public service configuration exposes only explicitly configured contacts a
   assert.equal(configured.body.supportEmail, "support@example.test");
   assert.equal(Object.hasOwn(configured.body, "bootstrapAdminEmail"), false);
 });
+
+test("rejects malformed, scalar and excessively nested JSON without touching accounts", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const account = await call(worker, database, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  const original = structuredClone(database.state);
+  for (const rawBody of ["{broken", "null", "[]", '"text"', "123", '{"x":'.repeat(70) + "{}" + "}".repeat(70)]) {
+    const result = await rawCall(worker, database, "database", { method: "PUT", cookie: sessionFrom(account), rawBody, headers: { "Content-Type": "application/json" } });
+    assert.equal(result.status, 400, rawBody.slice(0, 30));
+    assert.match(result.headers.get("X-Request-ID"), /^[a-f0-9-]{36}$/);
+    assert.deepEqual(database.state, original);
+  }
+});
+
+test("account write limits block excess mutations while preserving read and logout access", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const account = await call(worker, database, "login", { method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD } });
+  const cookie = sessionFrom(account);
+  const before = structuredClone(database.state);
+  await call(worker, database, "notices/clear", { method: "POST", cookie, payload: { noticeIds: [] } });
+  const budget = [...database.rateLimits.values()].find((row) => row.action === "account-write");
+  assert.ok(budget);
+  budget.request_count = 120;
+  const blocked = await rawCall(worker, database, "orders", { method: "POST", cookie, payload: { orders: [] } });
+  assert.equal(blocked.status, 429);
+  assert.ok(Number(blocked.headers.get("Retry-After")) >= 1);
+  assert.ok(Number(blocked.headers.get("Retry-After")) <= 60);
+  assert.deepEqual(database.state, before);
+  assert.equal((await call(worker, database, "session", { cookie })).status, 200);
+  assert.equal((await call(worker, database, "logout", { method: "POST", cookie })).status, 200);
+  assert.equal((await call(worker, database, "session", { cookie })).status, 401);
+});

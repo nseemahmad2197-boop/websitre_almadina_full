@@ -1,9 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateVapidKeyPair, sendWebPushNotification } from "../app/lib/web-push.ts";
+import { generateVapidKeyPair, sendWebPushNotification, trustedWebPushEndpoint } from "../app/lib/web-push.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+test("push endpoints allow browser services but reject internal and lookalike destinations", async () => {
+  for (const endpoint of [
+    "https://fcm.googleapis.com/fcm/send/test", "https://android.googleapis.com/gcm/send/test",
+    "https://updates.push.services.mozilla.com/wpush/v2/test",
+    "https://web.push.apple.com/test", "https://region.web.push.apple.com/test",
+    "https://wns2-bl2p.notify.windows.com/test",
+  ]) assert.ok(trustedWebPushEndpoint(endpoint), endpoint);
+  const rejected = [
+    "https://127.0.0.1/private", "https://[::1]/private", "https://169.254.169.254/metadata",
+    "https://localhost/private", "https://internal.service/private",
+    "https://fcm.googleapis.com.attacker.test/test", "https://evilpush.apple.com/test",
+    "https://web.push.apple.com.attacker.test/test", "http://fcm.googleapis.com/test",
+    "https://user:secret@fcm.googleapis.com/test", "https://fcm.googleapis.com:8443/test",
+    "https://fcm.googleapis.com/test#fragment",
+  ];
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error("must not reach a network destination"); };
+  try {
+    for (const endpoint of rejected) {
+      assert.equal(trustedWebPushEndpoint(endpoint), null, endpoint);
+      await assert.rejects(sendWebPushNotification({ endpoint, p256dh: "", auth: "" }, {}, {}, "https://app.test"), /Unsupported/);
+    }
+    assert.equal(calls, 0);
+  } finally { globalThis.fetch = original; }
+});
 
 function base64Url(bytes) {
   return Buffer.from(bytes).toString("base64url");
@@ -47,7 +74,7 @@ test("encrypts a standards-compatible Web Push payload and signs it with VAPID",
   const recipientPublic = new Uint8Array(await crypto.subtle.exportKey("raw", recipient.publicKey));
   const authSecret = crypto.getRandomValues(new Uint8Array(16));
   const subscription = {
-    endpoint: "https://push.example.test/send/test-subscription",
+    endpoint: "https://fcm.googleapis.com/send/test-subscription",
     p256dh: base64Url(recipientPublic),
     auth: base64Url(authSecret),
   };
@@ -87,7 +114,7 @@ test("encrypts a standards-compatible Web Push payload and signs it with VAPID",
   const [encodedHeader, encodedClaims, encodedSignature] = token.split(".");
   assert.deepEqual(JSON.parse(decoder.decode(decodeBase64Url(encodedHeader))), { typ: "JWT", alg: "ES256" });
   const claims = JSON.parse(decoder.decode(decodeBase64Url(encodedClaims)));
-  assert.equal(claims.aud, "https://push.example.test");
+  assert.equal(claims.aud, "https://fcm.googleapis.com");
   assert.equal(claims.sub, "https://almadina-express.onrender.com");
   const vapidPublic = await crypto.subtle.importKey(
     "raw",

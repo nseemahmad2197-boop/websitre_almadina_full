@@ -1,3 +1,4 @@
+import { logServiceEvent } from "../app/lib/security-events";
 /** Render/Node entry point for the Almadina Express application. */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -84,7 +85,7 @@ async function renderPublicAsset(request: Request, pathname: string): Promise<Re
     if (asset.serviceWorker) headers.set("Service-Worker-Allowed", "/");
     return new Response(request.method === "HEAD" ? null : bytes, { status: 200, headers });
   } catch (error) {
-    console.error(`Render could not read public/${asset.file}.`, error);
+    logServiceEvent("asset_unavailable");
     return Response.json({ error: "ملف التطبيق المطلوب غير متاح على الخادم." }, { status: 500 });
   }
 }
@@ -138,7 +139,7 @@ const worker = {
           : Response.json({ status: "unhealthy" }, { status: 503 });
         return withSecurityHeaders(request, response);
       } catch (error) {
-        console.error("Render health check could not reach PostgreSQL.", error);
+        logServiceEvent("health_failed");
         return withSecurityHeaders(request, Response.json({ status: "unhealthy" }, { status: 503 }));
       }
     }
@@ -147,7 +148,7 @@ const worker = {
       try {
         return withSecurityHeaders(request, await handleAlmadinaApi(request, resolveDatabase(env), passwordResetDeliveryConfig(env, ctx)));
       } catch (error) {
-        console.error("Almadina API could not reach PostgreSQL.", error);
+        logServiceEvent("database_unavailable");
         return withSecurityHeaders(request, unavailableDatabaseResponse());
       }
     }
