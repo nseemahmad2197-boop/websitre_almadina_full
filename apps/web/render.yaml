@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: almadina-express
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.1
+      - key: DEPLOY_TARGET
+        value: render
+      - key: VINEXT_TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: almadina-express-db
+          property: connectionString
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_FROM_EMAIL
+        sync: false
+      - key: BREVO_FROM_NAME
+        value: Almadina Express
+      - key: GEOAPIFY_API_KEY
+        sync: false
+      - key: ALMADINA_ADMIN_PASSWORD
+        sync: false
+      - key: ALMADINA_ADMIN_EMAIL
+        sync: false
+      - key: ALMADINA_ADMIN_PHONE
+        sync: false
+      - key: ALMADINA_ADMIN_NAME
+        value: إدارة المدينة إكسبرس
+      - key: ALMADINA_SECOND_ADMIN_EMAIL
+        sync: false
+      - key: ALMADINA_SECOND_ADMIN_PASSWORD
+        sync: false
+      - key: ALMADINA_SECOND_ADMIN_PHONE
+        sync: false
+      - key: ALMADINA_SECOND_ADMIN_NAME
+        sync: false
+
+databases:
+  - name: almadina-express-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "18"
+    ipAllowList: []

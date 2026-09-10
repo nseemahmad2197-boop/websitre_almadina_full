@@ -1,0 +1,4 @@
+-keepattributes *Annotation*
+-keepclassmembers class kotlinx.serialization.** { *; }
+-dontwarn org.conscrypt.**
+-dontwarn com.google.errorprone.annotations.**

@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">المدينة إكسبرس</string>
+    <string name="notification_channel_name">تحديثات المدينة إكسبرس</string>
+    <string name="notification_channel_description">إشعارات الطرود والتحصيلات والملاحظات</string>
+</resources>

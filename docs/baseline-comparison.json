@@ -1,0 +1,26 @@
+{
+  "web": {
+    "baselineFiles": 123,
+    "missing": [],
+    "changedBeforeDocumentation": [
+      "app/lib/data.ts"
+    ],
+    "productionSourceEquivalentIgnoringNewCommentsAndWhitespace": true
+  },
+  "android": {
+    "baselineFiles": 67,
+    "missing": [],
+    "changedBeforeDocumentation": [
+      "app/src/main/java/com/almadinaexpress/app/data/Models.kt"
+    ],
+    "productionSourceEquivalentIgnoringNewCommentsAndWhitespace": true
+  },
+  "ios": {
+    "baselineFiles": 59,
+    "missing": [],
+    "changedBeforeDocumentation": [
+      "Sources/AlmadinaCore/BusinessRules.swift"
+    ],
+    "productionSourceEquivalentIgnoringNewCommentsAndWhitespace": true
+  }
+}

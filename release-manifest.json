@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "repositoryRelease": "1.0.0",
+  "createdAt": "2026-09-10",
+  "applications": {
+    "web": {
+      "path": "apps/web",
+      "baselineVersion": "45",
+      "baselineArchive": "Almadina-Express-Website-v45.zip",
+      "baselineSha256": "5c20971fa863a1503e06237a342ba24bf6942b85b4760129aaf7c0beb48ce015"
+    },
+    "android": {
+      "path": "apps/android",
+      "baselineVersion": "2.9.9",
+      "baselineArchive": "Almadina-Express-Native-v2.9.9-source.zip",
+      "baselineSha256": "22fe420ea3ab30cb45af27cb74556631bae4914a7e337e13962ba13c51e93ec0"
+    },
+    "ios": {
+      "path": "apps/ios",
+      "baselineVersion": "1.0.12",
+      "baselineArchive": "Almadina-Express-iOS-v1.0.12-source.zip",
+      "baselineSha256": "dd3f697c47f2a68cf91bc314074df901fd9d246e618d04cbfb1f3410c91934dd"
+    }
+  }
+}
