@@ -3779,7 +3779,7 @@ test("issues an anonymous discoverable-passkey challenge and consumes it only on
   assert.equal(replayed.status, 401);
   assert.equal(replayed.body.error, rejected.body.error);
 
-  for (let attempt = 1; attempt < 30; attempt += 1) {
+  for (let attempt = 1; attempt < 60; attempt += 1) {
     const allowed = await call(worker, database, "passkey/login/options", { method: "POST", payload: {} });
     assert.equal(allowed.status, 200);
   }
@@ -3793,14 +3793,15 @@ test("issues an anonymous discoverable-passkey challenge and consumes it only on
     payload: {},
     headers: { "x-forwarded-for": "203.0.113.20", "cf-connecting-ip": "198.51.100.1" },
   });
-  assert.equal(otherAddress.status, 200);
+  // Unauthenticated forwarding headers no longer create fresh rate buckets.
+  assert.equal(otherAddress.status, 429);
   const spoofedCloudflareHeader = await call(worker, database, "passkey/login/options", {
     method: "POST",
     payload: {},
     headers: { "x-forwarded-for": "203.0.113.20", "cf-connecting-ip": "198.51.100.99" },
   });
-  assert.equal(spoofedCloudflareHeader.status, 200);
-  assert.equal(database.rateLimits.size, 3);
+  assert.equal(spoofedCloudflareHeader.status, 429);
+  assert.equal(database.rateLimits.size, 2);
   for (const [keyHash, rateLimit] of database.rateLimits) {
     assert.match(keyHash, /^[a-f0-9]{64}$/);
     assert.match(rateLimit.action, /^passkey-login-(options|verify)$/);
@@ -5349,6 +5350,23 @@ test("rejects malformed, scalar and excessively nested JSON without touching acc
     assert.equal(result.status, 400, rawBody.slice(0, 30));
     assert.match(result.headers.get("X-Request-ID"), /^[a-f0-9-]{36}$/);
     assert.deepEqual(database.state, original);
+  }
+});
+
+test("unverified Render clients use short shared public budgets rather than ten-minute per-IP lockouts", async () => {
+  const worker = await loadWorker();
+  const db = new FakeD1Database();
+  for (let i = 0; i < 35; i++) {
+    const tracking = await call(worker, db, `track?tracking=ALX-${10000000 + i}`);
+    assert.equal(tracking.status, 404);
+    const receipt = await call(worker, db, "account/deletion-receipt", { method: "POST", payload: { receiptToken: "a".repeat(64) } });
+    assert.equal(receipt.status, 404);
+    const location = await call(worker, db, "geocode/reverse", { method: "POST", payload: { latitude: 32.2211, longitude: 35.2544 }, environment: { REVERSE_GEOCODER: async () => ({ city: "نابلس", state: "محافظة نابلس", street: "الشارع" }) } });
+    assert.equal(location.status, 200);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  for (const bucket of db.rateLimits.values()) if (["public-tracking-ip", "deletion-receipt", "reverse-geocode"].includes(bucket.action)) {
+    assert.ok(bucket.reset_at <= now + 60);
   }
 });
 

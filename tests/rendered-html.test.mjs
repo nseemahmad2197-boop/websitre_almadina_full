@@ -1792,3 +1792,25 @@ test("serves privacy, deletion and support pages without an app session", async 
     assert.doesNotMatch(html, /0599000000/);
   }
 });
+
+
+test("all rendered page scripts have the fresh CSP nonce, including hydration streams", async () => {
+  const { default: worker } = await import(new URL("../dist/server/index.js", import.meta.url));
+  const nonces = new Set();
+  for (const path of ["/", "/privacy", "/support", "/delete-account"]) {
+    const response = await worker.fetch(new Request(`https://example.test${path}`, { headers: { accept: "text/html", "X-Almadina-CSP-Nonce": "untrusted" } }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+    assert.equal(response.status, 200);
+    const csp = response.headers.get("Content-Security-Policy");
+    const nonce = csp.match(/'nonce-([^']+)'/)?.[1];
+    assert.ok(nonce);
+    assert.equal(nonces.has(nonce), false);
+    nonces.add(nonce);
+    const scriptRule = csp.split(";").find(rule => rule.trim().startsWith("script-src "));
+    assert.doesNotMatch(scriptRule, /unsafe-inline|untrusted/);
+    assert.match(response.headers.get("Cache-Control"), /no-store/);
+    const html = await response.text();
+    const scripts = [...html.matchAll(/<script\b([^>]*)>/g)];
+    assert.ok(scripts.length > 0);
+    for (const [, attrs] of scripts) if (!attrs.includes("src=")) assert.ok(attrs.includes(`nonce="${nonce}"`), path);
+  }
+});

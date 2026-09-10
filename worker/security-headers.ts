@@ -1,6 +1,8 @@
-const DOCUMENT_CSP = [
+import { copyTrustedClientAddress } from "../app/lib/trusted-client.ts";
+
+function documentPolicy(nonce?: string) { return [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  nonce ? `script-src 'self' 'nonce-${nonce}'` : "script-src 'self'",
   "script-src-attr 'none'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://tile.openstreetmap.org",
@@ -14,12 +16,29 @@ const DOCUMENT_CSP = [
   "frame-src 'none'",
   "object-src 'none'",
   "upgrade-insecure-requests",
-].join("; ");
+].join("; "); }
+
+export function documentRequest(request: Request): Request {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const nonce = btoa(String.fromCharCode(...bytes));
+  const headers = new Headers(request.headers);
+  // Framework reads the request CSP to nonce its SSR/hydration scripts.
+  // Never accept a policy or nonce supplied by the visitor.
+  headers.set("Content-Security-Policy", documentPolicy(nonce));
+  headers.delete("Content-Security-Policy-Report-Only");
+  headers.set("X-Almadina-CSP-Nonce", nonce);
+  return copyTrustedClientAddress(request, new Request(request, { headers }));
+}
 
 export function withSecurityHeaders(request: Request, response: Response): Response {
   if (response.status === 101) return response;
   const headers = new Headers(response.headers);
-  if (!headers.has("Content-Security-Policy")) headers.set("Content-Security-Policy", DOCUMENT_CSP);
+  if (!headers.has("Content-Security-Policy")) headers.set("Content-Security-Policy", documentPolicy());
+  if (headers.get("content-type")?.includes("text/html")) {
+    const nonce = request.headers.get("X-Almadina-CSP-Nonce");
+    headers.set("Content-Security-Policy", documentPolicy(nonce && /^[A-Za-z0-9+/]{32}$/.test(nonce) ? nonce : undefined));
+    headers.set("Cache-Control", "private, no-store");
+  }
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
   headers.set("Permissions-Policy", "camera=(self), geolocation=(self), microphone=(), payment=(), publickey-credentials-get=(self), usb=()");

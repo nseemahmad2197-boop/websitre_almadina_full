@@ -7,7 +7,8 @@ import { getRenderDatabase } from "../app/lib/postgres-d1-adapter";
 import { handleAlmadinaApi, type AlmadinaApiConfig } from "../app/lib/server-database";
 import type { PasswordResetSender } from "../app/lib/password-reset-delivery";
 import type { ReverseGeocoder } from "../app/lib/reverse-geocoding";
-import { withSecurityHeaders } from "./security-headers";
+import { documentRequest, withSecurityHeaders } from "./security-headers";
+import { HealthProbe, OperationalSecurity, type SecurityConfig } from "./operational-security";
 
 interface Env {
   DB?: D1Database;
@@ -124,6 +125,18 @@ function unavailableDatabaseResponse(): Response {
   );
 }
 
+const protection = new OperationalSecurity();
+const health = new HealthProbe();
+function securityConfig(): SecurityConfig {
+  return {
+    edgeToken: process.env.ALMADINA_EDGE_TOKEN,
+    monitorToken: process.env.ALMADINA_MONITOR_TOKEN,
+    concurrentAPI: Number(process.env.ALMADINA_MAX_API_CONCURRENCY),
+    concurrentAuth: Number(process.env.ALMADINA_MAX_AUTH_CONCURRENCY),
+    authPerMinute: Number(process.env.ALMADINA_AUTH_BUDGET_PER_MINUTE),
+    requestsPerMinute: Number(process.env.ALMADINA_REQUEST_BUDGET_PER_MINUTE),
+  };
+}
 const worker = {
   async fetch(request: Request, env: Env | undefined, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -132,28 +145,27 @@ const worker = {
     if (publicAsset) return withSecurityHeaders(request, publicAsset);
 
     if (url.pathname === "/health") {
-      try {
+      return withSecurityHeaders(request, await health.check(async () => {
         const result = await resolveDatabase(env).prepare("SELECT 1 AS ok").first<{ ok: number }>();
-        const response = result?.ok === 1
-          ? Response.json({ status: "ok" })
-          : Response.json({ status: "unhealthy" }, { status: 503 });
-        return withSecurityHeaders(request, response);
-      } catch (error) {
-        logServiceEvent("health_failed");
-        return withSecurityHeaders(request, Response.json({ status: "unhealthy" }, { status: 503 }));
-      }
+        return result?.ok === 1;
+      }));
     }
 
+    if (url.pathname === "/ops/metrics") return withSecurityHeaders(request, await protection.metrics(request, securityConfig()));
+
     if (url.pathname.startsWith("/api/almadina/")) {
-      try {
+      return withSecurityHeaders(request, await protection.run(request, securityConfig(), async () => { try {
         return withSecurityHeaders(request, await handleAlmadinaApi(request, resolveDatabase(env), passwordResetDeliveryConfig(env, ctx)));
       } catch (error) {
         logServiceEvent("database_unavailable");
         return withSecurityHeaders(request, unavailableDatabaseResponse());
-      }
+      } }));
     }
 
-    return withSecurityHeaders(request, await handler.fetch(request, env ?? {}, ctx));
+    return protection.run(request, securityConfig(), async () => {
+      const secured = documentRequest(request);
+      return withSecurityHeaders(secured, await handler.fetch(secured, env ?? {}, ctx));
+    });
   },
 };
 

@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-10",
+  "website_release": "v45",
+  "android_release": "2.9.9 (41), unchanged",
+  "ios_release": "1.0.12 (13), unchanged",
+  "scope": "Local source and dependencies; no production penetration test or load test",
+  "changes": {
+    "fflate": "0.7.4 -> 0.7.5",
+    "miniflare/sharp": "0.35.2 -> 0.35.4"
+  },
+  "npm_audit_includes_dev": true,
+  "npm_audit_result": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "dependencies": {
+        "prod": 162,
+        "dev": 456,
+        "optional": 227,
+        "peer": 47,
+        "peerOptional": 0,
+        "total": 755
+      }
+    }
+  },
+  "validation": {
+    "website_build": "passed",
+    "website_tests": {
+      "passed": 119,
+      "failed": 0
+    },
+    "targeted_security_recheck": {
+      "passed": 19,
+      "failed": 0,
+      "subset_of_full_suite": true
+    },
+    "zip_round_trip": "passed",
+    "sharp_png_resize": "passed",
+    "native_android_build": "not run",
+    "native_ios_build": "not run",
+    "production_deployment": "not performed"
+  },
+  "advisories": [
+    "https://github.com/advisories/GHSA-px8p-9vwx-vf98",
+    "https://github.com/advisories/GHSA-rgj7-g3m4-5g8c"
+  ],
+  "limitations": [
+    "Known dependency advisories only; zero does not mean zero vulnerabilities",
+    "Actual production version, edge configuration, MFA, monitoring, backup restore and device security are unverified"
+  ]
+}
