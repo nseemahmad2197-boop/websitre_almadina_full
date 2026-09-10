@@ -1,12 +1,14 @@
+# Standalone website: repository root. Keep the existing Render service and database.
 services:
   - type: web
     name: almadina-express
     runtime: node
-    plan: free
+    rootDir: .
+    # Existing service: preserve its selected compute plan during sync.
     region: frankfurt
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
-    autoDeployTrigger: commit
+    autoDeployTrigger: checksPass
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
@@ -15,6 +17,8 @@ services:
         value: render
       - key: VINEXT_TRUST_PROXY
         value: "1"
+      - key: ALMADINA_MONITOR_TOKEN
+        generateValue: true
       - key: DATABASE_URL
         fromDatabase:
           name: almadina-express-db
@@ -46,7 +50,7 @@ services:
 
 databases:
   - name: almadina-express-db
-    plan: free
+    # Preserve existing plan. Managed backups/PITR require a paid database.
     region: frankfurt
     postgresMajorVersion: "18"
     ipAllowList: []

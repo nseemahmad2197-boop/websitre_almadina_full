@@ -10,11 +10,12 @@
     "dev": "vite",
     "build": "bash scripts/build-verified.sh",
     "start": "vinext start",
-    "test": "npm run build && node --experimental-strip-types --test tests/postgres-adapter.test.mjs tests/rendered-html.test.mjs tests/shared-database.test.mjs tests/web-push.test.mjs tests/browser-permissions.test.mjs tests/swipe-delete-events.test.mjs tests/security-resilience.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/postgres-adapter.test.mjs tests/rendered-html.test.mjs tests/shared-database.test.mjs tests/web-push.test.mjs tests/browser-permissions.test.mjs tests/swipe-delete-events.test.mjs tests/security-resilience.test.mjs tests/pricing-contract.test.mjs tests/operational-security.test.mjs",
     "typecheck": "tsc --noEmit --incremental false",
     "test:swipe": "node tests/swipe-delete.browser.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
+    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
+    "test:pricing": "node --experimental-strip-types --test tests/pricing-contract.test.mjs"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
@@ -48,6 +49,9 @@
     "wrangler": "4.128.0"
   },
   "overrides": {
+    "miniflare": {
+      "sharp": "0.35.4"
+    },
     "@esbuild-kit/core-utils": {
       "esbuild": "0.25.12"
     }

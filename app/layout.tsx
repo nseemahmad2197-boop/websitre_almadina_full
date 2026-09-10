@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+// Nonces must be generated per response, never reused from prerendered HTML.
+export const dynamic = "force-dynamic";
+
 const title = "المدينة إكسبرس | Almadina Express";
 const description =
   "منصة المدينة إكسبرس لإدارة الطرود، إنشائها، تتبع التوصيل، ومتابعة عمليات الشحن داخل فلسطين.";

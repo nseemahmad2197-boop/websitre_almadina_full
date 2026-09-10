@@ -1,0 +1,38 @@
+{
+  "package_date": "2026-09-10",
+  "source": "Independent website source with security hardening v46",
+  "independent_from_other_source_repositories": true,
+  "application_logic_preserved": true,
+  "production_deployed": false,
+  "production_database_accessed": false,
+  "monorepo_aggregate_gate_included": false,
+  "project": "website",
+  "root_directory": ".",
+  "build": "PASS: Cloudflare and Render targets built",
+  "tests": {
+    "passed": 132,
+    "failed": 0,
+    "skipped": 0
+  },
+  "dependency_lockfile": "unchanged from source",
+  "fresh_dependency_advisory_scan": {
+    "status": "PASS",
+    "date": "2026-09-10",
+    "includes_development_dependencies": true,
+    "known_advisories": 0
+  },
+  "runtime_comparison": "Security hardening source changes; interface and business-rule tests retained",
+  "source_files": 133,
+  "security_hardening_date": "2026-09-10",
+  "website_security_release": "v46",
+  "typescript": "PASS: tsc --noEmit --incremental false",
+  "operational_activation": {
+    "render_account_connected": false,
+    "notifications_configured": false,
+    "encrypted_backup_uploaded": false,
+    "real_restore_executed": false,
+    "edge_origin_restriction_enabled": false
+  },
+  "limits": "Source tests and mocked operations do not prove device security, complete vulnerability coverage or production recovery.",
+  "render_target_smoke": "PASS: four HTML routes with matching per-response CSP nonce, mock database health, protected metrics and three static assets"
+}

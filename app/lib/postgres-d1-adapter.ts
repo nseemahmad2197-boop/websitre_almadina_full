@@ -164,6 +164,9 @@ export function getRenderDatabase(): D1Database {
       max: 5,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
+      // Release database resources even when a query/transaction is stalled.
+      statement_timeout: 15_000,
+      idle_in_transaction_session_timeout: 15_000,
     }));
   }
 

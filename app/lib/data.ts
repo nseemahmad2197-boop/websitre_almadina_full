@@ -257,6 +257,7 @@ function mergeLocalities(...groups: readonly (readonly string[])[]): string[] {
   }));
 }
 
+// Approved standalone fee defaults; covered by tests/pricing-contract.test.mjs.
 const curatedGovernorates = [
   {
     name: "الخليل", fee: 25, cities: [
@@ -372,6 +373,9 @@ export function resolveDeliveryRegion(governorate: string, city = "") {
   return matchingRegions.length === 1 ? matchingRegions[0] : undefined;
 }
 
+// BEGIN SHARED PRICING
+// Approved standalone tariffs. Review pricing-contract tests when changing company prices.
+// Source SHA256: ca5887f6f4baa65560f91e765b5189054c786561ec61efab5a10f5bf397f3cee
 export const deliveryPricing = {
   standard: { westBank: 25, jerusalem: 35, interior: 80 },
   premium: { westBank: 20, jerusalem: 30, interior: 65 },
@@ -383,6 +387,7 @@ export const returnPricing = {
   premium: { westBank: 15, jerusalem: 25, interior: 40 },
   diamond: { westBank: 10, jerusalem: 15, interior: 25 },
 } as const;
+// END SHARED PRICING
 
 export const RETURN_PRICING_VERSION = 1;
 

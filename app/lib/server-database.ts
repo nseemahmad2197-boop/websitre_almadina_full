@@ -1,4 +1,6 @@
 import { logRequestEvent, logServiceEvent } from "./security-events";
+import { copyTrustedClientAddress, trustedClientAddress } from "./trusted-client";
+import { BodyLimitError, readBoundedBody } from "./bounded-body";
 import { deletionPolicy, type AccountDeletionRequestRecord } from "./account-deletion";
 import {
   generateAuthenticationOptions,
@@ -222,33 +224,17 @@ async function validateApiRequestEnvelope(request: Request): Promise<Request | R
     return json({ error: "نوع محتوى الطلب غير مدعوم." }, 415);
   }
 
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalLength = 0;
+  let body: Uint8Array<ArrayBuffer>;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      totalLength += value.byteLength;
-      if (totalLength > MAX_API_BODY_BYTES) {
-        await reader.cancel();
-        return json({ error: "حجم الطلب أكبر من الحد المسموح." }, 413);
-      }
-      chunks.push(value);
-    }
-  } catch {
+    body = await readBoundedBody(request.body, MAX_API_BODY_BYTES);
+  } catch (error) {
+    if (error instanceof BodyLimitError) return json({ error: error.status === 408 ? "انتهت مهلة إرسال الطلب." : "حجم الطلب أكبر من الحد المسموح." }, error.status);
     return json({ error: "تعذّرت قراءة بيانات الطلب." }, 400);
   }
+  const totalLength = body.byteLength;
 
   if (totalLength > 0 && !jsonContentType) return json({ error: "نوع محتوى الطلب غير مدعوم." }, 415);
 
-  const body = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
   if (totalLength > 0) {
     try {
       const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
@@ -265,7 +251,7 @@ async function validateApiRequestEnvelope(request: Request): Promise<Request | R
       }
     } catch { return json({ error: "بيانات الطلب غير صالحة. تحقق منها وحاول مجددًا." }, 400); }
   }
-  return new Request(request, { body });
+  return copyTrustedClientAddress(request, new Request(request, { body }));
 }
 
 function cookieHeaders(...cookies: string[]): Headers {
@@ -1082,9 +1068,12 @@ function registrationCookie(request: Request, token: string, maxAge = REGISTRATI
 
 async function enforcePublicPasskeyRateLimit(database: D1Database, request: Request, action: "options" | "verify", limit: number): Promise<void> {
   const clientAddress = requestClientAddress(request);
+  // Without verified network identity use a short shared budget, not a long
+  // per-IP lockout that one attacker could apply to every customer on Render.
+  if (clientAddress === "unknown") limit = 60;
   const keyHash = await sha256(`passkey-login:${action}:${clientAddress}`);
   const now = Math.floor(Date.now() / 1000);
-  const resetAt = now + PASSKEY_RATE_LIMIT_WINDOW;
+  const resetAt = now + (clientAddress === "unknown" ? 60 : PASSKEY_RATE_LIMIT_WINDOW);
 
   await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
   const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
@@ -1152,9 +1141,7 @@ async function enforcePasswordChangeRateLimit(database: D1Database, userId: stri
 }
 
 function requestClientAddress(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
-  const cloudflareAddress = "cf" in request ? request.headers.get("cf-connecting-ip")?.trim() : "";
-  return (cloudflareAddress || forwarded.at(0) || "unknown").slice(0, 128).toLowerCase();
+  return trustedClientAddress(request);
 }
 
 async function enforceEndpointRateLimit(
@@ -1165,6 +1152,10 @@ async function enforceEndpointRateLimit(
   windowSeconds: number,
   message: string,
 ): Promise<void> {
+  if (keyMaterial === "unknown" && (namespace === "public-tracking-ip" || namespace === "deletion-receipt")) {
+    limit = 120;
+    windowSeconds = 60;
+  }
   const keyHash = await sha256(`${namespace}:${keyMaterial}`);
   const now = Math.floor(Date.now() / 1000);
   const resetAt = now + windowSeconds;
@@ -1207,6 +1198,7 @@ async function enforcePasswordResetRateLimit(
   limit: number,
   windowSeconds: number,
 ): Promise<void> {
+  if (keyMaterial === "unknown" && action.endsWith("-ip")) { limit = 120; windowSeconds = 60; }
   const keyHash = await sha256(`password-reset:${action}:${keyMaterial}`);
   const now = Math.floor(Date.now() / 1000);
   const resetAt = now + windowSeconds;
@@ -1259,6 +1251,7 @@ async function enforceRegistrationRateLimit(
   limit: number,
   windowSeconds: number,
 ): Promise<void> {
+  if (keyMaterial === "unknown" && action.endsWith("-ip")) { limit = 120; windowSeconds = 60; }
   const keyHash = await sha256(`registration:${action}:${keyMaterial}`);
   const now = Math.floor(Date.now() / 1000);
   const resetAt = now + windowSeconds;
@@ -1277,9 +1270,10 @@ async function enforceRegistrationRateLimit(
 }
 
 async function enforceReverseGeocodeRateLimit(database: D1Database, request: Request): Promise<void> {
-  const keyHash = await sha256(`reverse-geocode:${requestClientAddress(request)}`);
+  const address = requestClientAddress(request);
+  const keyHash = await sha256(`reverse-geocode:${address}`);
   const now = Math.floor(Date.now() / 1000);
-  const resetAt = now + REVERSE_GEOCODE_RATE_LIMIT_WINDOW;
+  const resetAt = now + (address === "unknown" ? 60 : REVERSE_GEOCODE_RATE_LIMIT_WINDOW);
   await database.prepare("DELETE FROM almadina_rate_limits WHERE reset_at <= ?").bind(now).run();
   const rate = await database.prepare(`INSERT INTO almadina_rate_limits (key_hash, action, request_count, reset_at)
     VALUES (?, ?, 1, ?)
@@ -1289,7 +1283,7 @@ async function enforceReverseGeocodeRateLimit(database: D1Database, request: Req
       reset_at = CASE WHEN almadina_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE almadina_rate_limits.reset_at END
     RETURNING request_count, reset_at`)
     .bind(keyHash, "reverse-geocode", resetAt, now, now).first<RateLimitRow>();
-  if (!rate || rate.request_count > REVERSE_GEOCODE_REQUEST_IP_LIMIT) {
+  if (!rate || rate.request_count > (address === "unknown" ? 120 : REVERSE_GEOCODE_REQUEST_IP_LIMIT)) {
     throw new ApiRequestError("محاولات كثيرة لتحديد العنوان من الخريطة. انتظر عشر دقائق أو أدخل العنوان يدويًا.", 429);
   }
 }
@@ -3320,7 +3314,7 @@ async function login(database: D1Database, request: Request, config: AlmadinaApi
   const password = typeof payload.password === "string" ? payload.password.slice(0, 256) : "";
   const rateLimitMessage = "محاولات تسجيل دخول كثيرة. انتظر بضع دقائق ثم حاول مجددًا.";
   const loginLimits = [
-    { namespace: "login-ip-failures-v2", key: requestClientAddress(request), limit: LOGIN_REQUEST_IP_LIMIT },
+    ...(requestClientAddress(request) === "unknown" ? [] : [{ namespace: "login-ip-failures-v2", key: requestClientAddress(request), limit: LOGIN_REQUEST_IP_LIMIT }]),
     { namespace: "login-identifier-failures-v2", key: email || "invalid", limit: LOGIN_REQUEST_IDENTIFIER_LIMIT },
   ];
   for (const limit of loginLimits) {
