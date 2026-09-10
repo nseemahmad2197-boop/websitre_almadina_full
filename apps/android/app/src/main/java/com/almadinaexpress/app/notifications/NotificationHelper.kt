@@ -12,6 +12,7 @@ import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.almadinaexpress.app.MainActivity
 import com.almadinaexpress.app.R
 import com.almadinaexpress.app.data.NoticeItem
@@ -128,6 +129,16 @@ object NotificationHelper {
             .setDefaults(if (sounds) NotificationCompat.DEFAULT_ALL else 0)
             .setSilent(!sounds)
             .build()
-        NotificationManagerCompat.from(context).notify(notice.id.hashCode(), notification)
+        // Keep this check at the call site: Lint cannot infer the permission
+        // guarantee from notificationsAllowed(), and permission can be revoked.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        try {
+            NotificationManagerCompat.from(context).notify(notice.id.hashCode(), notification)
+        } catch (_: SecurityException) {
+            // The user may revoke permission between the check and notify().
+            // Skip this notification; keep the in-app notice and sync working.
+        }
     }
 }

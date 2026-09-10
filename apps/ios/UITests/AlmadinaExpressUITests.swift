@@ -6,11 +6,23 @@ final class AlmadinaExpressUITests: XCTestCase {
     private var app: XCUIApplication!
     override func setUpWithError() throws {
         continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
         app.launchArguments = ["--ui-test-no-network", "-AppleLanguages", "(ar)", "-AppleLocale", "ar_PS"]
         app.launch()
     }
-    override func tearDownWithError() throws { app.terminate(); app = nil }
+    override func tearDownWithError() throws {
+        if (testRun?.failureCount ?? 0) > 0 {
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "Failure-screen"; screenshot.lifetime = .keepAlways; add(screenshot)
+            if app.state == .runningForeground {
+                let hierarchy = XCTAttachment(string: app.debugDescription)
+                hierarchy.name = "Failure-accessibility-tree"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+            }
+        }
+        app.terminate(); app = nil
+        XCUIDevice.shared.orientation = .portrait
+    }
     func testNativeLoginHasNoAutomaticPermissionPrompt() throws {
         let login = app.buttons["login.submit"]
         XCTAssertTrue(login.waitForExistence(timeout: 10))
@@ -129,23 +141,28 @@ final class AlmadinaExpressUITests: XCTestCase {
         else { app.buttons["التحصيلات"].firstMatch.tap() }
     }
     private func invoiceRow(_ id: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: "invoice.row." + id).firstMatch
+        // Swipe the List cell, not an arbitrary text descendant inheriting
+        // the NavigationLink identifier. Both table and collection-backed
+        // SwiftUI Lists expose their rows through cells.
+        let identifier = "invoice.row." + id
+        let cell = app.cells.matching(identifier: identifier).firstMatch
+        if cell.exists { return cell }
+        return app.cells.containing(.any, identifier: identifier).firstMatch
     }
     func testPaidInvoiceCardsRevealDeleteOnPhysicalLeftSwipeAndCancelKeepsThem() throws {
         openInvoiceFixture()
         for id in ["ui-paid", "ui-paid-company"] {
             let row = invoiceRow(id)
-            XCTAssertTrue(row.waitForExistence(timeout: 5))
             reveal(row)
             // Also test a long swipe: deletion requires tapping and confirmation.
             row.swipeLeft(velocity: .fast)
-            let deletion = app.buttons["حذف الفاتورة"].firstMatch
+            let deletion = app.buttons["invoice.delete." + id + ".reveal"]
             XCTAssertTrue(deletion.waitForExistence(timeout: 3))
             XCTAssertTrue(deletion.isHittable)
             XCTAssertTrue(row.exists)
             deletion.tap()
             XCTAssertTrue(app.staticTexts["حذف الفاتورة من قائمتك؟"].waitForExistence(timeout: 3))
-            app.buttons["إلغاء"].tap()
+            app.buttons["invoice.delete." + id + ".cancel"].tap()
             XCTAssertTrue(row.exists)
             XCTAssertFalse(app.staticTexts["الاتصال معطّل في اختبارات الواجهة."].exists)
         }
@@ -153,7 +170,6 @@ final class AlmadinaExpressUITests: XCTestCase {
     func testOutstandingInvoiceCardDoesNotExposeDeleteOnLeftSwipe() throws {
         openInvoiceFixture()
         let row = invoiceRow("ui-due")
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
         reveal(row)
         row.swipeLeft()
         XCTAssertFalse(app.buttons["حذف الفاتورة"].exists)
@@ -162,18 +178,67 @@ final class AlmadinaExpressUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["تفاصيل التحصيل"].waitForExistence(timeout: 5))
     }
     private func clearOrderForm() throws {
-        app.navigationBars.buttons["مسح جميع الحقول"].tap()
-        let clear = try XCTUnwrap(app.buttons.matching(identifier: "مسح جميع الحقول").allElementsBoundByIndex.last)
+        let open = app.buttons["order.clear.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        open.tap()
+        let clear = app.buttons["order.clear.confirm"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
         clear.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: clear)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
     }
-    private func reveal(_ element: XCUIElement) {
-        for _ in 0..<8 { if element.isHittable { break }; app.swipeUp() }
-        XCTAssertTrue(element.isHittable)
+    private func reveal(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        for _ in 0..<16 {
+            let viewport = scrollViewport()
+            guard viewport.height > 40 else { break }
+            let frame = element.exists ? element.frame : .zero
+            if element.isHittable && frame.minY >= viewport.minY && frame.maxY <= viewport.maxY { return }
+            let above = !frame.isEmpty && frame.midY < viewport.minY
+            // Stay inside the scroll view, outside the keyboard, tab bar and
+            // multiline text views. App-wide swipes can operate the keyboard.
+            let startY = viewport.minY + viewport.height * (above ? 0.25 : 0.75)
+            let endY = viewport.minY + viewport.height * (above ? 0.75 : 0.25)
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let x = viewport.maxX - 12 - app.frame.minX
+            let start = origin.withOffset(CGVector(dx: x, dy: startY - app.frame.minY))
+            let end = origin.withOffset(CGVector(dx: x, dy: endY - app.frame.minY))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTFail("Could not reveal \(element.identifier): \(element.debugDescription)", file: file, line: line)
+    }
+    private func scrollViewport() -> CGRect {
+        let scrolls = app.scrollViews.allElementsBoundByIndex + app.collectionViews.allElementsBoundByIndex + app.tables.allElementsBoundByIndex
+        let frames = scrolls.filter { $0.isHittable }.map { $0.frame.intersection(app.frame) }.filter { !$0.isNull && !$0.isEmpty }
+        // On iPad use the detail pane's scroll region; the sidebar's large
+        // title must not reduce the usable area of a different column.
+        var viewport = frames.max { $0.width * $0.height < $1.width * $1.height } ?? app.frame
+        for bar in app.navigationBars.allElementsBoundByIndex where bar.isHittable && bar.frame.intersection(viewport).width > 0 && bar.frame.minY <= viewport.minY {
+            let top = max(viewport.minY, bar.frame.maxY)
+            viewport = CGRect(x: viewport.minX, y: top, width: viewport.width, height: max(0, viewport.maxY - top))
+        }
+        let bottomControls = app.tabBars.allElementsBoundByIndex + app.keyboards.allElementsBoundByIndex
+        for control in bottomControls where control.exists && control.frame.intersects(viewport) {
+            viewport.size.height = max(0, min(viewport.maxY, control.frame.minY) - viewport.minY)
+        }
+        guard viewport.width > 32, viewport.height > 32 else { return .zero }
+        return viewport.insetBy(dx: 4, dy: 8)
+    }
+    private func goBack(from title: String, to previousTitle: String) {
+        let bar = app.navigationBars[title]
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        // Index 0 can be a menu/toolbar button in RTL. Match the native back
+        // button by its destination label instead of its position in the tree.
+        let labels = [previousTitle, "رجوع", "عودة", "Back"]
+        let back = bar.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", labels, labels)).firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(app.navigationBars[previousTitle].waitForExistence(timeout: 5))
     }
     private func assertValue(_ value: String, of element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
         let matches = NSPredicate(format: "value == %@", value)
         let ready = XCTNSPredicateExpectation(predicate: matches, object: element)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 3), .completed, file: file, line: line)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed,
+                       "Expected \(value); actual \(String(describing: element.value))", file: file, line: line)
     }
     func testPhoneNumberAppearsWhileEditingOrderAndCanBeCorrected() throws {
         try openCleanOrderForm()
@@ -218,8 +283,10 @@ final class AlmadinaExpressUITests: XCTestCase {
         try openCleanOrderForm()
         let price = app.textFields["سعر الطرد"]
         reveal(price); price.tap(); price.typeText("100")
-        let separator = try XCTUnwrap([".", ",", "٫"].first { app.keyboards.keys[$0].exists })
-        app.keyboards.keys[separator].tap()
+        // Exercise the app's editing buffer without relying on a system key's
+        // localized accessibility label (it need not equal its punctuation).
+        let separator = "."
+        price.typeText(separator)
         assertValue("100" + separator, of: price)
         price.typeText("50")
         assertValue("100" + separator + "50", of: price)
@@ -294,7 +361,7 @@ final class AlmadinaExpressUITests: XCTestCase {
         let search = app.textFields["بحث في الطرود"]
         reveal(search); search.tap(); search.typeText("ALX")
         assertValue("ALX", of: search)
-        XCTAssertTrue(app.staticTexts["نتائج البحث"].exists)
+        XCTAssertTrue(app.staticTexts["نتائج البحث"].waitForExistence(timeout: 5))
         search.typeText(XCUIKeyboardKey.delete.rawValue)
         assertValue("AL", of: search)
     }
@@ -303,14 +370,14 @@ final class AlmadinaExpressUITests: XCTestCase {
         app.buttons["القائمة الجانبية"].tap()
         app.buttons["navigation.settings"].tap()
         let deletion = app.buttons["حذف الحساب"]
-        for _ in 0..<5 { if deletion.isHittable { break }; app.swipeUp() }
-        XCTAssertTrue(deletion.isHittable)
+        reveal(deletion)
         deletion.tap()
         let support = app.buttons["account.support"]
         XCTAssertTrue(support.waitForExistence(timeout: 5))
+        reveal(support)
         support.tap()
         XCTAssertTrue(app.navigationBars["مركز المساعدة"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        goBack(from: "مركز المساعدة", to: "حذف الحساب")
         XCTAssertTrue(support.waitForExistence(timeout: 5))
         XCTAssertEqual(app.alerts.count, 0)
     }

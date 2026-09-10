@@ -13,6 +13,7 @@ struct CollectionsView: View {
                 Section { InvoiceLink(invoice: invoice) }
             }
         }.listStyle(.insetGrouped).searchable(text: $search, prompt: "رقم الفاتورة أو المستخدم").refreshable { await store.refresh() }
+            .accessibilityIdentifier("collections.list")
     }
 }
 
@@ -33,7 +34,7 @@ struct InvoiceLink: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8).contentShape(Rectangle())
         }
         .accessibilityIdentifier("invoice.row." + invoice.id)
-        .modifier(RowDeleteActions(title: "حذف الفاتورة من قائمتك؟", message: "يمكن استعادتها من المحذوفات. يبقى سجل التسوية محفوظًا ولا تتكرر فوترة طرودها.", enabled: canDelete, buttonTitle: "حذف الفاتورة") {
+        .modifier(RowDeleteActions(title: "حذف الفاتورة من قائمتك؟", message: "يمكن استعادتها من المحذوفات. يبقى سجل التسوية محفوظًا ولا تتكرر فوترة طرودها.", enabled: canDelete, buttonTitle: "حذف الفاتورة", accessibilityID: "invoice.delete." + invoice.id) {
             Task { _ = await store.hideCollection(invoice.id) }
         })
     }

@@ -8,6 +8,7 @@ struct RowDeleteActions: ViewModifier {
     let message: String
     let enabled: Bool
     var buttonTitle = "حذف"
+    var accessibilityID = "row.delete"
     let action: () -> Void
     @ViewBuilder func body(content: Content) -> some View {
         if enabled {
@@ -15,12 +16,15 @@ struct RowDeleteActions: ViewModifier {
                 // A physical left swipe exposes the right edge, including Arabic RTL.
                 .swipeActions(edge: direction == .rightToLeft ? .leading : .trailing, allowsFullSwipe: false) {
                     Button { confirming = true } label: { Label(buttonTitle, systemImage: "trash") }.tint(.red)
+                        .accessibilityIdentifier(accessibilityID + ".reveal")
                 }
                 .contextMenu { Button(title, role: .destructive) { confirming = true } }
                 .accessibilityAction(named: Text(title)) { confirming = true }
                 .confirmationDialog(title, isPresented: $confirming, titleVisibility: .visible) {
                     Button(buttonTitle, role: .destructive, action: action)
+                        .accessibilityIdentifier(accessibilityID + ".confirm")
                     Button("إلغاء", role: .cancel) {}
+                        .accessibilityIdentifier(accessibilityID + ".cancel")
                 } message: { Text(message) }
         } else { content }
     }

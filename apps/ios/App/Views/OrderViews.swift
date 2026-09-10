@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct OrderFormView: View {
     @EnvironmentObject var store: AppStore
@@ -80,10 +81,11 @@ struct OrderFormView: View {
             if editing == nil { Text("بعد إنشاء الطرد، أضف كوده من التفاصيل بمسح QR الخاص بملصق الشركة.").font(.footnote).foregroundStyle(.secondary) }
         }.disabled(store.busy).navigationTitle(editing == nil ? "إنشاء طرد" : "تعديل الطرد").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if editing == nil { ToolbarItem(placement: .navigationBarTrailing) { Button { clearConfirmation = true } label: { Label("مسح جميع الحقول", systemImage: "eraser") }.disabled(store.busy) } }
+                if editing == nil { ToolbarItem(placement: .navigationBarTrailing) { Button { clearConfirmation = true } label: { Label("مسح جميع الحقول", systemImage: "eraser") }.disabled(store.busy).accessibilityIdentifier("order.clear.open") } }
             }
             .confirmationDialog("مسح جميع الحقول؟", isPresented: $clearConfirmation) {
-                Button("مسح جميع الحقول", role: .destructive) { draft = OrderDraft(); scheduled = false; date = Date(); if let key = draftKey { KeychainStore.remove(key) } }
+                Button("مسح جميع الحقول", role: .destructive) { clearForm() }
+                    .accessibilityIdentifier("order.clear.confirm")
                 Button("إلغاء", role: .cancel) {}
             }
             .sheet(isPresented: $savedRecipients) {
@@ -105,6 +107,13 @@ struct OrderFormView: View {
                 if let storedDate = formatter.date(from: draft.preferredDate) { date = storedDate }
             }
             .onDisappear { if editing == nil && !completed { persistDraft() } }
+    }
+    private func clearForm() {
+        // Commit any active UIKit/IME edit before replacing the draft. A later
+        // didEndEditing callback must not put the old text back after reset.
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        draft = OrderDraft(); scheduled = false; date = Date()
+        if let key = draftKey { KeychainStore.remove(key) }
     }
     private var contentValueField: some View {
         let value = pricingUser.flatMap { draft.contentValue($0) }

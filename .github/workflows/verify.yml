@@ -78,7 +78,21 @@ jobs:
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"'
       - name: Unit tests, lint, debug APK and unsigned release bundle
         working-directory: apps/android
-        run: bash gradlew --no-daemon --max-workers=2 -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleRelease
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/ci-reports
+          bash gradlew --no-daemon --max-workers=2 -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleRelease 2>&1 | tee build/ci-reports/gradle.log
+      - name: Save Android failure reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-failure-reports-${{ github.run_attempt }}
+          retention-days: 7
+          path: |
+            apps/android/build/ci-reports/
+            apps/android/app/build/reports/
+            apps/android/app/build/test-results/
 
   ios:
     name: iOS build and tests
@@ -92,7 +106,22 @@ jobs:
           persist-credentials: false
       - name: Native core, simulator/device builds and fixture UI tests
         working-directory: apps/ios
-        run: bash scripts/verify-mac.sh
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/ci-reports
+          bash scripts/verify-mac.sh 2>&1 | tee build/ci-reports/xcodebuild.log
+      - name: Save iOS failure reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-failure-reports-${{ github.run_attempt }}
+          retention-days: 7
+          path: |
+            apps/ios/build/ci-reports/
+            apps/ios/build/DerivedData/Logs/Test/
+            apps/ios/build/DerivedData/Logs/Build/
+            apps/ios/build/DeviceData/Logs/Build/
 
   gate:
     name: Monorepo verification
@@ -101,18 +130,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Require every affected platform to pass
         env:
           JOBS: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          jobs = json.loads(os.environ['JOBS'])
-          assert jobs['shared']['result'] == 'success', 'Shared checks failed or were cancelled'
-          for app in ('web', 'android', 'ios'):
-              if jobs['shared']['outputs'].get(app) == 'true':
-                  assert jobs[app]['result'] == 'success', app + ' did not pass'
-              else:
-                  assert jobs[app]['result'] in ('success', 'skipped'), app + ' unexpected result'
-          print('All affected platforms passed.')
-          PY
+        run: python3 scripts/verify_ci.py
