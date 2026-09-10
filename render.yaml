@@ -1,12 +1,14 @@
+# Monorepo configuration for the existing service. Read docs/MIGRATION-AR.md before adoption.
 services:
   - type: web
     name: almadina-express
     runtime: node
+    rootDir: apps/web
     plan: free
     region: frankfurt
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
-    autoDeployTrigger: commit
+    autoDeployTrigger: checksPass
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION

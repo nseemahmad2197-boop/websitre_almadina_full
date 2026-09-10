@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleDevelopmentRegion</key><string>ar</string>
+  <key>CFBundleDisplayName</key><string>المدينة إكسبرس</string>
+  <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>LSRequiresIPhoneOS</key><true/>
+  <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
+  <key>UILaunchScreen</key><dict><key>UIColorName</key><string>LaunchBackground</string></dict>
+  <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+  <key>UISupportedInterfaceOrientations~ipad</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+  <key>UIRequiresFullScreen</key><false/>
+  <key>NSCameraUsageDescription</key><string>نستخدم الكاميرا عند طلبك لقراءة QR الخاص بالطرد أو كود تحقق الفاتورة، دون حفظ الصور أو الفيديو.</string>
+  <key>NSFaceIDUsageDescription</key><string>استخدم Face ID لفتح التطبيق والدخول إلى حسابك بأمان عند تفعيلك الميزة.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>نستخدم الموقع عند طلبك فقط للمساعدة في اختيار عنوان التسجيل. يمكنك كتابة العنوان دون إذن الموقع.</string>
+  <key>NSLocationDefaultAccuracyReduced</key><true/>
+  <key>UIBackgroundModes</key><array><string>fetch</string></array>
+  <key>BGTaskSchedulerPermittedIdentifiers</key><array><string>$(PRODUCT_BUNDLE_IDENTIFIER).refresh</string></array>
+  <key>ITSAppUsesNonExemptEncryption</key><false/>
+  <key>AlmadinaAPIBaseURL</key><string>https://almadina-express.onrender.com/api/almadina/</string>
+  <key>AlmadinaSupportPhone</key><string>0599000000</string>
+  <key>AlmadinaPrivacyPolicyURL</key><string>https://almadina-express.onrender.com/privacy</string>
+  <key>AlmadinaAccountDeletionURL</key><string>https://almadina-express.onrender.com/delete-account</string>
+  <key>AlmadinaSupportURL</key><string>https://almadina-express.onrender.com/support</string>
+</dict></plist>

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "currency": "ILS",
+  "deliveryPricing": {
+    "standard": { "westBank": 25, "jerusalem": 35, "interior": 80 },
+    "premium": { "westBank": 20, "jerusalem": 30, "interior": 65 },
+    "diamond": { "westBank": 15, "jerusalem": 25, "interior": 55 }
+  },
+  "returnPricing": {
+    "standard": { "westBank": 20, "jerusalem": 30, "interior": 50 },
+    "premium": { "westBank": 15, "jerusalem": 25, "interior": 40 },
+    "diamond": { "westBank": 10, "jerusalem": 15, "interior": 25 }
+  }
+}

@@ -1,0 +1,118 @@
+name: Almadina monorepo
+
+"on":
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monorepo-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared:
+    name: Shared source and affected apps
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      web: ${{ steps.affected.outputs.web }}
+      android: ${{ steps.affected.outputs.android }}
+      ios: ${{ steps.affected.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 scripts/sync_shared.py --check
+      - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - id: affected
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 scripts/affected.py --github-output
+
+  web:
+    name: Web build and tests
+    needs: shared
+    if: needs.shared.outputs.web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: apps/web/.node-version
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --include=dev
+        working-directory: apps/web
+      - run: npm audit --audit-level=high
+        working-directory: apps/web
+      - run: npm test
+        working-directory: apps/web
+      - run: node --experimental-strip-types --test tests/pricing-contract.test.mjs
+
+  android:
+    name: Android build and tests
+    needs: shared
+    if: needs.shared.outputs.android == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            apps/android/**/*.gradle.kts
+            apps/android/gradle/wrapper/gradle-wrapper.properties
+      - name: Install the project's Android SDK
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"'
+      - name: Unit tests, lint, debug APK and unsigned release bundle
+        working-directory: apps/android
+        run: bash gradlew --no-daemon --max-workers=2 -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleRelease
+
+  ios:
+    name: iOS build and tests
+    needs: shared
+    if: needs.shared.outputs.ios == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Native core, simulator/device builds and fixture UI tests
+        working-directory: apps/ios
+        run: bash scripts/verify-mac.sh
+
+  gate:
+    name: Monorepo verification
+    if: always()
+    needs: [shared, web, android, ios]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every affected platform to pass
+        env:
+          JOBS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          jobs = json.loads(os.environ['JOBS'])
+          assert jobs['shared']['result'] == 'success', 'Shared checks failed or were cancelled'
+          for app in ('web', 'android', 'ios'):
+              if jobs['shared']['outputs'].get(app) == 'true':
+                  assert jobs[app]['result'] == 'success', app + ' did not pass'
+              else:
+                  assert jobs[app]['result'] in ('success', 'skipped'), app + ' unexpected result'
+          print('All affected platforms passed.')
+          PY
