@@ -1,0 +1,62 @@
+{
+  "date": "2026-09-15",
+  "base": "Almadina-Website-Clear-Colors-2026-09-15.zip",
+  "changed_code_files": [
+    "app/globals.css"
+  ],
+  "css_sha256": "1b0b31db4fe34537af280de785996bb21975751ddc3e37d9927ca8d6f9e7e0b5",
+  "changed_action_selectors": [
+    ".button--outline",
+    ".available-accounts-button",
+    ".registration-map__locate, .registration-map__confirm",
+    ".topbar__import",
+    ".order-detail-actions > button",
+    ".status-action",
+    ".bulk-shipping-labels-modal__select-all",
+    ".export-options > button",
+    ".notification-card__delete",
+    ".admin-status-buttons > button",
+    ".employee-scan-card__button",
+    ".auth-footer .public-service-links a"
+  ],
+  "checks": {
+    "local_visual_states": 26,
+    "css_postcss_tailwind_compilation": "passed",
+    "render_errors": 0,
+    "horizontal_overflow_observed": 0,
+    "targeted_computed_borders": "0px",
+    "solid_background_control_text_contrast": "no findings in sampled states",
+    "full_build": "not rerun for border-only changes",
+    "unit_tests": "not rerun"
+  },
+  "deployed": false,
+  "scope": "Decorative borders on shared action buttons and authentication footer links; keyboard focus indicators retained",
+  "visual_state_names": [
+    "borderless-login-desktop-light",
+    "footer-hover-desktop-light",
+    "footer-focus-desktop-light",
+    "borderless-signup-desktop-light",
+    "borderless-login-mobile-light",
+    "footer-hover-mobile-light",
+    "footer-focus-mobile-light",
+    "borderless-signup-mobile-light",
+    "borderless-merchant-order-detail-light",
+    "borderless-merchant-notifications-light",
+    "borderless-merchant-collections-light",
+    "borderless-admin-admin-light",
+    "borderless-courier-home-light",
+    "borderless-login-desktop-dark",
+    "footer-hover-desktop-dark",
+    "footer-focus-desktop-dark",
+    "borderless-signup-desktop-dark",
+    "borderless-login-mobile-dark",
+    "footer-hover-mobile-dark",
+    "footer-focus-mobile-dark",
+    "borderless-signup-mobile-dark",
+    "borderless-merchant-order-detail-dark",
+    "borderless-merchant-notifications-dark",
+    "borderless-merchant-collections-dark",
+    "borderless-admin-admin-dark",
+    "borderless-courier-home-dark"
+  ]
+}
