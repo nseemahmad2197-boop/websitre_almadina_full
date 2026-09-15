@@ -1649,6 +1649,7 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
 .public-service-page article + article { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 16px; }
 .public-service-page h1 { font-size: clamp(24px, 5vw, 36px); }
 .public-service-page a, .public-service-links a, .support-contacts a, .deletion-request-panel a { color: var(--green-ink); text-decoration: underline; text-underline-offset: 4px; }
+.public-service-links a { text-decoration: none; }
 .public-service-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; margin-top: 24px; }
 .deletion-request-panel { margin-bottom: 24px; line-height: 1.8; }
 .deletion-request-form { display: grid; gap: 18px; margin: 20px 0; }
@@ -1677,7 +1678,7 @@ html[data-theme="dark"] .employee-order-card__instructions strong { color: #80d9
   color: #c4f8d8;
   font-size: 12px;
   font-weight: 750;
-  text-decoration-thickness: 1px;
+  text-decoration: none;
 }
 .auth-footer .public-service-links a:hover,
 .auth-footer .public-service-links a:focus-visible { background: #053a24; color: #e1ffec; }
