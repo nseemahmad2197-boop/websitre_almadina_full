@@ -199,6 +199,61 @@ test("PostgreSQL customer directory and selected followups agree from the first 
       }
     });
 
+    await t.test("PostgreSQL soft delete keeps private records, filters counts and denies content and receipt replays", async () => {
+      const call = (path, body, account = merchant, rateLimit = async () => {}) => handleFollowupRequest(new Request(`${base}${path}`, {
+        ...(body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+      }), { database, state, account, rateLimit });
+      const originalOrders = structuredClone(state.orders);
+      const body = { requestId: crypto.randomUUID(), orderId: "parcel-first", type: "delivery-delay", title: "متابعة للحذف", description: "بيانات خاصة محفوظة", attachmentIds: [] };
+      const ticket = (await call("", body)).followup;
+      const media = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+      const upload = await call("/uploads", { requestId: crypto.randomUUID(), orderId: ticket.orderId, name: "private.png", mimeType: "image/png", size: media.length, chunkCount: 1 });
+      await call(`/uploads/${upload.uploadId}/chunks`, { index: 0, dataBase64: media.toString("base64") });
+      const comment = { requestId: crypto.randomUUID(), text: "محادثة محفوظة", attachmentIds: [upload.uploadId] };
+      await call(`/${ticket.id}/comments`, comment);
+      const changed = (await call(`/${ticket.id}/status`, { status: "resolved" }, admin)).followup;
+      const deletion = { orderId: ticket.orderId, expectedUpdatedAt: changed.updatedAt };
+      await assert.rejects(call(`/${ticket.id}/delete`, deletion, courier), (error) => error.status === 403);
+      await assert.rejects(call(`/${ticket.id}/delete`, deletion, other), (error) => error.status === 404);
+      await assert.rejects(call(`/${ticket.id}/delete`, { ...deletion, expectedUpdatedAt: ticket.updatedAt }), (error) => error.status === 409);
+      const countsBefore = (await read("/customers", admin)).payload.customers.find((item) => item.id === merchant.id);
+      const replies = await Promise.all([call(`/${ticket.id}/delete`, deletion), call(`/${ticket.id}/delete`, deletion, admin)]);
+      assert.deepEqual(replies[0], { deleted: true, followupId: ticket.id, orderId: ticket.orderId });
+      assert.deepEqual(replies[0], replies[1]);
+      assert.deepEqual(await call(`/${ticket.id}/delete`, deletion), replies[0]);
+      for (const [path, replay] of [[`/${ticket.id}`], [`/${ticket.id}/comments`], [`/${ticket.id}/comments`, comment], ["", body], [`/attachments/${upload.uploadId}`], [`/${ticket.id}/status`, { status: "open" }]]) {
+        await assert.rejects(call(path, replay), (error) => error.status === 404);
+      }
+      assert.equal((await read("?orderId=parcel-first", admin)).payload.followups.some((item) => item.id === ticket.id), false);
+      const countsAfter = (await read("/customers", admin)).payload.customers.find((item) => item.id === merchant.id);
+      assert.equal(countsAfter.followupCount, countsBefore.followupCount - 1);
+      assert.equal(countsAfter.openCount, countsBefore.openCount);
+      for (const [table, column, value] of [["almadina_followups", "id", ticket.id], ["almadina_followup_comments", "followup_id", ticket.id], ["almadina_followup_chunks", "upload_id", upload.uploadId], ["almadina_followup_deleted", "followup_id", ticket.id]]) {
+        assert.equal(Number((await database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`).bind(value).first()).count), 1);
+      }
+      assert.deepEqual(state.orders, originalOrders);
+    });
+
+    await t.test("PostgreSQL lifecycle guards serialize deletion against pending edit, comment and status finalization", async () => {
+      const call = (path, body, account = merchant, rateLimit = async () => {}) => handleFollowupRequest(new Request(`${base}${path}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      }), { database, state, account, rateLimit });
+      for (const operation of ["edit", "comment", "status"]) {
+        const ticket = await create("parcel-first");
+        const before = (await database.prepare("SELECT payload FROM almadina_followups WHERE id = ?").bind(ticket.id).first()).payload;
+        const token = crypto.randomUUID();
+        const body = operation === "edit" ? { requestId: token, expectedUpdatedAt: ticket.updatedAt, title: "cannot persist", description: ticket.description, attachmentIds: [] }
+          : operation === "comment" ? { requestId: token, text: "cannot persist", attachmentIds: [] }
+          : { status: "resolved", response: "cannot persist" };
+        await assert.rejects(call(`/${ticket.id}/${operation === "comment" ? "comments" : operation}`, body, operation === "status" ? admin : merchant, async (namespace) => {
+          if (namespace === `followup-${operation}`) await call(`/${ticket.id}/delete`, { orderId: ticket.orderId, expectedUpdatedAt: ticket.updatedAt });
+        }), (error) => error.status === 409);
+        assert.equal((await database.prepare("SELECT payload FROM almadina_followups WHERE id = ?").bind(ticket.id).first()).payload, before);
+        assert.equal(Number((await database.prepare("SELECT COUNT(*) AS count FROM almadina_followup_comments WHERE followup_id = ?").bind(ticket.id).first()).count), 0);
+        assert.equal(Number((await database.prepare("SELECT COUNT(*) AS count FROM almadina_followup_mutations WHERE request_id = ?").bind(token).first()).count), 0);
+      }
+    });
+
     await t.test("fresh reads track current parcel ownership and exclude deleted parcels", async () => {
       state.orders[0].deleted = true;
       state.orders[1].merchantId = other.id;
