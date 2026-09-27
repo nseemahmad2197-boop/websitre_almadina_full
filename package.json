@@ -18,7 +18,8 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "test:pricing": "node --experimental-strip-types --test tests/pricing-contract.test.mjs",
     "test:staff:browser": "node tests/staff-followups.browser.mjs",
-    "test:qr:browser": "node tests/qr-camera.browser.mjs"
+    "test:qr:browser": "node tests/qr-camera.browser.mjs",
+    "test:drawer:browser": "node tests/drawer-scroll.browser.mjs"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",

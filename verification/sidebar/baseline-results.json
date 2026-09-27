@@ -1,0 +1,18 @@
+{
+  "browser": "131.0.6778.204",
+  "baseline": true,
+  "results": [
+    {
+      "scenario": "baseline-mobile",
+      "backgroundBefore": 540,
+      "backgroundAfter": 1090,
+      "drawer": {
+        "top": 0,
+        "max": 121
+      },
+      "logoutBottom": 733,
+      "viewportHeight": 650
+    }
+  ],
+  "errors": []
+}

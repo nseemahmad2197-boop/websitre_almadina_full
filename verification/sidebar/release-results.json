@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-27",
+  "scope": "Website sidebar scrolling only",
+  "build": "passed after final fix",
+  "typecheck": "passed",
+  "regressions": {
+    "passed": 151,
+    "failed": 0
+  },
+  "browser": "Real ApplicationShell, Chromium plus CDP touch emulation; scroll, sticky toolbar, focus and navigation passed at 390x650, 844x390, 1280x800",
+  "limits": [
+    "Physical iPhone/Safari not executed.",
+    "No production deployment performed."
+  ],
+  "changedProductFiles": [
+    "app/components/application-shell.tsx",
+    "app/globals.css",
+    "app/lib/use-drawer-modal.ts"
+  ]
+}

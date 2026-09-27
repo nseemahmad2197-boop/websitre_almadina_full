@@ -1,0 +1,43 @@
+{
+  "browser": "131.0.6778.204",
+  "baseline": false,
+  "results": [
+    {
+      "scenario": "mobile",
+      "viewport": [
+        390,
+        650
+      ],
+      "backgroundOffset": 540,
+      "drawerScrollRange": 121,
+      "touchScroll": 121,
+      "logoutVisible": true,
+      "checks": "touch/wheel; drawer edges/backdrop; keyboard trap/Escape; close/reopen; navigation; unmount cleanup"
+    },
+    {
+      "scenario": "landscape",
+      "viewport": [
+        844,
+        390
+      ],
+      "backgroundOffset": 540,
+      "drawerScrollRange": 381,
+      "touchScroll": 190,
+      "logoutVisible": true,
+      "checks": "touch/wheel; drawer edges/backdrop; keyboard trap/Escape; close/reopen; navigation; unmount cleanup"
+    },
+    {
+      "scenario": "desktop",
+      "viewport": [
+        1280,
+        800
+      ],
+      "backgroundOffset": 540,
+      "drawerScrollRange": 0,
+      "touchScroll": 0,
+      "logoutVisible": true,
+      "checks": "touch/wheel; drawer edges/backdrop; keyboard trap/Escape; close/reopen; navigation; unmount cleanup"
+    }
+  ],
+  "errors": []
+}
