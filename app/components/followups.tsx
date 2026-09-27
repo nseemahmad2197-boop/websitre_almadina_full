@@ -34,6 +34,7 @@ export function FollowupsPage() {
 
 export function FollowupCollection({ accountId, order, merchantId }: { accountId: string; order?: Order; merchantId?: string }) {
   const { user, database, setSelectedOrderId, setView, showToast } = useApp();
+  const canCreate = user?.id === accountId && user.role === "merchant" && !!order && !order.deleted && order.merchantId === user.id;
   const signal = useRequests(accountId);
   const [entries, setEntries] = useState<Followup[]>([]);
   const [next, setNext] = useState<string | null>(null);
@@ -61,8 +62,8 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
   }
   useEffect(() => { void load(); }, [signal]); // account/parcel identity is a component key
   function updated(item: Followup) { setEntries((current) => current.map((row) => row.id === item.id ? item : row)); setSelected(item); }
-  return <SectionCard title={order ? "متابعات الطرد" : "طلبات المتابعة"} icon="message" className="followup-section" action={order && !order.deleted ? <Button icon="plus" onClick={() => setCreating(true)}>إنشاء متابعة</Button> : undefined}>
-    {!order && <p className="followup-hint">لإنشاء متابعة، افتح تفاصيل الطرد واضغط «إنشاء متابعة».</p>}
+  return <SectionCard title={order ? "متابعات الطرد" : "طلبات المتابعة"} icon="message" className="followup-section" action={canCreate ? <Button icon="plus" onClick={() => setCreating(true)}>إنشاء متابعة</Button> : undefined}>
+    {!order && <p className="followup-hint">{user?.role === "merchant" ? "لإنشاء متابعة، افتح تفاصيل الطرد واضغط «إنشاء متابعة»." : "اختر متابعة للاطلاع على تفاصيلها ومرفقاتها والرد عليها."}</p>}
     <div className="followup-toolbar"><Button variant="ghost" onClick={() => void load()} disabled={loading}>تحديث المتابعات</Button><span aria-live="polite">{loading ? "جارٍ التحميل…" : `${entries.length.toLocaleString("ar-EG")} متابعة`}</span></div>
     {error && <p className="followup-error" role="alert">{error}</p>}
     {!loading && !error && !entries.length && <p className="followup-empty">لا توجد متابعات{order ? " لهذا الطرد" : " حتى الآن"}.</p>}
@@ -73,7 +74,7 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
       <small>{dateLabel(item.createdAt)}{item.attachments.length ? ` · ${item.attachments.length} مرفقات` : ""}</small>
     </button>)}</div>
     {next && <Button variant="outline" loading={loading} onClick={() => void load(next)}>عرض المزيد</Button>}
-    {creating && order && <FollowupForm key={`${accountId}:${order.id}`} order={order} accountId={accountId} onClose={() => { setCreating(false); void load(); }} onCreated={(item) => {
+    {creating && canCreate && order && <FollowupForm key={`${accountId}:${order.id}`} order={order} accountId={accountId} onClose={() => { setCreating(false); void load(); }} onCreated={(item) => {
       if (signal.aborted) return;
       setCreating(false); setEntries((current) => [item, ...current.filter((existing) => existing.id !== item.id)]); setSelected(item); showToast("تم إنشاء المتابعة وإرسالها للمراجعة.");
     }} />}
