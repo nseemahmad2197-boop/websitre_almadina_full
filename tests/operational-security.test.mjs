@@ -106,3 +106,26 @@ test("document requests share the concurrency and minute budgets with API work",
   assert.equal((await guard.run(new Request("https://example.test/arbitrary-missing-page"), config, ok)).status, 503);
   assert.equal((await guard.run(api("logout"), config, ok)).status, 200);
 });
+
+test("login region comes only from authenticated edge or Worker cf metadata and survives body clones", async () => {
+  const { trustedClientLocation } = await import('../app/lib/trusted-client.ts');
+  const geoHeaders = { 'X-Almadina-Client-IP': '203.0.113.9', 'X-Almadina-Client-City': encodeURIComponent('نابلس'), 'X-Almadina-Client-Region': encodeURIComponent('نابلس'), 'X-Almadina-Client-Country': 'PS', 'CF-IPCity': 'spoofed', 'CF-IPCountry': 'US' };
+  const untrusted = api('login', geoHeaders);
+  await new OperationalSecurity().run(untrusted, {}, ok);
+  assert.equal(trustedClientLocation(untrusted), null);
+  const wrong = api('login', { ...geoHeaders, 'X-Almadina-Edge-Token': 'wrong' });
+  assert.equal((await new OperationalSecurity().run(wrong, { edgeToken: secret }, ok)).status, 403);
+  assert.equal(trustedClientLocation(wrong), null);
+  const trusted = api('login', { ...geoHeaders, 'X-Almadina-Edge-Token': secret });
+  assert.equal((await new OperationalSecurity().run(trusted, { edgeToken: secret }, ok)).status, 200);
+  assert.match(trustedClientLocation(trusted), /نابلس/);
+  assert.equal(trustedClientLocation(copyTrustedClientAddress(trusted, new Request(trusted))), trustedClientLocation(trusted));
+  const workerRequest = api('login', { ...geoHeaders, 'CF-Connecting-IP': '203.0.113.8' });
+  Object.defineProperty(workerRequest, 'cf', { value: { city: 'Ramallah', region: 'West Bank', country: 'PS' } });
+  await new OperationalSecurity().run(workerRequest, {}, ok, true);
+  assert.match(trustedClientLocation(workerRequest), /Ramallah/);
+  assert.doesNotMatch(trustedClientLocation(workerRequest), /نابلس|spoofed/);
+  const malformed = api('login', { ...geoHeaders, 'X-Almadina-Edge-Token': secret, 'X-Almadina-Client-Country': '%bad' });
+  await new OperationalSecurity().run(malformed, { edgeToken: secret }, ok);
+  assert.equal(trustedClientLocation(malformed), null);
+});

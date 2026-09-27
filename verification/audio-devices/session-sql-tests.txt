@@ -1,0 +1,79 @@
+{"event":"api_request","requestId":"669f1b87-a252-42c9-977e-1d5f46e1372f","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":7}
+✔ native hints identify Android/iPhone/iPad without mislabeling them as browsers (4.951409ms)
+{"event":"api_request","requestId":"c34629f3-0f77-4496-8757-75a9a6599fd2","route":"login","method":"POST","client":"web","status":200,"durationMs":143}
+{"event":"api_request","requestId":"64d66426-5bb9-4ea7-966b-8a82b2548f36","route":"login","method":"POST","client":"web","status":200,"durationMs":126}
+▶ SQLite session metadata uses real SQL, ownership, monotonic data and foreign-key cleanup
+  ✔ login metadata and first trusted region survive requests without headers and changed regions (6.683039ms)
+{"event":"api_request","requestId":"0ea44250-8c7f-480b-b6d9-aed045d59296","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"d7e4ade0-693f-4566-b907-3f94718fc986","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":2}
+{"event":"api_request","requestId":"b3c8035e-01a8-4aa6-9d8f-83170f9a371c","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"653c9b20-ee6b-4e8e-a329-d79ce577e913","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"30ca04a8-2c08-48a8-af01-761bd4c3bac3","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"b275a68c-7131-41df-a9fa-e35afd04090b","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"94767088-3acf-4a26-b1fc-ed8eaf8f24ea","route":"security/devices","method":"GET","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"09ef57bf-de9b-429c-a7cf-a7bc1b5fa85b","route":"security/devices/current","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"7241fb7f-5bfb-432b-8c8e-7990d3be6635","route":"security/devices/revoke","method":"POST","client":"web","status":409,"durationMs":2}
+{"event":"api_request","requestId":"640ff88c-6bbf-4cfa-886a-bab82faba221","route":"security/devices/current","method":"POST","client":"web","status":401,"durationMs":0}
+  ✔ labels change only the current account/session, reject forged targets and preserve on refresh (16.777745ms)
+{"event":"api_request","requestId":"0fd7e130-4a9e-43ed-b801-0811d4e027f0","route":"account/password","method":"POST","client":"web","status":200,"durationMs":322}
+{"event":"api_request","requestId":"a59d7d6e-5f26-4775-a907-de7b64d4bee5","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"080f4f03-9a87-4e3e-9ef0-6ecf78be6de4","route":"security/devices/revoke","method":"POST","client":"web","status":200,"durationMs":6}
+{"event":"api_request","requestId":"988b1851-7327-493b-a0d9-b79f17eed790","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":0}
+  ✔ password rotation preserves label/region while invalidating old token; revoke cascades details (331.203079ms)
+{"event":"api_request","requestId":"16e0a041-29aa-4a28-93ce-e8ccf764926b","route":"logout","method":"POST","client":"web","status":200,"durationMs":1}
+  ✔ revocation race cannot recreate metadata; logout clears device details with parent (1.732293ms)
+{"event":"api_request","requestId":"3062b6f4-6187-49a1-b1dc-c7be712a3208","route":"login","method":"POST","client":"web","status":200,"durationMs":94}
+{"event":"api_request","requestId":"2acbb123-3997-43fe-b887-b2c0a53d1652","route":"login","method":"POST","client":"web","status":200,"durationMs":120}
+{"event":"api_request","requestId":"51e700b5-7a88-46e3-8079-c75e2921fdab","route":"account/password","method":"POST","client":"web","status":200,"durationMs":393}
+  ✔ account-wide password revocation removes every device metadata row (606.988276ms)
+{"event":"api_request","requestId":"177395bb-f024-4f66-b5cc-666014798967","route":"login","method":"POST","client":"web","status":200,"durationMs":121}
+{"event":"api_request","requestId":"0a8eb16e-46d4-425f-8d7a-befed879e0be","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":4}
+{"event":"api_request","requestId":"a355dd54-0d44-4705-b524-7960b13b7954","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"71747fca-c66b-46da-b5e3-75be9f02fcaf","route":"login","method":"POST","client":"web","status":200,"durationMs":131}
+{"event":"api_request","requestId":"30d234f1-d873-49f3-a9f7-db94adffd2fa","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"2c2f1068-b3ae-486b-9ade-5b14197cdc3e","route":"account/delete","method":"POST","client":"web","status":200,"durationMs":122}
+  ✔ expired sessions and deleted accounts cascade their saved labels and locations (383.203617ms)
+✔ SQLite session metadata uses real SQL, ownership, monotonic data and foreign-key cleanup (1643.321901ms)
+{"event":"api_request","requestId":"bb1fa6fd-91fd-4a27-b2fe-75b92c0b9e65","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":3324}
+{"event":"api_request","requestId":"8cdc6b90-dd9a-443a-b495-a8430fbaac95","route":"login","method":"POST","client":"web","status":200,"durationMs":129}
+{"event":"api_request","requestId":"1a6d28b8-fbde-4acd-82b0-4a4c9e1b5ef4","route":"login","method":"POST","client":"web","status":200,"durationMs":105}
+▶ PostgreSQL session metadata uses production adapter and foreign-key cleanup
+  ✔ login metadata and first trusted region survive requests without headers and changed regions (11.607983ms)
+{"event":"api_request","requestId":"a9427c0e-1b20-4b19-9610-eb3c54a26f39","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":15}
+{"event":"api_request","requestId":"e37cb50d-51fa-4a55-bc8d-ed0fc5036550","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":13}
+{"event":"api_request","requestId":"67eff84d-afa9-4a3d-b69a-19998e018879","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":8}
+{"event":"api_request","requestId":"40686d83-b160-46a8-a895-805a0c965a55","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":7}
+{"event":"api_request","requestId":"65de1edc-8854-4809-be27-eb3fcc7b72e5","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":7}
+{"event":"api_request","requestId":"96c84200-9018-4bbd-813a-158c12945999","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"f81476bb-ee9b-4a88-b59c-cb7bafbea635","route":"security/devices","method":"GET","client":"web","status":409,"durationMs":5}
+{"event":"api_request","requestId":"fcbe456f-0434-4b19-ae30-5b97018a15b6","route":"security/devices/current","method":"POST","client":"web","status":409,"durationMs":15}
+{"event":"api_request","requestId":"ab3da9b9-1ff7-4c98-baa1-866b2d94aa91","route":"security/devices/revoke","method":"POST","client":"web","status":409,"durationMs":6}
+{"event":"api_request","requestId":"c0bdfc0d-c388-4ed2-8365-bf5e745b9b72","route":"security/devices/current","method":"POST","client":"web","status":401,"durationMs":0}
+  ✔ labels change only the current account/session, reject forged targets and preserve on refresh (90.673999ms)
+{"event":"api_request","requestId":"a38b6b8e-841b-45d0-927b-78396914c630","route":"account/password","method":"POST","client":"web","status":200,"durationMs":353}
+{"event":"api_request","requestId":"dd7d57c3-1033-49de-87c9-2148a96f28ba","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"2fb772bb-bcc8-4c8e-9eaf-1f2198a49195","route":"security/devices/revoke","method":"POST","client":"web","status":200,"durationMs":13}
+{"event":"api_request","requestId":"8523feae-51c8-400c-8657-4d3cc396c03f","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":1}
+  ✔ password rotation preserves label/region while invalidating old token; revoke cascades details (376.151184ms)
+{"event":"api_request","requestId":"dd3a6223-f2e5-46b0-97f1-a996f7963baf","route":"logout","method":"POST","client":"web","status":200,"durationMs":7}
+  ✔ revocation race cannot recreate metadata; logout clears device details with parent (10.206406ms)
+{"event":"api_request","requestId":"aa5b724e-3f83-4643-b2f3-8cbd4f62b5c2","route":"login","method":"POST","client":"web","status":200,"durationMs":100}
+{"event":"api_request","requestId":"6b70fd4d-3fb8-4a63-8cd0-3d2a4a6b960f","route":"login","method":"POST","client":"web","status":200,"durationMs":86}
+{"event":"api_request","requestId":"f3c43277-b23d-481a-891e-9138e0dc0144","route":"account/password","method":"POST","client":"web","status":200,"durationMs":294}
+  ✔ account-wide password revocation removes every device metadata row (483.522693ms)
+{"event":"api_request","requestId":"d683d0db-3b65-437c-9ff5-4e8ba05ea4f4","route":"login","method":"POST","client":"web","status":200,"durationMs":89}
+{"event":"api_request","requestId":"739fea04-57c1-4700-9e41-4e9001cdc357","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":6}
+{"event":"api_request","requestId":"d22b2971-02d1-4150-8783-626fc9716d0e","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":2}
+{"event":"api_request","requestId":"6b935cf9-0ca4-4003-b676-ab446d3089d9","route":"login","method":"POST","client":"web","status":200,"durationMs":94}
+{"event":"api_request","requestId":"0202154e-f477-4d27-aa54-aec1feaaedc8","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":8}
+{"event":"api_request","requestId":"92360d2c-cade-475f-b6ab-a10f46806940","route":"account/delete","method":"POST","client":"web","status":200,"durationMs":110}
+  ✔ expired sessions and deleted accounts cascade their saved labels and locations (314.426717ms)
+✔ PostgreSQL session metadata uses production adapter and foreign-key cleanup (4875.766775ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7106.980292

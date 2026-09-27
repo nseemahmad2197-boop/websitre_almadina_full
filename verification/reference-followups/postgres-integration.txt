@@ -1,0 +1,21 @@
+{"event":"api_request","requestId":"bfa13354-11a9-4b58-8709-ee8f953de3b8","route":"unknown","method":"GET","client":"web","status":401,"durationMs":65}
+▶ PostgreSQL customer directory and selected followups agree from the first authenticated request
+  ✔ first directory entry and immediate customer selection return both tickets for each staff role (29.957566ms)
+{"event":"api_request","requestId":"3ae64828-39cc-4cef-ab69-8f44e48fab15","route":"unknown","method":"GET","client":"web","status":403,"durationMs":3}
+{"event":"api_request","requestId":"b0250efb-df24-4bb4-86f4-570c52d313cf","route":"unknown","method":"GET","client":"web","status":409,"durationMs":3}
+  ✔ legacy ownership payloads, merchant isolation and account switching remain enforced (27.261699ms)
+  ✔ filtered PostgreSQL cursor pages preserve all tickets exactly once (391.67451ms)
+  ✔ PostgreSQL structured edits, immutable retries, private conversation pages and optimistic conflicts (347.648007ms)
+  ✔ PostgreSQL finalization cannot restore parent or author data after account purge (33.341051ms)
+{"event":"api_request","requestId":"ab5eef42-d3a9-410d-9dcf-080001198aff","route":"unknown","method":"GET","client":"web","status":404,"durationMs":4}
+  ✔ fresh reads track current parcel ownership and exclude deleted parcels (15.883653ms)
+✔ PostgreSQL customer directory and selected followups agree from the first authenticated request (2621.663235ms)
+ℹ PostgreSQL 18.3 (PGlite 0.5.8) on wasm32-unknown-emscripten, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2745.791997

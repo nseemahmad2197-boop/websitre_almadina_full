@@ -1,4 +1,4 @@
-import { setTrustedClientAddress, trustedClientAddress } from "../app/lib/trusted-client.ts";
+import { setTrustedClientAddress, setTrustedClientLocation, trustedClientAddress } from "../app/lib/trusted-client.ts";
 
 export type SecurityConfig = {
   edgeToken?: string;
@@ -86,8 +86,19 @@ export class OperationalSecurity {
       if (config.edgeToken) {
         if (!await equalSecret(request.headers.get("x-almadina-edge-token") ?? "", config.edgeToken)) return this.finish(rejected(403), started);
         setTrustedClientAddress(request, request.headers.get("x-almadina-client-ip") ?? "");
+        // These headers are overwritten by our ingress Worker, which owns the
+        // secret. Percent encoding keeps non-ASCII region names valid HTTP.
+        const locationHeader = (name: string) => {
+          try { return decodeURIComponent((request.headers.get(name) ?? "").slice(0, 1200)); } catch { return ""; }
+        };
+        if (trustedClientAddress(request) !== "unknown") setTrustedClientLocation(request, {
+          city: locationHeader("x-almadina-client-city"), region: locationHeader("x-almadina-client-region"),
+          country: locationHeader("x-almadina-client-country"),
+        });
       } else if (cloudflareRuntime && "cf" in request) {
         setTrustedClientAddress(request, request.headers.get("cf-connecting-ip") ?? "");
+        const cf = (request as Request & { cf?: { city?: unknown; region?: unknown; country?: unknown } }).cf;
+        if (cf && trustedClientAddress(request) !== "unknown") setTrustedClientLocation(request, cf);
       }
       // Do not trust X-Forwarded-For on Render: its trust chain has not been
       // established. Persistent account/global limits still apply in that mode.

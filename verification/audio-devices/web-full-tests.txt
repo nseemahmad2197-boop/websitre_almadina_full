@@ -1,0 +1,1107 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> reference-website-recreation@0.1.0 test
+> npm run build && node --experimental-strip-types --test tests/postgres-adapter.test.mjs tests/rendered-html.test.mjs tests/shared-database.test.mjs tests/web-push.test.mjs tests/browser-permissions.test.mjs tests/swipe-delete-events.test.mjs tests/security-resilience.test.mjs tests/pricing-contract.test.mjs tests/operational-security.test.mjs tests/followups.test.mjs tests/session-devices.test.mjs tests/secure-ingress.test.mjs tests/linked-devices-client.test.mjs
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> reference-website-recreation@0.1.0 build
+> bash scripts/build-verified.sh
+
+/usr/bin/timeout
+Running bounded vinext build...
+
+  vinext build  (Vite 8.2.2)
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mProxy environment variables detected. We'll use your proxy for fetch requests.[0m
+
+
+[1/5] analyze client references...
+transforming...
+✓ 559 modules transformed.
+rendering chunks...
+✓ built in 1.08s
+[2/5] analyze server references...
+transforming...
+✓ 385 modules transformed.
+rendering chunks...
+✓ built in 612ms
+[3/5] build rsc environment...
+transforming...
+✓ 550 modules transformed.
+rendering chunks...
+computing gzip size...
+✓ built in 1.06s
+[4/5] build client environment...
+transforming...
+✓ 429 modules transformed.
+rendering chunks...
+computing gzip size...
+✓ built in 657ms
+[5/5] build ssr environment...
+transforming...
+✓ 391 modules transformed.
+rendering chunks...
+computing gzip size...
+✓ built in 776ms
+[0m
+  Route (app)
+  ┌ ? /              
+  ├ ? /delete-account
+  ├ ? /privacy       
+  └ ? /support       
+
+  ? Unknown
+
+  ? Some routes could not be classified. vinext currently uses static analysis
+    and cannot detect dynamic API usage (headers(), cookies(), etc.) at build time.
+    Automatic classification will be improved in a future release.
+
+  Build complete. Run `vinext start` to start the production server.
+
+✔ permission is requested on activation once and reused on later visits (9.427303ms)
+✔ an existing system grant is reused without prompting or auto-enabling an unknown preference (6.568516ms)
+✔ denial and revocation override a saved preference without repeated prompts (1.368536ms)
+✔ a missing subscription recovers only with an existing grant and opt-in; disabling persists (12.319219ms)
+✔ camera and location use fresh browser state and unsupported permission queries fall back (0.952528ms)
+✔ overlapping permission refreshes cannot undo an explicit subscription disable (1.797915ms)
+✔ independent persistent tickets survive old snapshots and idempotent retries without altering parcel finances (27.838681ms)
+✔ merchant isolation and staff-wide followup access apply to reads, uploads, downloads, and responses (23.825711ms)
+✔ merchant filters intersect current parcel access and return ownership for legacy followups (3.93406ms)
+✔ staff customer directory includes zero-count merchants and only active parcel followups without account secrets (9.77656ms)
+✔ customer directory search and keyset pagination are bounded and stable for duplicate and Arabic names (6.142774ms)
+✔ private multi-chunk media round-trips byte exactly; incomplete uploads never create tickets (132.963776ms)
+✔ chunk retries are immutable; invalid base64, signatures, indexes, MIME and sizes are rejected (5.82222ms)
+✔ limits validate fields, attachment ownership/count/total and bounded reservation quotas (6.923353ms)
+✔ orphan expiry purges only pending uploads and preserves finalized media (4.982132ms)
+✔ merchant and creator deletion purge all linked tickets and private chunks (7.5049ms)
+✔ cursor paging has no duplicates and rejects malformed cursors (30.84585ms)
+{"event":"api_request","requestId":"0ec76aae-bd17-481f-be24-baf3f1a12598","route":"unknown","method":"GET","client":"web","status":401,"durationMs":3}
+✔ notification failure never masks a committed submission (1.506955ms)
+✔ allowed native/browser containers match magic and executable content is rejected (0.375427ms)
+{"event":"api_request","requestId":"1271bee6-52df-45cc-b3ad-dc253cdae9e6","route":"unknown","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"a2a1d340-d972-4ca5-a204-3ee3cc77385c","route":"unknown","method":"GET","client":"web","status":403,"durationMs":2}
+{"event":"api_request","requestId":"88705e11-7fdc-4d73-a921-0864edb42907","route":"unknown","method":"GET","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"74ee0f0d-af61-436f-ae87-4fe0df060ff3","route":"unknown","method":"GET","client":"web","status":409,"durationMs":0}
+{"event":"api_request","requestId":"34c41c0f-ea2e-4209-9657-ba09f341601b","route":"unknown","method":"GET","client":"web","status":401,"durationMs":1}
+✔ customer directory API authenticates staff and preserves account switching and cache protections (9.706294ms)
+{"event":"api_request","requestId":"a128f89d-a484-49ea-8858-96b366f5b17d","route":"unknown","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"086f127d-8f63-4ff6-abb1-65a97b9127d9","route":"unknown","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"ca135d20-d88b-416c-9b57-7c4eb52d336b","route":"unknown","method":"POST","client":"web","status":409,"durationMs":4}
+{"event":"api_request","requestId":"369cc751-2b3e-435d-8411-1c44b2cf416a","route":"unknown","method":"POST","client":"web","status":413,"durationMs":0}
+{"event":"api_request","requestId":"34431151-fe86-4f1c-aaff-335c1dcb206d","route":"unknown","method":"POST","client":"web","status":200,"durationMs":5}
+{"event":"api_request","requestId":"71386a64-6c72-4940-aeb3-7bcc8409b374","route":"unknown","method":"GET","client":"web","status":401,"durationMs":2}
+✔ real API rejects unauthenticated, cross-origin, oversized bodies and account switching; preserves security headers (22.381811ms)
+{"event":"api_request","requestId":"08771091-83fa-4618-95a9-012696e549dd","route":"unknown","method":"POST","client":"web","status":200,"durationMs":6}
+{"event":"api_request","requestId":"4af4621c-0310-4219-9546-bd2ce59764bd","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"b0fafe2c-e8cd-4aaa-8f8c-f92c4c2c8a30","route":"unknown","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"a9757b8e-66a3-446e-9903-fc6fa752418b","route":"unknown","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"97902a96-99d8-4755-a3b0-5cbdcdf8128d","route":"unknown","method":"POST","client":"web","status":200,"durationMs":4}
+{"event":"api_request","requestId":"e49a2a0f-f84f-4b34-9b30-8793b71b98f3","route":"unknown","method":"POST","client":"web","status":200,"durationMs":7}
+{"event":"api_request","requestId":"92d6f0fe-8c5e-458a-a020-30a613b6f3ff","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"79d8b19e-d8f8-40fc-8f32-f9db4193d3e2","route":"unknown","method":"POST","client":"web","status":200,"durationMs":5}
+{"event":"api_request","requestId":"121e4eff-0b60-41ba-8099-ccc61ea19e81","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"c32f033c-7c8e-4fd4-9510-87d5c3ece670","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"60c4c718-a776-4569-a3cc-4258bd283b86","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"57f9eada-2f75-4d9c-9e69-f9bd0a947f37","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"12dc630f-09a1-4365-8f4f-c1ab5b42a96d","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"575cc87f-5422-4db9-89a2-d26740d70195","route":"unknown","method":"POST","client":"web","status":200,"durationMs":8}
+{"event":"api_request","requestId":"2f027803-a0ac-4b96-b173-bc85cf8fab0a","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"831c8a00-4fd7-4f0b-a780-8d7e834e47f0","route":"unknown","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"49f42788-6344-4933-848a-9935dcb07117","route":"unknown","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"ebd2b972-19b8-4228-b28c-ea02de3bd1ac","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"cdf47943-d3e8-4553-b102-b87305bb4c6d","route":"unknown","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"07594cc1-0cac-4f49-a0c5-fb1dc39dd8c7","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"a9dfd169-a3b2-4aa3-ab54-67fc12c7e77d","route":"unknown","method":"POST","client":"web","status":429,"durationMs":3}
+✔ real API rate limit prevents excessive submissions while reads remain available (73.044862ms)
+✔ versioned structured details and unique references are additive and never mutate parcel data (10.999307ms)
+✔ creator edits preserve immutable creation retries and enforce field, permission, status and timestamp guards (16.10165ms)
+✔ pre-upgrade creation payload is recorded before first edit so legacy retries remain safe (3.336447ms)
+✔ edit retains only selected ticket media; removed, borrowed, comment and foreign uploads cannot be attached (11.274191ms)
+✔ conversation validates payload, private media and immutable retries against current authorization (11.764182ms)
+✔ conversation returns newest fifty ascending, pages older rows without duplicates and refreshes recent messages (43.455698ms)
+✔ concurrent edits yield one winner and idempotent repeated submissions return one committed result (6.972578ms)
+✔ purge deletes authored conversation/media/receipts while preserving unrelated parent tickets (4.39144ms)
+✔ in-flight comment finalization cannot recreate data after parent or author account purge (4.741098ms)
+{"event":"api_request","requestId":"dcc752ca-2a3e-452d-9ff9-1ff93ab21a80","route":"unknown","method":"GET","client":"web","status":401,"durationMs":2}
+✔ purge during upload or creation finalization does not restore deleted account files or tickets (4.487004ms)
+{"event":"api_request","requestId":"121d39e4-2a63-4edd-aadd-e0bbd86066f6","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"9058327e-0463-4fc9-b932-45f83fbc732e","route":"unknown","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"e6e1720b-1e92-46e8-bd21-d9614db097ac","route":"unknown","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"c44e2aa8-397f-4409-8b23-f2f23985a07c","route":"unknown","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"50de4008-f1b1-4a30-ae35-0583f1cc412c","route":"unknown","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"58b45511-c204-46e7-b195-50bc23f76875","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"33517711-b8e7-464c-afd6-8fcf9901f5f7","route":"unknown","method":"POST","client":"web","status":200,"durationMs":7}
+{"event":"api_request","requestId":"3ed1eb6e-c28e-49cd-a2c3-b0690af55555","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"96afc7ee-b1e6-486c-9484-adbf1c3778ac","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"4e146bb2-b433-427b-8a45-cf0a7ce651d5","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"5f038704-2417-4119-8e17-5b18b17b3421","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"390bdd76-d267-44ae-b12d-e5582f183e93","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"3f0908e9-8b0d-49a0-90ee-c0a3db980ba5","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"9cd11ac7-8b71-48bc-9284-18ef0fb5794c","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"19ec15ac-1534-4f93-b54b-b03656af3e9a","route":"unknown","method":"POST","client":"web","status":200,"durationMs":5}
+{"event":"api_request","requestId":"e409c678-3ab4-4070-9f64-de2b09d77514","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"1279bf03-7a99-434c-904f-520826a7fd02","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f1ff3207-ad31-4482-b778-6f6adb532dae","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"4505d532-c157-4cbb-ae02-091b9ed02e30","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"6a6068ae-6c1a-4c29-910a-5c16b8062cb0","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"c304c655-79c9-4c03-a593-4095abe4d3d3","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"20e94c0f-3bc7-4b9f-8688-e348f3efb254","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"eb30af20-99ac-4b03-bac1-6b57a7269f88","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"382f32b1-7f1d-4062-b0ae-b0574dcc7e6a","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"31502008-c70c-49de-8e73-3fad8bfa1169","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"054d3d9e-1261-449d-9bd4-93b14748e8db","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"ca06f8de-01bd-49f7-88a3-d6774a8070c5","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"4e540f47-928f-435d-a5ad-5b9f49fb8bec","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"3c645ea1-2568-413a-9dcd-5fcb758f91da","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b94e203b-8c75-43b0-95f7-e9a210d6c8e6","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"569643ff-60ee-411e-b57d-69d97e420658","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"2be3a439-83ba-4abc-a0e4-96bf2da70f52","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"915263dd-bbc0-44fa-8a32-3c205bad1b02","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"43088a06-d491-4de4-9b08-d09f8979c9ca","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"4e1697c6-b9ce-4891-8bbb-b256ab903a4b","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"5a838137-c574-4f8e-8357-9e4291ad06b8","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"d3c67cde-9ab5-45d9-981b-de1613a339d5","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"82068c95-05f5-494e-8b3b-179e1d5383eb","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"42868a9b-cb45-4593-8851-0e7cedaf017e","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"e4616a9f-95d6-4b8e-bfa7-fdb6fd5e1518","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"acea4a76-de1f-4bd2-bfab-714a40d8fc37","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"2ad1426c-a892-450e-927f-dc787d4c4803","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"7e29dd94-6c95-416f-a0f0-ad8fde7eb2ef","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"611786ad-f932-424a-8bc1-53ab921ed747","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"575e0b7c-a9d6-4ffa-a340-92fa727ea872","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"4ac3f1c8-366f-4391-a7e5-c6cb56aef7ae","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"dbe6c30e-c8fc-47f0-bb12-5d1aa4264afd","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"cc7f99c2-68e3-4896-aa47-34aefd90b9c6","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"9402453b-475c-4899-8c7a-c256f20902b3","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b58975e1-4675-426a-814b-e9e553c0fc4f","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"9b4f1753-1bc7-4282-b920-bab11e882bdd","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"2648109c-7517-4e49-8c45-ab57fdd573ef","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"ffe48417-0d7a-4472-a015-558edc3496ae","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"1ece3d71-80cb-4227-ba91-f4b43c87cf49","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"6c12ab51-8ba5-4395-a5ad-0fb401330bb3","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"961dc22a-df8f-49f1-ad7d-6f3cb6b64341","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"348b9552-e66d-4187-8151-d305af9da5c1","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"de3ba670-9251-429d-8520-69deeb78e79a","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"bd2667e6-36c4-484a-be2e-65dbe4065bfc","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"82270f9a-5411-4f9d-a78e-7af2d2335f34","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"1e0eb752-d336-4e4d-a285-38416e330f57","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"9f9abc52-7559-4c52-8386-f943b91753a3","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"4a701f9a-9bf6-4321-9b0a-cb275be6ff12","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"a50e4650-aed7-4f85-bc76-9996920c319b","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"74677170-dc1b-475e-b6db-34b0c8cb5348","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"e7ae460e-814d-494c-8c12-c078ab9e0bb8","route":"unknown","method":"POST","client":"web","status":429,"durationMs":1}
+✔ comment and edit endpoints inherit authentication, account switching, no-store and rate limits (91.626145ms)
+✔ identical media request replay succeeds when another request finalizes between ledger lookup and upload lookup (23.52026ms)
+✔ linked devices client accepts legacy records and keeps missing area unknown (5.538892ms)
+✔ device rename pins account and validates exact trimmed receipt; empty clears (2.601207ms)
+✔ old server or contradictory rename receipts cannot report success (3.60968ms)
+✔ malformed devices and duplicate or multiple-current identities are rejected (5.816291ms)
+✔ invalid aliases never send requests and use UTF-16 server limit (1.062774ms)
+✔ revoke requires the target to disappear and propagates authentication errors (1.143256ms)
+✔ unauthenticated forwarding headers cannot select an IP rate-limit identity (5.258879ms)
+✔ origin protection rejects missing/wrong keys before any database work and trusts only verified edge identity (12.207871ms)
+✔ load shedding stops costly work, reserves logout, and releases slots after failures (2.548888ms)
+✔ authentication rate budget recovers with time and cannot be bypassed with spoofed client headers (0.758806ms)
+✔ monitor endpoint is closed by default and only exposes anonymous aggregate counters (5.155875ms)
+✔ health requests coalesce, cache briefly and time out without disclosing database errors (16.457818ms)
+✔ CSP uses fresh server-created nonces and HTML cannot be publicly cached (9.257677ms)
+✔ body bounds stop oversized and stalled streams even when cancel never resolves (23.285566ms)
+✔ document requests share the concurrency and minute budgets with API work (4.552233ms)
+✔ login region comes only from authenticated edge or Worker cf metadata and survives body clones (16.34039ms)
+✔ converts D1 placeholders without changing quoted question marks (1.343709ms)
+✔ translates authorized follow-up inbox scope into a single PostgreSQL JSON array bind (0.267174ms)
+✔ translates customer directory status aggregates without loading private ticket payloads (0.256126ms)
+✔ maps PostgreSQL rows and row counts to the D1 statement contract (2.961551ms)
+✔ commits successful D1 batches and rolls back failed batches (1.127552ms)
+✔ fails clearly when Render has no database URL without exposing credentials (0.299472ms)
+✔ all 18 actual web tariffs preserve the approved prices (0.874791ms)
+✔ the catalog defaults agree with standard delivery; missing location stays zero (0.182646ms)
+✔ renders the Almadina Express Arabic login application (164.021105ms)
+✔ keeps status-filtered parcels and latest parcels together on the dashboard (1.174693ms)
+✔ offers a responsive Brevo email-only password recovery flow backed by public one-time server grants (4.070245ms)
+✔ uses a five-step reference-style registration with map, legal disclosures, and Brevo email verification (16.88296ms)
+✔ starts without hard-coded accounts and securely bootstraps the administrator from secrets (1.988121ms)
+✔ keeps account switching and all merchant-facing records private to the signed-in owner (35.485855ms)
+✔ stores accounts centrally in D1 and authenticates devices using encrypted server sessions (5.731343ms)
+✔ includes a GitHub-to-Render deployment with PostgreSQL and a health check (6.741037ms)
+✔ keeps the selected theme consistent before login, inside the account, and after logout (1.006971ms)
+✔ shows a safe available-accounts picker with password fallback and signed-out passkey login (1.886528ms)
+✔ gates secure mobile biometric unlock behind an encrypted four-digit app lock (3.037306ms)
+✔ keeps merchant and courier account fields read-only while administrators manage them (3.524511ms)
+✔ keeps Excel importing in the desktop toolbar instead of the navigation drawer (1.064597ms)
+✔ shows the notification bell for the administrator, employees, and users (0.696071ms)
+✔ routes private notes only to administrators and courier instructions to the employee who receives the parcel (1.551803ms)
+✔ replaces compensation requests with responsive collection invoices and verification codes (5.15978ms)
+✔ lets courier employees prepare and deliver a collection invoice with the customer's code (9.82939ms)
+✔ lets courier employees scan ready or returned parcels and mark them shipped (33.132503ms)
+✔ lets administrators switch merchants between standard, premium, and diamond accounts (2.813298ms)
+✔ preserves ₪25 West Bank, ₪35 Jerusalem, and ₪80 interior standard delivery prices (1.901471ms)
+✔ automatically applies ₪20 West Bank, ₪30 Jerusalem, and ₪65 interior premium delivery prices (1.388716ms)
+✔ applies exactly ₪15 West Bank, ₪25 Jerusalem, and ₪55 interior diamond delivery prices (25.037041ms)
+✔ applies the requested return-fee matrix by membership and region (3.193622ms)
+✔ shows every merchant account in the administrator collections page and filters its invoices (1.827229ms)
+✔ allows freely typing the parcel governorate and city while resolving regional delivery prices (1.995453ms)
+✔ subtracts the selected regional delivery fee from the parcel price in the contents value (1.230238ms)
+✔ adds progressive weight and dimension fees while keeping legacy imports compatible (8.784964ms)
+✔ imports explicit governorate and city CSV columns while preserving the legacy single-region template (5.443018ms)
+✔ normalizes Arabic and Latin dimension values used by CSV importing (0.681379ms)
+✔ covers representative West Bank, Jerusalem, and interior localities without mispricing unknown text (22.820414ms)
+✔ uses «الطرود» in visible copy while preserving the internal shipments hooks (31.650386ms)
+✔ shows a clear responsive day month year prompt and saves the preferred delivery date (1.667247ms)
+✔ adds a responsive printable shipping label with a real tracking QR code (3.619164ms)
+✔ lets the merchant select exactly which parcels are included in the responsive bulk print job (5.334413ms)
+✔ opens every newly created parcel on a persistent responsive tracking history (3.051963ms)
+✔ renders dialogs into the document body and keeps collection verification controls outside scrolling content (1.078018ms)
+✔ lets only the administrator broadcast app-update notifications to membership groups, roles, or one user with optional sound (4.878545ms)
+✔ lets a signed-in account clear only its own selected notifications through the protected server route (2.622269ms)
+✔ shows a reference-style account deletion page and performs deletion only through the protected server route (2.568798ms)
+✔ shows a responsive reference-style password change flow backed only by the protected server route (2.886744ms)
+✔ shows linked device names and safely revokes only another session (9.224827ms)
+✔ supports opt-in phone push notifications with sound guidance for every signed-in role (3.537961ms)
+✔ printed parcel codes round-trip through the scanner and CSV manual entry (96.474555ms)
+✔ renders camera-only QR assignment on parcel details without manual code entry (259.251267ms)
+✔ serves privacy, deletion and support pages without an app session (71.935376ms)
+✔ all rendered page scripts have the fresh CSP nonce, including hydration streams (26.84553ms)
+✔ ingress pins every path to Render, strips forged geodata, preserves Origin and never follows redirects with credentials (8.131046ms)
+✔ operational events exclude credentials, submitted content and identifying URLs (3.497661ms)
+✔ failed logging cannot change an acknowledged API result (0.465452ms)
+✔ snapshots require usable records and reject stale or foreign account revisions (0.322827ms)
+✔ API reads use same-origin credentials, no cache and refuse redirects (1.629661ms)
+✔ a stalled mutation times out once and is never automatically replayed (16.003281ms)
+✔ an expired session is recognized even when a proxy returns HTML (0.80763ms)
+✔ malformed successful replies cannot be accepted as saved data (0.922433ms)
+{"event":"api_request","requestId":"59b00691-2e05-45d0-aea3-e96371d59079","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":6}
+✔ native hints identify Android/iPhone/iPad without mislabeling them as browsers (2.952238ms)
+{"event":"api_request","requestId":"6fe9b8bf-909c-4d0b-86f6-a1fd8327c478","route":"login","method":"POST","client":"web","status":200,"durationMs":105}
+{"event":"api_request","requestId":"2d02fe63-505c-4569-afe7-1a718f772c18","route":"login","method":"POST","client":"web","status":200,"durationMs":123}
+▶ SQLite session metadata uses real SQL, ownership, monotonic data and foreign-key cleanup
+  ✔ login metadata and first trusted region survive requests without headers and changed regions (2.72212ms)
+{"event":"api_request","requestId":"ebd66eac-2087-41ed-bda4-70bbc87e47ac","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"39cd538c-383d-4f55-8b3e-06c821356b4f","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"293584ee-2d0d-45f6-aaa7-3888eabbc51c","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"021553fa-879a-4778-baae-43c96af2b34e","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"aa43d184-18b8-4de6-b285-51009f92eb0f","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"62bd1836-e8ea-4bde-afc7-36769dde44ac","route":"security/devices/current","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"46a24974-27b8-4f72-a6bd-8ebaeada063f","route":"security/devices","method":"GET","client":"web","status":409,"durationMs":0}
+{"event":"api_request","requestId":"557a7c91-833b-489f-bfea-8d29dcd93bd8","route":"security/devices/current","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"2c015833-eab1-490c-94a6-fb266ca19747","route":"security/devices/revoke","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"43d35711-7d85-4875-8481-b45a64c7cec9","route":"security/devices/current","method":"POST","client":"web","status":401,"durationMs":0}
+  ✔ labels change only the current account/session, reject forged targets and preserve on refresh (11.396706ms)
+{"event":"api_request","requestId":"4bbd3dc3-17fd-48e8-b083-131c4d300390","route":"account/password","method":"POST","client":"web","status":200,"durationMs":274}
+{"event":"api_request","requestId":"5abc729b-2aea-49b3-980d-6053c751e4ed","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"f69d75ce-481e-4dcc-9090-f488e282150e","route":"security/devices/revoke","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"f91f5461-5e51-46c7-affa-fcf115b826d2","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":0}
+  ✔ password rotation preserves label/region while invalidating old token; revoke cascades details (277.622599ms)
+{"event":"api_request","requestId":"4de54d65-87ee-412d-bdd4-b18d105ffcc0","route":"logout","method":"POST","client":"web","status":200,"durationMs":0}
+  ✔ revocation race cannot recreate metadata; logout clears device details with parent (1.458683ms)
+{"event":"api_request","requestId":"41b73070-e593-4da2-8293-ba98633d48e1","route":"login","method":"POST","client":"web","status":200,"durationMs":88}
+{"event":"api_request","requestId":"30b22db7-57b9-4d8e-967a-0ec6719c60e6","route":"login","method":"POST","client":"web","status":200,"durationMs":79}
+{"event":"api_request","requestId":"0a2bc8c4-5569-411c-a1f2-97dcd1450df1","route":"account/password","method":"POST","client":"web","status":200,"durationMs":251}
+  ✔ account-wide password revocation removes every device metadata row (419.562546ms)
+{"event":"api_request","requestId":"06135e14-d610-4211-8cd9-a07642051b46","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"c229468e-7bda-4ed0-b94f-7bda234ebc46","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"40522cf3-bac6-448b-81b1-f8748e70cb32","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"fdf7871b-be44-4039-8660-0b7d5211dd2f","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"a11ebc80-3209-4165-a4b4-aa5e6029809d","route":"security/devices/current","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"ed13dea0-84b7-42fd-a7b9-73ed03fcbfd3","route":"account/delete","method":"POST","client":"web","status":200,"durationMs":83}
+  ✔ expired sessions and deleted accounts cascade their saved labels and locations (251.888716ms)
+✔ SQLite session metadata uses real SQL, ownership, monotonic data and foreign-key cleanup (1216.722951ms)
+﹣ PostgreSQL session metadata uses production adapter and foreign-key cleanup (0.128424ms) # SKIP
+✔ invoice list deletion preserves settlement, respects roles, and restores without duplicate billing (2.63611ms)
+✔ outstanding invoices cannot be hidden, regardless of amount, and old hidden entries reappear (0.885897ms)
+✔ matches a reverse-geocoded pin to the supported registration address (1.412242ms)
+✔ reads both supported Geoapify reverse-geocoding response shapes (3.630111ms)
+✔ normalizes legacy shipped collection invoices as delivered and paid (0.869994ms)
+{"event":"api_request","requestId":"94c0cad0-f088-4964-ac6e-6a4e9f0186b7","route":"login","method":"POST","client":"web","status":200,"durationMs":194}
+{"event":"api_request","requestId":"d15bc242-5a86-46a3-805e-082426a9b7fc","route":"login","method":"POST","client":"web","status":200,"durationMs":409}
+{"event":"api_request","requestId":"503d1926-c891-4bed-93b0-85a399252237","route":"login","method":"POST","client":"web","status":401,"durationMs":2}
+✔ synchronizes the bootstrap administrator when Render environment credentials change (673.449599ms)
+{"event":"api_request","requestId":"2224f04b-aa69-442e-a523-891647c1ece5","route":"login","method":"POST","client":"web","status":200,"durationMs":170}
+{"event":"api_request","requestId":"9e252dc9-787d-479d-9492-35b5fb66e6f2","route":"login","method":"POST","client":"web","status":200,"durationMs":336}
+{"event":"api_request","requestId":"8d629651-0ab4-4d9b-a433-10a23db4d78c","route":"login","method":"POST","client":"web","status":401,"durationMs":1}
+✔ recovers updated Render administrator credentials even after this database was already initialized (538.737404ms)
+{"event":"api_request","requestId":"62763ab1-da47-43fc-835a-8c06ed2708a8","route":"login","method":"POST","client":"web","status":200,"durationMs":164}
+✔ repairs an administrator stored by a legacy plaintext release (195.451458ms)
+{"event":"api_request","requestId":"c33ad3f0-fb32-4612-a004-8afbe5aa4bc0","route":"login","method":"POST","client":"web","status":200,"durationMs":244}
+{"event":"api_request","requestId":"5ba0f809-ae0d-4a55-9c47-1a76349e964e","route":"login","method":"POST","client":"web","status":200,"durationMs":79}
+✔ adds an independent secondary administrator without replacing the primary administrator (354.482359ms)
+{"event":"api_request","requestId":"1e962c98-9398-4a80-bc13-dd2cc3caa545","route":"login","method":"POST","client":"web","status":200,"durationMs":246}
+{"event":"api_request","requestId":"a11598ac-a6a5-4f3f-9603-83201dc2ed7d","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"8e9f94b3-9a95-4c41-bfcf-542d3e3d2f20","route":"database","method":"PUT","client":"web","status":200,"durationMs":84}
+✔ allows several active accounts to share one phone number while keeping emails unique (365.162835ms)
+{"event":"api_request","requestId":"d9f1df15-b4bb-4903-bb43-3ffe0be3addc","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":88}
+{"event":"api_request","requestId":"1673a6a4-6840-45db-a120-ce23ccc778e4","route":"geocode/reverse","method":"POST","client":"web","status":503,"durationMs":83}
+{"event":"api_request","requestId":"eaf049fd-cc2b-492d-88f9-87a67786c049","route":"geocode/reverse","method":"POST","client":"web","status":400,"durationMs":104}
+✔ reverse-geocodes a registration pin with a safe manual fallback (303.800622ms)
+{"event":"api_request","requestId":"c72dbe3c-7295-41da-b1bf-3b6c0410f7e4","route":"logout","method":"POST","client":"web","status":200,"durationMs":87}
+{"event":"api_request","requestId":"bc0ed12e-e56d-491d-9dfe-5f3bc4907990","route":"login","method":"POST","client":"web","status":415,"durationMs":0}
+{"event":"api_request","requestId":"f0abef71-329b-4737-8cdc-b09a85b85526","route":"login","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"694cc689-0bad-486d-93d9-696b1162a4a6","route":"login","method":"POST","client":"web","status":413,"durationMs":0}
+✔ rejects forged, unsupported, and oversized API request envelopes (120.126134ms)
+{"event":"api_request","requestId":"0a6ac5a3-c9e3-4e35-931e-a12c0c3c3c04","route":"register","method":"POST","client":"web","status":410,"durationMs":86}
+{"event":"api_request","requestId":"bfe188cc-29b8-4fe2-b399-4738a5a54ce6","route":"register/request","method":"POST","client":"web","status":400,"durationMs":2}
+{"event":"api_request","requestId":"13995251-c754-4c27-9bef-d92c66904f39","route":"register/request","method":"POST","client":"web","status":503,"durationMs":2}
+{"event":"api_request","requestId":"a3cc9897-e395-437a-bd13-10187c568f6c","route":"register/request","method":"POST","client":"web","status":202,"durationMs":99}
+{"event":"api_request","requestId":"30b4ebec-f6b0-4811-ae7f-86e47d989e37","route":"register/verify","method":"POST","client":"web","status":422,"durationMs":17}
+{"event":"api_request","requestId":"13128e9a-b756-4010-a926-92f5a56f576d","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"f9d878dd-0a7b-4a18-a732-44a7ff937701","route":"register/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"6097e709-a59c-4af9-81b0-0c7a93abca92","route":"register/request","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"46121dc4-4a5b-48d1-a113-444931a66091","route":"register/request","method":"POST","client":"web","status":202,"durationMs":101}
+{"event":"api_request","requestId":"3d73d319-5fed-42d6-8b06-34369ca39416","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"1015dc82-ee7a-47ab-a668-a0c48d9aa9b2","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"registration_delivery_failed"}
+{"event":"api_request","requestId":"bb791afc-c6bc-4195-b778-4d660d12553a","route":"register/request","method":"POST","client":"web","status":400,"durationMs":2}
+{"event":"api_request","requestId":"9a52535e-406c-4e70-84be-620904ea5b07","route":"register/request","method":"POST","client":"web","status":400,"durationMs":1}
+✔ creates an account only after the six-digit email verification code succeeds (566.494496ms)
+{"event":"api_request","requestId":"5294a4d5-4045-42d5-8794-14cc7071aecb","route":"register/request","method":"POST","client":"web","status":202,"durationMs":188}
+{"event":"api_request","requestId":"cc803943-0142-49f7-9951-5aecfa4c79f5","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"4a3e7920-50dc-4559-9ca3-81f26dbc6c2e","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"2d6825b2-7c4c-42e9-9132-b1935f091242","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+✔ keeps simultaneous registrations with one shared phone number independent (352.178506ms)
+{"event":"api_request","requestId":"5824cca0-c78b-4c63-b62e-a779510a6e93","route":"register/request","method":"POST","client":"web","status":202,"durationMs":183}
+{"event":"api_request","requestId":"e40ae97a-741f-46b5-93d0-6ded51b77cc4","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+✔ accepts a complete manual address without requiring or trusting map coordinates (232.025527ms)
+{"event":"api_request","requestId":"e0ba88dc-19ac-4565-b549-b490677dfb9b","route":"login","method":"POST","client":"web","status":200,"durationMs":171}
+{"event":"api_request","requestId":"36d7263b-326e-4c53-8e13-fff863f7efd0","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"be1a0cd3-cc0f-4f40-b789-cd44e1f0275a","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"23304de9-03b3-4d1c-a2d6-0d1e0ea5fa8c","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"75681b35-ae3f-439b-9e18-e842b3a58b42","route":"login","method":"POST","client":"web","status":200,"durationMs":86}
+{"event":"api_request","requestId":"1069acd0-01c4-4b56-8925-db6d2f197e02","route":"database","method":"PUT","client":"web","status":200,"durationMs":4}
+{"event":"api_request","requestId":"627aecca-f0f6-4a3b-939d-b11dd0f5acea","route":"register/request","method":"POST","client":"web","status":202,"durationMs":101}
+{"event":"api_request","requestId":"74afdfa2-e4c7-48ab-9acd-65ef6e4134f1","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":31}
+{"event":"api_request","requestId":"3c0d00a0-bbfd-4682-897a-4a9c30ee1597","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+{"event":"api_request","requestId":"dac84fff-4a91-4aa6-b98a-f016d4f9605f","route":"database","method":"PUT","client":"web","status":200,"durationMs":8}
+{"event":"api_request","requestId":"f7ab0f2e-19ac-4b41-9953-50f9f8e141e8","route":"database","method":"PUT","client":"web","status":200,"durationMs":245}
+{"event":"api_request","requestId":"04985e32-b5ec-410a-a3dc-cd7d46c701e8","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"8ca44d07-8eba-4399-ae9a-9aedf6adadd4","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"5ec86a70-ac56-415d-b5b4-4c71e78c15fa","route":"login","method":"POST","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"dd78c53c-0ba5-4e81-bbdd-0e5fff4a3332","route":"notices/broadcast","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"8d6894f3-47a6-46b8-9250-e5520a28903e","route":"notices/broadcast","method":"POST","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"7d3d8cde-0777-48f1-9b2c-fcb31d8d809e","route":"notices/broadcast","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"b7519a48-937c-42a1-83de-025c6b1035b0","route":"notices/broadcast","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"dca76ea7-d082-4d7c-8ff1-6b0147f9f497","route":"notices/broadcast","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"77dc75bd-6e12-44ed-8176-7979e5c0083c","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"6b819ce4-8822-46cc-bce9-1229a4a2fe36","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"8703cc3d-5e6c-41d4-bc5c-185a0e4a914a","route":"notices/broadcast","method":"POST","client":"web","status":409,"durationMs":0}
+{"event":"api_request","requestId":"8891bc72-33a0-44fb-9215-991448810538","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"669fef55-6718-42ea-8c07-27752113f0f6","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"3c82af90-a9dd-4db2-ad7b-7c5fa3555fd8","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":5}
+{"event":"api_request","requestId":"13c708cd-969d-4142-86d6-2120db57b45b","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":6}
+{"event":"api_request","requestId":"89d66974-6bc1-4799-b8ff-57ac76a88c8b","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":6}
+{"event":"api_request","requestId":"c598c9aa-e699-4d47-9dc4-b96099016666","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"926ebe1b-b6eb-472a-8fc8-ef0b666fa75b","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"d92762c0-3520-4fea-8ac5-f7dab1a1e2f8","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"028b1a7a-f0a3-4925-8888-ec73a7101184","route":"notices/broadcast","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"bfa4706a-3d8f-4319-bd3a-13dff8d2622c","route":"notices/broadcast","method":"POST","client":"web","status":400,"durationMs":5}
+{"event":"api_request","requestId":"7ddc0a25-f160-4f74-b3aa-20dcbfcbfd52","route":"notices/broadcast","method":"POST","client":"web","status":422,"durationMs":5}
+{"event":"api_request","requestId":"f6807160-a403-4ba2-80b8-a36e1f71e85e","route":"notices/broadcast","method":"POST","client":"web","status":400,"durationMs":5}
+{"event":"api_request","requestId":"055b3667-676c-4983-afab-55160168cb28","route":"notices/broadcast","method":"POST","client":"web","status":422,"durationMs":5}
+{"event":"api_request","requestId":"b4603390-5ba7-4458-aaec-297750854375","route":"notices/broadcast","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"e6386b2b-64b5-44cf-972d-08aaf2f1ad42","route":"notices/clear","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"2a7162f4-cf55-41d4-95a2-56a126fc5554","route":"notices/clear","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"c905ff3f-3cc4-4798-a039-fe6f398687ef","route":"notices/clear","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"30b78702-03ea-4f30-8537-9e2c8383a368","route":"orders/scan","method":"POST","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"78bb3c40-b811-426a-9f02-a68d37f426cf","route":"orders/scan","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"ccbaa514-9421-48d0-b5d7-e4b5df30679a","route":"orders/scan","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"e87b7963-9c55-4e72-91b8-e934ccb46b53","route":"orders/scan","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"c2e09286-3537-487f-bedd-2a55d3829c09","route":"orders/scan","method":"POST","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"9510aa36-b403-4025-a8ac-9ff84561c3cc","route":"orders/scan","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"0e56f2b1-05d4-4b10-8899-661aebc5fe26","route":"orders/scan","method":"POST","client":"web","status":409,"durationMs":0}
+{"event":"api_request","requestId":"ef540f97-42ac-4ede-bdd2-23e1f607b065","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"75c758b0-51b5-465f-b4a3-584249e1ce34","route":"orders/scan","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"29a4d98d-919e-4d9d-9ddb-5b599f150bd8","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"b8c828cd-0ebe-4b02-a2e2-7458fe085cda","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"63622808-01e8-4e62-871a-167d35acc54a","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"4207f4ce-05f5-40b8-b3a7-d63a7b716dc6","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f9a509c3-c0ea-4ec7-8b87-8e17c64bf3d3","route":"collections/verify","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"5026c033-3a71-4377-b474-6b17d938c77d","route":"collections/prepare","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"88101cd8-a195-4896-a8a0-fd387d02b097","route":"collections/prepare","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"f555e55c-ecd0-4c32-b9ac-c87c6d6eeadf","route":"collections/prepare","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"a2b3e321-5c3e-46d0-9a9d-75bf86080ebf","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"d4a40fd8-7b36-45b4-a93c-7ed0e75947d4","route":"collections/verify","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"9be5f5ae-5127-49ef-a4a7-2d27388c896e","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"41d32a79-b3e2-4fed-95a0-21ebe5be7290","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"eeb05930-7bd1-47b1-a3de-cb0c508c3d88","route":"collections/verify","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"835d480b-a71e-4955-877a-765938535e40","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"ffcd672c-edab-4c06-ad98-abe3d07589b3","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"478520be-cedc-41b2-bc14-eee7d2f00047","route":"database","method":"PUT","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"44b733bb-9120-41f3-a6e0-f2296399fe2d","route":"database","method":"PUT","client":"web","status":409,"durationMs":0}
+{"event":"api_request","requestId":"28e89fff-7c0e-4b4c-8f16-8a8aecb26ad0","route":"register/request","method":"POST","client":"web","status":409,"durationMs":2}
+{"event":"api_request","requestId":"c97bc238-8de5-432f-ac48-b1942bff9711","route":"login","method":"POST","client":"web","status":401,"durationMs":80}
+{"event":"api_request","requestId":"75ac7b7c-1dde-46b1-a87f-ff14774724c4","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"c7ef65c1-550c-4595-afa8-9aac598542ae","route":"database","method":"PUT","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"b9ef158a-6238-404d-ad54-40bc9fc2ec56","route":"logout","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"4469ef2a-af17-4447-9a95-d3fc51b10a37","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+✔ shares accounts and orders across devices while isolating customers and protecting sessions (1313.548545ms)
+{"event":"api_request","requestId":"3d4caa36-bf86-4a71-8a78-9351bdd0d503","route":"register/request","method":"POST","client":"web","status":202,"durationMs":199}
+{"event":"api_request","requestId":"73809eeb-55f4-438c-943c-ae3f6995e009","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":20}
+{"event":"api_request","requestId":"9ffd4b63-ae96-49f6-9f42-b70c475f2ed7","route":"register/request","method":"POST","client":"web","status":202,"durationMs":102}
+{"event":"api_request","requestId":"dbd7560d-2512-46bf-a6d9-2ef75e374b18","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"f9c2fe8c-b864-4459-a20d-37f11b23770f","route":"login","method":"POST","client":"web","status":200,"durationMs":83}
+{"event":"api_request","requestId":"47e778a7-3484-423d-9964-cc6ccc552bc0","route":"database","method":"PUT","client":"web","status":200,"durationMs":163}
+{"event":"api_request","requestId":"a954eba1-91d3-4461-856d-4c262a863f57","route":"login","method":"POST","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"a7a499ae-adf3-4758-8a58-172a625c642a","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+✔ couriers read every active parcel while private data and write permissions remain scoped (706.61391ms)
+{"event":"api_request","requestId":"7d002545-ccce-405c-9797-46519b08e613","route":"register/request","method":"POST","client":"web","status":202,"durationMs":193}
+{"event":"api_request","requestId":"56543451-4061-4ecc-a8f1-f2c5a98eff4f","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"a117ce14-8e08-4cca-9806-036466fb2199","route":"register/request","method":"POST","client":"web","status":202,"durationMs":99}
+{"event":"api_request","requestId":"b3f356d6-9313-4a33-b9e7-bc16e7f1f571","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"8a1b71c6-6035-44c9-b94b-a99da7135395","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"3582c1b9-a92a-4e86-b2a7-61556a55be18","route":"login","method":"POST","client":"web","status":200,"durationMs":83}
+{"event":"api_request","requestId":"43879fcc-3710-419b-8160-585e8a9b05e8","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+✔ invoice list deletion synchronizes for its account and keeps paid records on the server (445.980574ms)
+{"event":"api_request","requestId":"76c6280e-7d97-466a-b6c9-a43ea9436b3a","route":"register/request","method":"POST","client":"web","status":202,"durationMs":184}
+{"event":"api_request","requestId":"e47848d7-1e02-499f-a546-478e62bc9a9b","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"14c97feb-35df-4085-a633-27883803392f","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"5e05f029-df1b-45f2-ad13-ff8d27259c58","route":"database","method":"PUT","client":"web","status":403,"durationMs":2}
+{"event":"api_request","requestId":"10eedeae-bf15-452e-a9e3-6b1a00c46adf","route":"database","method":"PUT","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"a9014355-7a4c-405e-9ade-786a794d72c8","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b224b1e1-ba68-4ce8-b499-26a823008b2e","route":"database","method":"PUT","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"4c029210-476c-4f6e-a9f8-060ba7eb66c3","route":"database","method":"PUT","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"62ce7b44-ec4b-420f-9e2a-2171d97fe021","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+✔ server blocks hiding outstanding invoices for merchants and admins, repairs old visibility and retains omitted invoices (324.721895ms)
+{"event":"api_request","requestId":"8cf6a9cf-2ad2-4941-a0f5-8943d0a97b48","route":"register/request","method":"POST","client":"web","status":202,"durationMs":201}
+{"event":"api_request","requestId":"5f659315-8c21-4cc6-9955-240c4795e853","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"add47682-cac6-4c11-84cc-a9f9ce82bf0f","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+{"event":"api_request","requestId":"b6f5afda-b21b-4534-b881-13e488d1b944","route":"database","method":"PUT","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"ebabfcb3-1ece-4e5d-a0da-bd807156856d","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"abc48d57-c9fd-4774-b0cb-313104f14f26","route":"collections/verify","method":"POST","client":"web","status":200,"durationMs":4}
+{"event":"api_request","requestId":"37ba6d35-3fac-4cd2-b759-03be64de588c","route":"orders/scan","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"de24dab5-40d1-4285-9e7a-719a9c1724d9","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"80988fdb-6faa-4c50-b528-9a494aba8164","route":"database","method":"PUT","client":"web","status":409,"durationMs":2}
+{"event":"api_request","requestId":"d3b8044b-c977-4e56-992b-7c7c1076a9b9","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"bd523d05-3169-4338-819b-16a0694cccac","route":"database","method":"PUT","client":"web","status":409,"durationMs":1}
+✔ preserves a settled return invoice and bills a later delivery once after a courier rescan (518.021991ms)
+{"event":"api_request","requestId":"8c0f4480-02ec-4797-884e-653ec502e222","route":"register/request","method":"POST","client":"web","status":202,"durationMs":191}
+{"event":"api_request","requestId":"4e98348a-50d1-46a2-81c8-4afc33ab7032","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"198610de-6b70-4edf-ba91-90f2c6b13e64","route":"login","method":"POST","client":"web","status":200,"durationMs":92}
+{"event":"api_request","requestId":"a9673ed2-c80d-44ed-9e74-34ff08651cf3","route":"database","method":"PUT","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"9ad4fc8c-6e50-4af0-93c5-73cf500ff298","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"43a6072f-9b18-48c7-832e-99ed4897e3d2","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":2}
+{"event":"api_request","requestId":"a60075ff-5688-4944-9de1-7aac07495a19","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"19fd1dec-5b47-47c4-8a16-ea15fc800bac","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"970e1e37-fe0c-41ff-b9a9-499784cf891f","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"0c792d7e-5370-41f0-9a8f-81997e15e191","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"026db211-7cd1-4006-9ccd-62fbf0877bec","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"9d72cf78-aec3-4745-a952-42ee36180ddb","route":"collections/verify","method":"POST","client":"web","status":429,"durationMs":1}
+✔ rate limits repeated courier collection-code attempts without changing the invoice (512.402996ms)
+{"event":"api_request","requestId":"56dde687-157d-4ec7-884c-6aada36385f5","route":"register/request","method":"POST","client":"web","status":202,"durationMs":185}
+{"event":"api_request","requestId":"05b45411-fa95-496b-a36c-35a0ab9fbd87","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":20}
+{"event":"api_request","requestId":"ae7ab0b2-b891-4937-9d82-1c85cae99afb","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+{"event":"api_request","requestId":"6f98ceb7-ac81-4743-9f9b-ec69a02ce781","route":"database","method":"PUT","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"dd36e9a5-68f5-4a09-99de-939888dfb8e4","route":"login","method":"POST","client":"web","status":200,"durationMs":79}
+{"event":"api_request","requestId":"726eb535-3147-482f-b207-5efff1a2401c","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"5067fe6d-db46-4cd7-8b55-70bcd58cbf2d","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"933b0bc9-3f1d-4aa9-8a39-f314f0d25230","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":0}
+{"event":"api_request","requestId":"c7abd15e-b1df-436b-84a8-3cf0f8715758","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"f740b1f8-9f07-435c-86b0-0eaf812f0242","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":0}
+{"event":"api_request","requestId":"3648bf35-15c2-45e4-bd4d-3be10f1b41b4","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":0}
+{"event":"api_request","requestId":"fcfd9da6-5e39-4306-bb4f-51f8ebc8b35e","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":0}
+{"event":"api_request","requestId":"a1cdaf50-f2a1-4722-9168-390871843def","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":0}
+{"event":"api_request","requestId":"87e4ed00-7b28-4018-9c35-fe7c373446a5","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"362bf569-4176-46c5-af37-70d6defef6e5","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"5c52cfc8-b066-40d9-8d7b-3cde3b5a99ed","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"d7b8aa74-dd33-4512-b7a0-4b5c4b3019b8","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"ca64daef-0256-4e29-bef0-feae373b64cb","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"5118e2bb-ea4b-44cd-a8b0-914b3a56efc7","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"d589b866-5edf-485f-a670-e2837c78588a","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"7d80e5d0-82f4-4183-ae6a-5751ee0ce956","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":0}
+{"event":"api_request","requestId":"9b040410-d789-45e7-a5da-84017388e1c4","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"acebbce1-aeaa-4f5b-bc47-a2fb175fb5ff","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"e7154808-ff67-4cb8-9eea-e48abbadc92a","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"6cecb150-5ef6-4a60-afd9-44b90b8101bd","route":"collections/verify","method":"POST","client":"web","status":422,"durationMs":0}
+{"event":"api_request","requestId":"42a9885f-94b1-4f2c-8398-601153931961","route":"collections/verify","method":"POST","client":"web","status":429,"durationMs":0}
+✔ rate limits a courier after twenty collection-code attempts across different invoices (504.769554ms)
+{"event":"api_request","requestId":"6dc38ea3-3afc-4261-834f-c0dd2774cc1f","route":"register/request","method":"POST","client":"web","status":202,"durationMs":191}
+{"event":"api_request","requestId":"b520f766-61fb-415f-8209-21dff224207f","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"24c64118-21a2-420f-a1a2-b47364f3f9c2","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"b2aa69e8-f9de-4b62-bd93-8de6426545bf","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"acee0288-b7db-4f32-b3c1-08641db52610","route":"login","method":"POST","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"ab2484f2-f7a5-4eb2-9995-ebb7ad5a67a1","route":"database","method":"PUT","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"7d9759e1-a73d-4553-89b9-da030e8e10f6","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"d8aaa5a7-e6b7-43d6-b43a-3f0208f696e7","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"b2710293-84a3-4146-809b-6f503a558091","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f658747c-6699-4d0d-a9cc-c79d38bef2c8","route":"database","method":"PUT","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"940778e8-b260-4182-9d22-5787f6d0d189","route":"login","method":"POST","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"ca071e59-fedc-40a4-aa69-d6226f8bc077","route":"login","method":"POST","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"05467be0-2313-43b1-a8b9-3101fc13ad04","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"70a35e53-d2f2-4cce-8e73-f4240f8fd9d2","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"481765b5-f4f8-42e5-9ca8-e324b6fb21aa","route":"database","method":"PUT","client":"web","status":409,"durationMs":1}
+✔ allows only the administrator to change merchant and courier account fields (778.613618ms)
+{"event":"api_request","requestId":"ba805884-c3ad-4e33-b6c4-b80295e6a2b9","route":"login","method":"POST","client":"web","status":200,"durationMs":163}
+{"event":"api_request","requestId":"d5064652-28e7-4268-88eb-46ab391b6b2e","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":2}
+{"event":"api_request","requestId":"7bfed7f3-dcee-4c17-bc56-952651a2ab6e","route":"register/request","method":"POST","client":"web","status":202,"durationMs":101}
+{"event":"api_request","requestId":"56f34efc-7075-4ea3-baba-b653a4971e45","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"8992f018-2b70-4cdf-ac81-294003b92beb","route":"database","method":"PUT","client":"web","status":200,"durationMs":4}
+{"event":"api_request","requestId":"a41e831a-369e-46dc-9957-78ef869ac7ad","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"68d90e70-24f9-42b5-b69d-55293665ee35","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"4706e2d3-e59b-4069-b8d6-9e14e5e95ba7","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"4921dce9-a37c-4652-bf6f-f895c6d1262c","route":"database","method":"PUT","client":"web","status":200,"durationMs":8}
+{"event":"api_request","requestId":"fac44a19-3028-4bba-9ddd-0ac5c4452472","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"6be6eaff-bb71-4f19-9f1e-4ebc5396c360","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"3ac98ce9-054c-45d1-9e64-c826434caa69","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"b9d1463d-2c99-467d-a673-3f3e4134d2cd","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"3999db58-5855-4ba2-8e7b-7fc7f689b568","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"e6d5e9df-70cb-4be3-9a48-7af243ae0ec7","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"25ad38e6-910f-434f-91b3-6ac190934a57","route":"database","method":"PUT","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"5ed96318-5d11-4478-8be4-bd7f570a288b","route":"login","method":"POST","client":"web","status":200,"durationMs":79}
+{"event":"api_request","requestId":"5cd542e0-190e-4958-a6a4-aa12e32b6746","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"eda6bbc9-dc05-485b-8492-dc85dfaf6d3a","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+✔ recalculates progressive weight and dimension fees without trusting client totals (433.696757ms)
+{"event":"api_request","requestId":"ccc44551-1d65-4cfc-ae66-6456ce981287","route":"login","method":"POST","client":"web","status":200,"durationMs":165}
+{"event":"api_request","requestId":"f2d6d56f-85d3-4d35-9f8e-9b65e548b387","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"ad152e50-58d2-4ed0-8adb-5a403d5a560b","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"62c78e72-d26f-4b9f-ae79-1c3724507311","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"e27f61b4-924a-41ad-ada8-9ef59d3a2b74","route":"login","method":"POST","client":"web","status":200,"durationMs":90}
+{"event":"api_request","requestId":"a3c4a062-e19f-46e9-a2ab-6215c13f07eb","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"aaac3297-367f-42a0-9c38-618349bd3847","route":"database","method":"PUT","client":"web","status":200,"durationMs":4}
+✔ persists diamond membership and enforces its 15/25/55 regional prices on the server (409.321554ms)
+{"event":"api_request","requestId":"ee65d9ea-0f74-48a7-b258-5795ee24c84a","route":"login","method":"POST","client":"web","status":200,"durationMs":167}
+{"event":"api_request","requestId":"d0a58f0b-8b4e-4779-b4cc-32447463e687","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"64280bc0-c55a-403e-a3d4-bd81b627934b","route":"register/request","method":"POST","client":"web","status":202,"durationMs":100}
+{"event":"api_request","requestId":"2bf04967-c812-4bd8-836d-0d697706a5dc","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"899bd4cf-a9c9-4d9c-8b32-76e9f7c056a9","route":"login","method":"POST","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"d72a083e-bed8-4602-a8b6-f5a0b3bc2d96","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"6bd886ae-bfb3-4091-a5bb-9420d7fa7b2e","route":"database","method":"PUT","client":"web","status":200,"durationMs":4}
+{"event":"api_request","requestId":"efb6af1b-d74d-498c-b804-81796d959cc6","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"85e180f2-bdb5-4bb1-9873-d0a55097689d","route":"database","method":"PUT","client":"web","status":200,"durationMs":5}
+{"event":"api_request","requestId":"2df5607a-fae8-4743-a667-a64ebceb8b60","route":"login","method":"POST","client":"web","status":200,"durationMs":161}
+{"event":"api_request","requestId":"50b7ba60-d4c5-4d48-adfc-735930b5316c","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"f21d13a8-aec3-49c6-8d62-953da4b9abec","route":"register/request","method":"POST","client":"web","status":202,"durationMs":104}
+{"event":"api_request","requestId":"7afbc9b6-78aa-4b57-8049-02bdd9810995","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"b3ac8bee-f799-48fb-9eff-3892a1ce1c27","route":"login","method":"POST","client":"web","status":200,"durationMs":90}
+{"event":"api_request","requestId":"2e972ae1-a359-4405-b8f5-aece9fd18bea","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"5695de08-9fd2-4a17-8b1f-55f8a028b440","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"56b24d1b-e376-4ded-a60d-06af9453f6bd","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"ad6f8130-c20e-4aaa-881e-5cbcc4c99326","route":"database","method":"PUT","client":"web","status":200,"durationMs":5}
+{"event":"api_request","requestId":"c7ddd112-9551-4842-9849-00d2bb8474f6","route":"login","method":"POST","client":"web","status":200,"durationMs":163}
+{"event":"api_request","requestId":"645d86b1-5652-4136-84e9-69c5cf28834e","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"1a76633b-bf61-458c-b282-d407ea2178a7","route":"register/request","method":"POST","client":"web","status":202,"durationMs":102}
+{"event":"api_request","requestId":"f118ef4b-4e9f-4b34-8e96-8e463acafd29","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"b2d56165-02a9-4569-9ec5-4c191a7dfa63","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"7c0942f2-0ed3-4fbf-b282-a571024ef478","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f7cf7850-dbd0-4520-bf44-253671ed1ebd","route":"database","method":"PUT","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"bcc8b12c-bbb1-4e00-8203-e887c0a82ec1","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"de9058aa-6e8c-4ba7-908c-61e53ce24624","route":"database","method":"PUT","client":"web","status":200,"durationMs":5}
+✔ recalculates return fees on the server for standard, premium, and diamond invoices (1186.671556ms)
+{"event":"api_request","requestId":"8aee87a5-141d-4063-8c6e-6ef2e2275ac2","route":"register/request","method":"POST","client":"web","status":202,"durationMs":186}
+{"event":"api_request","requestId":"ccf1fe0e-58c9-4b92-a8ff-5bdeb3b6f85a","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"278f1fe2-69da-413a-9138-331b7ff21838","route":"security/pin","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"ddcaabb1-d550-4193-a83c-605d76cd7154","route":"security/pin","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"ac124800-efb1-4aa4-9e93-4185292068d2","route":"security/pin/verify","method":"POST","client":"web","status":403,"durationMs":83}
+{"event":"api_request","requestId":"7b69b1a5-5d27-43e3-9893-826994012fbd","route":"security/pin/verify","method":"POST","client":"web","status":200,"durationMs":88}
+{"event":"api_request","requestId":"49c153b6-0a70-4f77-a567-9dbd11411587","route":"security/webauthn/register/options","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"99f03f01-1841-4bf4-9a52-38087b4404c0","route":"security/webauthn/register/options","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"0c5f917f-1331-46ae-9286-68a5be9567ca","route":"security/disable","method":"POST","client":"web","status":200,"durationMs":81}
+✔ stores the app-lock PIN only as a server hash and gates device biometrics behind it (656.339786ms)
+{"event":"api_request","requestId":"98d70547-2b3a-40cc-97be-e1de590afb19","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"165162e3-d32d-4738-aff4-d620d10c72fd","route":"passkey/login/verify","method":"POST","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"c5c5420b-0d20-44c8-ba94-0395d72f0362","route":"passkey/login/verify","method":"POST","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"c9dd79e6-ba85-48bd-8e90-f32fb31cfe30","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"41d5634c-3d45-4fa6-ba56-989098324917","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"ff46203c-5063-4fc1-9890-944633d59c4e","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"7f0d077f-b43f-4151-a250-fa363283e36d","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"911dc98a-6852-4a31-822b-fb72b8e6e081","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"ff65fc18-5e95-4519-bd31-5b44a1dba1bc","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"a06aeddc-3b5a-46c6-98b4-2055e8fc1234","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"100e18e3-d4d4-4c41-83e1-6248d45725c1","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"5936fd14-39f2-47ff-9761-48f127caf68e","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"ee277352-5200-4054-8e2b-068947d57e21","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"220bc763-82c8-4c3f-a12f-1ad670c98626","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"441b371c-7909-40da-81c2-df3db9df0d1e","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"b1aa5553-1960-48e3-834c-95ceea9e993a","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"2b1e6dc3-81f9-4cfc-87b2-4bea26ff8392","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"24b6128f-bf70-4e7f-b077-c97dd5a76e17","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"c2927a0b-ad24-4772-9e64-362de1e6613c","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"1e04b28c-7422-461c-85e4-239d1372b19f","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"2018935f-8e11-4b81-8938-8c6002ad1096","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"e00c46d4-89a8-4dc5-930d-aba9938f882f","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"416d24c7-ae5b-4985-a9bd-6fe42f79410e","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"ce5755fc-9166-462f-b3bc-71e38d43435e","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"0f395414-b596-41d2-ae0a-8be8b006429c","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"51f71ad0-c3a5-41c7-8240-691954132c3c","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"8948f7e2-4ca6-4f0d-b65a-bfebc485feda","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"304920cf-972c-4be0-ada3-70bd78e8950d","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"ef9f30e8-7b6b-4498-9db2-944859bab328","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"33097a43-e282-42c9-8c75-46650bc33adc","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"01b4ce71-a398-4b69-be1e-07f86fc1e622","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"c06491c6-0818-4727-b12b-7eed54fb2606","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"8b6f230d-41f4-4209-ae6d-a15570133019","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b0a23cf7-79ee-491e-aff5-acd40674e2a1","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"5f638d8f-f091-4303-8951-a74fed52490a","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"dbe38375-8f20-44f9-bd8a-66dcbc1b2eee","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"6c1e3213-06be-4f5e-b766-a9de81f91355","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"dfae1cdc-93ae-4bf5-86a3-b38de19d2b49","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"d9bbbd66-5773-41f0-a385-d89fd894ea2e","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"03188680-f14a-4811-b97e-36d2f6339752","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"05e95051-7100-421d-86dd-ad69c3af4f06","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"9f3ed81e-2993-439c-876e-b0a849cdb9e1","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b1150e53-3af9-48ae-a825-41edcc134918","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"c5bb9a12-c3b6-4ba4-9536-cbf6ca710c6e","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"03e75d23-6ff0-40d4-835a-453d95c6679b","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"084def75-5f4c-4945-8842-94da87eb5236","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"f0edf45f-38c6-434a-b37f-6275e12924c8","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b7cbbc15-8956-4537-89ec-92491daad26d","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"9d4c7776-c06d-484c-9840-90955253937a","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"803d895b-a5ee-40a3-a32e-86a1320733c4","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"bb2bbdab-4760-4f14-98ca-a444eceaafcb","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"baf2ec40-f64a-4f84-8b4f-0f8b6adf5251","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"7b9ddf5b-edce-4bea-a4c2-7aca7f2191a4","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"b104bf1b-ed53-4763-90c0-83f3085298cf","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"6fb06fc5-70e7-449f-88a5-1fe7a4aa8874","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"d07eebab-8e02-4c71-a80e-1656b919b274","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"c1c5cb5a-cbf5-4665-844d-437db810ee5f","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"278f6e70-116d-4e67-b070-920a53d0c487","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"625539b5-78a9-4244-92b3-1daf6545141a","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"02bce123-929d-4fdf-ae09-2c96f670eea1","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"689344ff-5385-49ca-86b0-3c860db1de5e","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"8dd76f9e-2c4b-4d2e-9b6a-265cae65d0c9","route":"passkey/login/options","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"f081f934-ef54-4069-a96e-a29c3cb92f71","route":"passkey/login/options","method":"POST","client":"web","status":429,"durationMs":0}
+{"event":"api_request","requestId":"a3a19e0d-e564-428a-a66e-ec8afb4b6696","route":"passkey/login/options","method":"POST","client":"web","status":429,"durationMs":0}
+{"event":"api_request","requestId":"7a111d46-ab65-4d8c-ba06-2e3ebc01b2cf","route":"passkey/login/options","method":"POST","client":"web","status":429,"durationMs":0}
+✔ issues an anonymous discoverable-passkey challenge and consumes it only once (147.976346ms)
+{"event":"api_request","requestId":"7e657e0f-e0d7-41ac-9708-01ac8bd03b3b","route":"login","method":"POST","client":"web","status":200,"durationMs":163}
+{"event":"api_request","requestId":"81cd5ddb-f87d-46d5-9b0c-77e25a05965e","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"a4ce4252-0bc1-45ee-a4a7-340cebf53077","route":"register/request","method":"POST","client":"web","status":202,"durationMs":96}
+{"event":"api_request","requestId":"e187af79-39eb-48ed-b178-aca406c37f97","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"511ce83b-c6f7-45ee-a33b-e3a1dfaa8b6c","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"f243dff6-be04-4b9c-abb1-5179e63c9704","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"158b9c62-d63c-4a99-ab8b-90c683a0d90c","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"6212adf0-cabb-4206-96f8-851ffaf559c9","route":"login","method":"POST","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"f18e54e3-cb94-4110-8c5d-8a5348524fb6","route":"account/delete","method":"POST","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"f744fd06-7d14-412a-a633-9531ff043dc0","route":"account/delete","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"b9f7fbc4-979a-4294-b6df-817d8272c1b8","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"84e44203-a214-477a-a40f-3b59601ac3da","route":"account/delete","method":"POST","client":"web","status":409,"durationMs":83}
+{"event":"api_request","requestId":"608aa9f3-a26e-445d-b321-2230ae23c0c2","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"e33ba8a5-a246-4270-8bbd-79f1262adfd0","route":"collections/verify","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"c259214e-ecb7-480f-b0c4-6edab9db3c2c","route":"account/delete","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"ec6ec533-a029-41de-bdcc-90561bc65f3e","route":"account/delete","method":"POST","client":"web","status":403,"durationMs":81}
+{"event":"api_request","requestId":"5c47f566-745a-4cca-954e-f16222ac299e","route":"account/delete","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"d52c1c2a-bb67-40f8-b430-bdaa65fdf532","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"8f89dc01-e95c-4ec7-9e20-2ff02062592b","route":"database","method":"PUT","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"42c561b9-5022-4556-8724-2db254124e5c","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"412e4238-7ce7-4bce-a8c2-f93783295df0","route":"account/delete","method":"POST","client":"web","status":409,"durationMs":80}
+{"event":"api_request","requestId":"c5761ff4-6a23-4622-8c11-95031845d9b3","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"13983943-7149-48bc-893e-253b0ac532e3","route":"account/delete","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"3354f7aa-41e4-4fe1-bb39-cc695d2cfc01","route":"register/request","method":"POST","client":"web","status":202,"durationMs":100}
+{"event":"api_request","requestId":"77cbd08f-ecf8-469b-9395-9c7632050152","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+✔ deletes only the authenticated eligible account and preserves every other hosted record (1294.53126ms)
+{"event":"api_request","requestId":"98a98c57-978b-43fb-a090-9b2f1df22c00","route":"register/request","method":"POST","client":"web","status":202,"durationMs":180}
+{"event":"api_request","requestId":"bd63dd2f-9d07-4794-bde9-a339603c2703","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"6c8f5731-2507-477a-b801-a74526734d06","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"c303aa42-60db-4a68-b20e-1e89e5bc5a44","route":"register/request","method":"POST","client":"web","status":202,"durationMs":97}
+{"event":"api_request","requestId":"dd9f167e-e642-4f67-9269-f70334a92e28","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"d5c77610-d1f2-4b31-8e1d-64f1b785da2d","route":"security/devices","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"669d984a-ff4f-446a-a70c-65ad09c72e89","route":"security/devices/revoke","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"5d7fa1c0-582e-4f62-9e60-8a44386899b0","route":"security/devices/revoke","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"d48d9fb9-a522-4730-b2e9-414e50a43f87","route":"security/devices/revoke","method":"POST","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"4e6ef06f-8807-4622-b6cd-5edba9bb04ff","route":"security/devices/revoke","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"24a2d2a6-defe-494d-acc8-884d37d8632e","route":"security/devices/revoke","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"7172fd33-a14b-4ded-8c55-aba570e65862","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+✔ lists linked device names per account and revokes only a selected non-current session (437.260515ms)
+{"event":"api_request","requestId":"67439e9e-6bb9-4147-afcf-9c83a9e1bcdc","route":"register/request","method":"POST","client":"web","status":202,"durationMs":181}
+{"event":"api_request","requestId":"accedfa6-9d14-4ced-816f-d3631ecc131b","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"17d8710f-cb19-4baf-93d9-cb863c5abfa9","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+{"event":"api_request","requestId":"2f161e9f-5778-4a8e-8f4d-fe3149cbe11d","route":"register/request","method":"POST","client":"web","status":202,"durationMs":97}
+{"event":"api_request","requestId":"089de804-1407-4273-91ed-195c8fa25e46","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"f24c3296-3b7c-4404-8b4b-73acb31327a6","route":"account/password","method":"POST","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"20fc4197-9fad-4222-8859-3e6cabe78a02","route":"account/password","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"ac018293-0ffa-4ff1-8bb9-b4c5bb00c43e","route":"account/password","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"e2809fc9-ea36-4c41-a895-a04ce5032d38","route":"account/password","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"28050e93-128d-4b2b-9dfd-58efbb552a2b","route":"account/password","method":"POST","client":"web","status":403,"durationMs":82}
+{"event":"api_request","requestId":"5fc91c04-7d2b-479e-bfdf-9ffa0224801c","route":"account/password","method":"POST","client":"web","status":200,"durationMs":246}
+{"event":"api_request","requestId":"9f985e64-ce83-460b-8f6d-8cb45004e57e","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"15dedea4-c5bf-42ce-8fa6-125ab90456b4","route":"login","method":"POST","client":"web","status":401,"durationMs":81}
+{"event":"api_request","requestId":"c901d421-e0be-45a0-b728-1d939c48cd04","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"4a86a079-3190-4e48-b24c-609302f823b7","route":"account/password","method":"POST","client":"web","status":200,"durationMs":251}
+{"event":"api_request","requestId":"5b578a27-e56f-45cc-8936-2d8f9bb88b3d","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"f584d664-200a-4d7a-b4c2-0e37a37c2f87","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"0e5dbbc6-edfc-45f5-b2de-ca7e243cce62","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"7c01c810-5c78-40cf-a57d-81fe18d0a940","route":"database","method":"GET","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"0155d5d1-df81-4258-aa71-fa3ed4202622","route":"login","method":"POST","client":"web","status":401,"durationMs":80}
+{"event":"api_request","requestId":"2aaf0621-b6f2-4fa6-ad8b-9c1d1cc8c3d8","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+✔ changes only the authenticated account password and optionally revokes every session and biometric credential (1341.220383ms)
+{"event":"api_request","requestId":"c3ac29bb-be08-4cf3-bcf7-073140975bef","route":"register/request","method":"POST","client":"web","status":202,"durationMs":190}
+{"event":"api_request","requestId":"18b81f4e-72ff-4510-9c60-e2fd8470770c","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"360582f5-a239-4d40-aee6-2e070d61439c","route":"account/password","method":"POST","client":"web","status":403,"durationMs":89}
+{"event":"api_request","requestId":"f10ff2cf-d0ba-434b-9d7a-f166f8d4d086","route":"account/password","method":"POST","client":"web","status":403,"durationMs":81}
+{"event":"api_request","requestId":"106fc352-1708-4f9b-8eee-322601ce4a22","route":"account/password","method":"POST","client":"web","status":403,"durationMs":80}
+{"event":"api_request","requestId":"75efa376-9ea5-45bf-ad9a-3e718e32e478","route":"account/password","method":"POST","client":"web","status":403,"durationMs":83}
+{"event":"api_request","requestId":"02d77df9-fe00-48c1-ae6a-b6cbd30ed7fb","route":"account/password","method":"POST","client":"web","status":403,"durationMs":81}
+{"event":"api_request","requestId":"5b5e7234-d19f-4ac1-b834-fde94507c70f","route":"account/password","method":"POST","client":"web","status":429,"durationMs":1}
+✔ rate limits repeated wrong current-password attempts without changing hosted data (655.007776ms)
+{"event":"api_request","requestId":"9917ef5f-610d-423d-b831-6763bcfbd63f","route":"register/request","method":"POST","client":"web","status":202,"durationMs":181}
+{"event":"api_request","requestId":"2308b81d-7ad5-41ef-89f7-dda6e9aed326","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"64235b82-41ff-4315-83b7-7f0fd58762a1","route":"register/request","method":"POST","client":"web","status":202,"durationMs":102}
+{"event":"api_request","requestId":"37c0af38-dfd9-428f-a5a3-6e2648b26b23","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"a82ef536-5c24-435f-af47-6b6465ebbca2","route":"login","method":"POST","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"e4cefa42-4ace-4495-8598-5d2e5a297259","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"2519c807-739e-4b80-8403-7ce20ed77646","route":"password-reset/request","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"ca1ee19d-798a-4dff-952d-e9e1315c7127","route":"password-reset/request","method":"POST","client":"web","status":202,"durationMs":18}
+{"event":"api_request","requestId":"d626278d-f0c6-49f9-98e5-8c15a3239c47","route":"password-reset/request","method":"POST","client":"web","status":202,"durationMs":19}
+{"event":"api_request","requestId":"08013544-766d-441a-bc4f-d6c9c4574eaa","route":"password-reset/verify","method":"POST","client":"web","status":422,"durationMs":17}
+{"event":"api_request","requestId":"2ed18144-b419-4ecb-aa40-928073e903ca","route":"password-reset/verify","method":"POST","client":"web","status":200,"durationMs":17}
+{"event":"api_request","requestId":"714b0ef5-72a0-4349-91cb-c40b4dd08ee8","route":"password-reset/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"54059e52-a63e-4ccf-af95-0a49f6af22e1","route":"password-reset/complete","method":"POST","client":"web","status":200,"durationMs":177}
+{"event":"api_request","requestId":"f5811336-a733-40e6-8ed2-ba17b15e7ac2","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"488ef8bb-c5e3-4c3c-8ac8-31ec64269a5d","route":"database","method":"GET","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"41baee77-1316-4c20-bd25-76ee5357479d","route":"login","method":"POST","client":"web","status":401,"durationMs":80}
+{"event":"api_request","requestId":"a8338ee3-a2bc-4b71-a6e0-dc9da8fc15b9","route":"login","method":"POST","client":"web","status":200,"durationMs":92}
+{"event":"api_request","requestId":"7a260b72-98db-4acf-a0ce-e28bc61e7bd5","route":"password-reset/complete","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"74358332-de7d-454d-b5f9-6f82bf431025","route":"password-reset/request","method":"POST","client":"web","status":202,"durationMs":18}
+{"event":"api_request","requestId":"d17ee2ad-41a5-4ab6-9fa3-e1f547181a3d","route":"password-reset/verify","method":"POST","client":"web","status":422,"durationMs":18}
+{"event":"api_request","requestId":"d5fade29-25d7-4e7d-95a7-d7abaf6eb1e8","route":"password-reset/verify","method":"POST","client":"web","status":200,"durationMs":18}
+{"event":"api_request","requestId":"a2359d31-600d-44c3-9d62-1cf52f70a019","route":"password-reset/verify","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"f109e747-158a-448b-9182-9e604ce54e87","route":"password-reset/complete","method":"POST","client":"web","status":200,"durationMs":168}
+{"event":"api_request","requestId":"43fff4ad-2192-4c78-99cb-b6a0ed022d12","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"b9785848-d1e3-41fe-8b0a-1799781fb569","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"646162db-8fe0-4814-b6f2-8e90ba98f2de","route":"login","method":"POST","client":"web","status":401,"durationMs":80}
+{"event":"api_request","requestId":"3afa6cea-c2ba-4157-a420-b45f715fdf05","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"0d0589e8-88a7-415a-8fb2-20da19062e52","route":"password-reset/complete","method":"POST","client":"web","status":422,"durationMs":1}
+{"event":"api_request","requestId":"52c32212-c69e-4cde-b617-e44cd51d3d40","route":"register/request","method":"POST","client":"web","status":202,"durationMs":111}
+{"event":"api_request","requestId":"4cd78162-6ca1-4702-a0c0-2c86a5f6a8b5","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"398ca559-c215-40ce-93d8-2093b1e0eb5a","route":"password-reset/request","method":"POST","client":"web","status":202,"durationMs":18}
+{"event":"reset_delivery_failed"}
+✔ resets passwords through the email-only verification flow and consumes every security grant once (1475.879411ms)
+{"event":"api_request","requestId":"42b97123-46d7-4bf4-bb5f-ed2788cd3108","route":"register/request","method":"POST","client":"web","status":202,"durationMs":195}
+{"event":"api_request","requestId":"7267daaf-9fd5-4ed2-ac4b-f946ec418164","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"d76a7d84-4d8f-4851-80dc-ab4538dc3f1b","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"296f416c-e9a2-4577-9437-b0ec9c329775","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"bd8af29e-5275-4258-94b3-8b6a0943703e","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b4640a7f-b6e4-4cc3-8a49-89b6e587a1a6","route":"database","method":"PUT","client":"web","status":400,"durationMs":1}
+✔ saves settings when an untouched legacy recipient has no governorate (330.342146ms)
+{"event":"api_request","requestId":"cd8fd360-5a54-40f9-be7f-993d480ea2ae","route":"login","method":"POST","client":"web","status":200,"durationMs":169}
+{"event":"api_request","requestId":"6cdaded7-0eb1-482b-be27-676558226632","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"f758bb2f-c96f-41a5-90e8-ae0340c7db86","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"027bcac7-6dec-405d-9e3a-7252dcbcaf61","route":"login","method":"POST","client":"web","status":200,"durationMs":83}
+{"event":"api_request","requestId":"beb3e573-1fc6-4c5f-a7cc-8190a5e8184f","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"5109cd45-efe6-4936-9609-619adea994e6","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"2de81601-52fe-425b-8735-3b77e793b952","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"1bc6d11d-068d-4147-9860-e52c5f43cb49","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"3fd72ae0-55b1-48b2-abed-3001269fa351","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+{"event":"api_request","requestId":"7a18042a-fdbc-4bbc-a257-1991c4f41577","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"c7bce64f-67e7-42d2-b93b-3917b3c21f0c","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"fa5a52c1-da1c-4d1b-a6a3-0b409b256918","route":"login","method":"POST","client":"web","status":200,"durationMs":83}
+{"event":"api_request","requestId":"31e8896b-1e41-4467-b8ee-2045dcde6060","route":"login","method":"POST","client":"web","status":401,"durationMs":80}
+{"event":"api_request","requestId":"d06b2074-77d4-497a-af2d-758ffa308477","route":"login","method":"POST","client":"web","status":401,"durationMs":79}
+{"event":"api_request","requestId":"f74bfd08-5cff-45ab-afc1-1b36198e7294","route":"login","method":"POST","client":"web","status":401,"durationMs":84}
+{"event":"api_request","requestId":"2f2fadc3-68eb-47bd-b906-3cac2d1c3768","route":"login","method":"POST","client":"web","status":401,"durationMs":82}
+{"event":"api_request","requestId":"e3dca8fc-52bd-49d1-9ec4-37b0d02081c5","route":"login","method":"POST","client":"web","status":401,"durationMs":80}
+{"event":"api_request","requestId":"c1abd710-ddfb-4c05-93ab-c881992fd08c","route":"login","method":"POST","client":"web","status":401,"durationMs":79}
+{"event":"api_request","requestId":"069e2b3e-cec4-448d-90ce-3cb39fefd9d2","route":"login","method":"POST","client":"web","status":401,"durationMs":79}
+{"event":"api_request","requestId":"85f88567-85fa-4640-9020-effc92c9f507","route":"login","method":"POST","client":"web","status":401,"durationMs":82}
+{"event":"api_request","requestId":"668c54a6-a990-452e-b1b8-a466ba1f724c","route":"login","method":"POST","client":"web","status":401,"durationMs":84}
+{"event":"api_request","requestId":"9839cb62-f827-4858-ad23-7429a7faeb45","route":"login","method":"POST","client":"web","status":401,"durationMs":83}
+{"event":"api_request","requestId":"ffc3bd6f-81b1-4448-9927-3df0302a6faa","route":"login","method":"POST","client":"web","status":429,"durationMs":1}
+✔ counts only failed sign-ins while keeping brute-force protection active (1912.980487ms)
+{"event":"api_request","requestId":"01e4135a-fd7d-4be6-9d52-ff51ef38e915","route":"login","method":"POST","client":"web","status":200,"durationMs":164}
+{"event":"api_request","requestId":"36bbda00-aafa-4bc1-bcba-9b313adec0cf","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"3b397076-5a51-4179-a300-74825746ec83","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+{"event":"api_request","requestId":"63e7bfeb-54ca-4ed0-8559-3cfc602bb804","route":"parcel-code-batches","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"76672d06-a721-479b-9cc5-f185fd264546","route":"parcel-code-batches","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"7361c91d-a612-4f0e-ae46-41777c9c82e8","route":"parcel-code-batches","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"04305ce8-3cc1-475d-869b-dd2791f0506b","route":"parcel-code-batches","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"b63434ad-cf72-4463-a73e-dfeb14dfde75","route":"parcel-code-batches","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"f0839be1-d12a-48b2-a4f6-e48d1b9fe314","route":"parcel-code-batches","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"8635fbc8-571b-4f74-990c-43e2b509f53b","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"1ee701a2-b734-4891-9aea-d816382a18f3","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"a9a631b0-ca18-4628-8dc9-a2e6ed1403b1","route":"register/request","method":"POST","client":"web","status":202,"durationMs":99}
+{"event":"api_request","requestId":"2adab1ba-538b-4606-b397-99dfb0830dc3","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"73c6f8cf-b10c-4d88-9e4e-ae64d4a44e46","route":"parcel-code-batches","method":"POST","client":"web","status":403,"durationMs":0}
+✔ reserves disjoint printable batches atomically and retries the same batch without reallocating (404.689587ms)
+{"event":"api_request","requestId":"bbe56835-bde9-46e6-a0d3-f34ff3c5bd0b","route":"login","method":"POST","client":"web","status":200,"durationMs":166}
+{"event":"api_request","requestId":"3d84a160-43d1-4901-91c3-f9a9cfd58360","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"05cc191e-ab3f-4079-9c8d-0dbab4a8eb88","route":"register/request","method":"POST","client":"web","status":202,"durationMs":103}
+{"event":"api_request","requestId":"718b9ba7-33e8-4c68-b824-85615547f22b","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"ba0a1550-96d6-4645-b930-1dd950857c29","route":"orders","method":"POST","client":"web","status":201,"durationMs":3}
+{"event":"api_request","requestId":"c1c351b1-2c2e-4685-a099-f2b71c051d66","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"66899c52-acb9-4a2e-8829-74d4d79cc558","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+✔ unassigned parcel notes notify all administrators and cannot be redirected by the merchant (327.286069ms)
+{"event":"api_request","requestId":"9e8c411a-2233-4c3c-915d-6cc2138b1422","route":"login","method":"POST","client":"web","status":200,"durationMs":168}
+{"event":"api_request","requestId":"6e8d0f29-f46b-4997-8d59-3e70658efa49","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"c962283d-70d1-4a63-9ce0-0125312d7c72","route":"register/request","method":"POST","client":"web","status":202,"durationMs":107}
+{"event":"api_request","requestId":"571614d9-ae7e-4b34-8404-94c357c330ec","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"9c33b716-e3cc-4b8d-905c-d5fe1c1347ec","route":"orders","method":"POST","client":"web","status":400,"durationMs":3}
+{"event":"api_request","requestId":"996624e7-4598-4e8a-9298-317d9d744492","route":"orders","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"8bab2bbc-7f66-4d5b-a920-865cf6944055","route":"orders","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"500beed0-103d-4856-a7f8-9dbfed6b2dd4","route":"orders","method":"POST","client":"web","status":201,"durationMs":2}
+{"event":"api_request","requestId":"1aef67a0-a6d9-4b4f-a310-597c88f347e9","route":"orders","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"522b9e27-9988-48ca-9fb4-f3a73d2fc71d","route":"orders","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"890e6aa9-8795-4051-84f2-20ae2915db78","route":"orders","method":"POST","client":"web","status":409,"durationMs":2}
+{"event":"api_request","requestId":"e1e74185-84ff-400d-a93b-050213374214","route":"orders","method":"POST","client":"web","status":409,"durationMs":3}
+{"event":"api_request","requestId":"913980f2-0ff2-4841-8fdf-456ab1bd3140","route":"orders","method":"POST","client":"web","status":201,"durationMs":2}
+✔ requires an issued code, normalizes printed digits, and rejects conflicting parcel retries (342.473029ms)
+{"event":"api_request","requestId":"d4540143-46b3-4214-a14e-adee902725b2","route":"login","method":"POST","client":"web","status":200,"durationMs":174}
+{"event":"api_request","requestId":"e0a1fc6e-fcf9-498b-9657-7b0146590dcf","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":2}
+{"event":"api_request","requestId":"9a398385-fbb1-4b62-a4ed-36c4f73b8896","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"9f7740a6-50e6-4551-94cf-9f4f15e23fbd","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"af39a324-bd1a-4146-b74a-8666bf029dd8","route":"register/request","method":"POST","client":"web","status":202,"durationMs":102}
+{"event":"api_request","requestId":"2d2de496-ee13-4402-b7eb-e32205ec2e19","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"a57f96e4-f150-4e65-9f2f-99a5dda8619c","route":"orders","method":"POST","client":"web","status":201,"durationMs":4}
+{"event":"api_request","requestId":"4a7b5083-ebc3-483d-86c4-db158d2e089d","route":"orders","method":"POST","client":"web","status":409,"durationMs":5}
+{"event":"api_request","requestId":"8a75768e-afb4-4e8f-99b1-2a4020e21080","route":"login","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"098ca899-36bc-4605-b490-8ab55f23bf13","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"cf9a9ee5-84a2-4a27-a1b2-d2ad24585928","route":"orders","method":"POST","client":"web","status":409,"durationMs":2}
+✔ allows only one account to claim a printed code concurrently and preserves claims after permanent removal (530.623685ms)
+{"event":"api_request","requestId":"09ac3fc9-dbdc-4cbc-a6a9-897861ab1cee","route":"login","method":"POST","client":"web","status":200,"durationMs":163}
+{"event":"api_request","requestId":"06fab352-e5ae-44c3-800d-30768c852e56","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":2}
+{"event":"api_request","requestId":"a1173bda-a50f-4da1-ab77-aa8a233e8aaa","route":"register/request","method":"POST","client":"web","status":202,"durationMs":100}
+{"event":"api_request","requestId":"b273105d-d2f9-44e0-a1dd-53e79f2a9b4c","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"80a85911-ee0d-463a-8d0e-186c73ff45b4","route":"orders","method":"POST","client":"web","status":201,"durationMs":4}
+{"event":"api_request","requestId":"efdd1eb8-3a8c-4d44-8f52-163fb78a6cec","route":"orders/assign-code","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"df14c28f-c2aa-40e5-863d-9b90da19f674","route":"orders/assign-code","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"e2570f2f-8d3e-4a14-982a-bb700a22d0c1","route":"orders/assign-code","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"d624bcb3-ca27-4091-9262-e38824b26f6d","route":"orders/assign-code","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"b6c80d71-69c6-435a-8f62-23bfefd8d020","route":"orders/assign-code","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"4c2fbd9a-6bf3-460b-b25d-0a59cd9718f2","route":"orders/assign-code","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"07388d9f-87d7-4fcc-b3c6-1cc88eafcea5","route":"orders/assign-code","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"3f4780f6-5714-4bf0-857a-b7cebf80ac7d","route":"orders/assign-code","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"8fc62d32-0777-4cfa-8b8d-1fea67f3e11f","route":"orders","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"f9c0e481-c8b0-4804-a073-fc98d876d183","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f1cce812-3249-42c9-86b0-9505e204a5fc","route":"orders/assign-code","method":"POST","client":"web","status":404,"durationMs":0}
+✔ creates blank parcels and assigns printed codes from details without changing shipment data (329.378687ms)
+{"event":"api_request","requestId":"5a3b5091-64b3-43c5-984b-60b9dc9d0b04","route":"login","method":"POST","client":"web","status":200,"durationMs":164}
+{"event":"api_request","requestId":"96884570-c31c-41b1-83be-1e4fefb092d6","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":2}
+{"event":"api_request","requestId":"481798ae-b739-49b8-aff0-6a7f8a67926f","route":"register/request","method":"POST","client":"web","status":202,"durationMs":97}
+{"event":"api_request","requestId":"3696ee2b-e873-4ad8-ac53-ef25f834c731","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"c3009556-0ec6-47bf-991c-d00aae08957f","route":"register/request","method":"POST","client":"web","status":202,"durationMs":101}
+{"event":"api_request","requestId":"ac7ca2d5-0e23-4589-bfad-39e0438effea","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"214f832a-f4a0-4c1e-bd73-91027caae67f","route":"orders","method":"POST","client":"web","status":201,"durationMs":4}
+{"event":"api_request","requestId":"451f0230-09f1-41b7-8b4f-877276199e96","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"ab5a2e4a-30f4-4b3f-a043-a31ba98b5e5b","route":"database","method":"PUT","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"c7422e2c-d0e2-412e-9f53-c23b1dfcd7e3","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"4be7b8b4-a7d1-4478-87c1-2340cf8af245","route":"orders/assign-code","method":"POST","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"fa333eca-dc24-4120-9430-530a3610d73a","route":"orders/assign-code","method":"POST","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"c90d482c-b701-470e-abd5-705c25963146","route":"orders/assign-code","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"4a25cd58-6531-42f6-8795-7c949e632747","route":"orders/assign-code","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"34636f2a-5573-4309-b87b-303b72ae1e9f","route":"orders/assign-code","method":"POST","client":"web","status":200,"durationMs":1}
+✔ only the parcel owner or administrator can attach a code and deleted parcels consume no labels (681.154861ms)
+{"event":"api_request","requestId":"391722be-0974-4642-a620-192acbe8e0d5","route":"login","method":"POST","client":"web","status":200,"durationMs":163}
+{"event":"api_request","requestId":"2c8ad568-a137-4cf0-ab74-4cc9fa3e61c3","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":2}
+{"event":"api_request","requestId":"d5910bc5-a4ff-498e-b67e-9cc31eaa13ef","route":"register/request","method":"POST","client":"web","status":202,"durationMs":106}
+{"event":"api_request","requestId":"4c0bef76-4060-40d6-9343-83bfe8ae8565","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"cdf4893f-21e1-47be-acf7-6e3c3e89d2d7","route":"register/request","method":"POST","client":"web","status":202,"durationMs":113}
+{"event":"api_request","requestId":"114c8918-1fb8-4299-bb74-7ad395e447e8","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"38bb9c09-8172-48c1-be47-f3ca8dba99b4","route":"orders","method":"POST","client":"web","status":201,"durationMs":3}
+{"event":"api_request","requestId":"4141e562-ab17-4ab5-a391-666311dae9d8","route":"orders","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"11ae3eba-5431-4aae-9069-eec4c9eeebd2","route":"orders/assign-code","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"49b82c00-a58b-46ef-829a-8565f7c7ec2d","route":"orders/assign-code","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"55293b29-2d1c-434f-b774-e1a105f419b7","route":"orders/assign-code","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"8f6eb4b2-52e0-4079-9bee-f03ace8c9648","route":"orders/assign-code","method":"POST","client":"web","status":409,"durationMs":1}
+✔ concurrent detail assignments never consume the same label twice or consume a losing label (455.812049ms)
+{"event":"api_request","requestId":"25f3125f-c101-4cb4-bbc7-0623d4291b3d","route":"login","method":"POST","client":"web","status":200,"durationMs":161}
+{"event":"api_request","requestId":"a696b663-7748-48fc-a9f6-50feaa3faa37","route":"parcel-code-batches","method":"POST","client":"web","status":201,"durationMs":1}
+{"event":"api_request","requestId":"6ae2281f-ad13-465f-9e1e-0a3483076f32","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"dc652ea8-24c9-42e8-b00d-2d9d7db70fc5","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"a7e0b81c-dfc5-4b15-bbe7-4643074d5fcc","route":"orders","method":"POST","client":"web","status":201,"durationMs":4}
+{"event":"api_request","requestId":"29a9a5b5-3f3a-45d0-9d9c-494a0f17315d","route":"orders/assign-code","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"561ef3d8-4089-4ec4-8d99-cc64297bf49e","route":"orders/assign-code","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f29040da-ed89-4932-ac99-92c3bc09da86","route":"orders/assign-code","method":"POST","client":"web","status":409,"durationMs":1}
+✔ links a QR from an administrator's printed batch to the selected blank parcel (409.054668ms)
+{"event":"api_request","requestId":"f240082f-3e11-4277-a1ea-f64f07dc9042","route":"register/request","method":"POST","client":"web","status":202,"durationMs":189}
+{"event":"api_request","requestId":"f0e9effb-a65a-48ed-9d5c-ae94b0c07874","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"a5dbcd3e-3e92-47ba-96c8-bde4d31a56f5","route":"register/request","method":"POST","client":"web","status":202,"durationMs":96}
+{"event":"api_request","requestId":"8707694b-2300-483c-913a-11062cf438fb","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"dbde2146-b426-460c-8e35-5bfc03afaaa5","route":"login","method":"POST","client":"web","status":200,"durationMs":82}
+{"event":"api_request","requestId":"e44a0e20-0ec2-4659-9a09-454d6b98e4d7","route":"trash/purge","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"4b64a1a5-dc1d-40a6-b620-7e62534ac963","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+{"event":"api_request","requestId":"a9634758-e397-4dbd-b51c-fe835d0cf2ae","route":"database","method":"PUT","client":"web","status":200,"durationMs":3}
+✔ purging selected trash removes only selected records, retains ledger/codes and syncs per account (527.322096ms)
+{"event":"api_request","requestId":"7175b948-1bb9-4e27-953d-3280252d4fad","route":"register/request","method":"POST","client":"web","status":202,"durationMs":183}
+{"event":"api_request","requestId":"8ddc278f-819c-47f5-ae70-8d5f07d921c5","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"274b2d9e-0334-49b9-94ff-b8ca07206af3","route":"register/request","method":"POST","client":"web","status":202,"durationMs":97}
+{"event":"api_request","requestId":"f9083f40-3d80-478f-82f4-a847a26f8eff","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":17}
+{"event":"api_request","requestId":"d022a889-c2ea-41e6-a21a-39c682e59e5d","route":"login","method":"POST","client":"web","status":200,"durationMs":85}
+{"event":"api_request","requestId":"a50e02ee-578e-44ea-9c88-ec1326074f1c","route":"trash/purge","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"b953f4d4-3438-4918-9147-bbeec539f41b","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"1b38652a-bcbc-4820-bc0a-725b4d6e234d","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"25d347e8-5f94-4bc7-a4b7-3067b90b6f9a","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"ba85381e-841f-4283-b997-984a9a51db18","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"f0efad19-8cd7-4b62-a5de-652ecdc805cc","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"4070f7b8-ed4d-406b-8674-97a77a45aab0","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"02785aad-9f30-4360-a97a-369a46852250","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"f74a4004-0489-4c4f-9bb1-b0d0692240a2","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"1a3a16a2-7cda-46fb-bb08-281ae2a29fab","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"38d48cfd-c7be-46aa-82bf-dd5f725e9fd6","route":"trash/purge","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"7b204181-1add-4009-819a-0444098abdbf","route":"trash/purge","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"05c9989b-7ec6-4323-9bc6-9867f4d9f9cb","route":"trash/purge","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"a7207967-57cf-43fa-8ad5-6b36a1872721","route":"trash/purge","method":"POST","client":"web","status":401,"durationMs":0}
+✔ trash purge rejects empty, missing, active, foreign, outstanding and mixed invalid selections atomically (443.78449ms)
+{"event":"api_request","requestId":"ed7250da-524f-43c1-b660-a8ac1a2a954e","route":"register/request","method":"POST","client":"web","status":202,"durationMs":182}
+{"event":"api_request","requestId":"175d1cc7-44fa-4e3c-9eeb-17a4e646248c","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"b407fa44-edaf-4091-a564-f3963f38374c","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"2335e8dd-2038-4df6-82d9-0d6152d95014","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"d4354f08-1992-4d14-a9d3-1441e58540a6","route":"login","method":"POST","client":"web","status":200,"durationMs":84}
+{"event":"api_request","requestId":"d211ad69-a6f7-4d75-9436-8385ae065cdd","route":"database","method":"PUT","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"7b42793f-3579-4ab5-b835-1938d5db0afc","route":"trash/purge","method":"POST","client":"web","status":409,"durationMs":1}
+✔ a restore from another device invalidates a pending purge and returns a fresh snapshot (435.070477ms)
+{"event":"api_request","requestId":"10f0401b-8dca-4b17-a996-66bfd22107e2","route":"register/request","method":"POST","client":"web","status":202,"durationMs":188}
+{"event":"api_request","requestId":"03027750-56f9-4320-aa77-f4796cff3303","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":19}
+{"event":"api_request","requestId":"bbba4af0-00d6-4f45-9961-5f6ec2886da8","route":"register/request","method":"POST","client":"web","status":202,"durationMs":98}
+{"event":"api_request","requestId":"df5208bc-5e3e-4ef5-a156-a5e5a6001d07","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":18}
+{"event":"api_request","requestId":"e2d4427e-a934-4e88-8fba-14141c9fef39","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"1530139e-35f6-4302-b80c-9ee09d8472e5","route":"database","method":"PUT","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"97d63fb4-5a2f-4e3d-8193-7eaa3763bbb4","route":"trash/purge","method":"POST","client":"web","status":200,"durationMs":1}
+✔ purge preferences cannot be forged through general saves and admins can purge authorized trash (447.416713ms)
+✔ purged invoices retain billing protection and become visible if payment is reopened (0.451933ms)
+{"event":"api_request","requestId":"3008ca98-61db-4c6d-a573-e66bc6d96953","route":"register/request","method":"POST","client":"web","status":202,"durationMs":181}
+{"event":"api_request","requestId":"797026df-c071-4c3a-afa0-f27f2021bbbc","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":21}
+{"event":"api_request","requestId":"efe715b4-621d-4651-badf-52bd1fdf8ba4","route":"register/request","method":"POST","client":"web","status":202,"durationMs":96}
+{"event":"api_request","requestId":"db008b7f-6124-432d-8db2-2f5520a8a5de","route":"register/verify","method":"POST","client":"web","status":201,"durationMs":16}
+{"event":"api_request","requestId":"65ff2c4e-71ca-4211-9af3-0c3ccd7cacea","route":"login","method":"POST","client":"web","status":200,"durationMs":81}
+{"event":"api_request","requestId":"61cc50b7-faed-4d76-8cc0-69beb3d3e22e","route":"account/deletion-request","method":"POST","client":"web","status":401,"durationMs":1}
+{"event":"api_request","requestId":"affb86dd-4b4f-43f1-8753-1fecb19b25f3","route":"account/deletion-request","method":"POST","client":"web","status":403,"durationMs":79}
+{"event":"api_request","requestId":"10805e19-a556-4a1d-ab8b-267e696b1cac","route":"account/deletion-request","method":"POST","client":"web","status":400,"durationMs":1}
+{"event":"api_request","requestId":"922f6560-bfe5-4fb8-9825-30fe87c413a2","route":"account/deletion-request","method":"POST","client":"web","status":201,"durationMs":83}
+{"event":"api_request","requestId":"bf2dcf88-7dad-4108-ae07-68db01e8b4e3","route":"account/deletion-request","method":"POST","client":"web","status":200,"durationMs":80}
+{"event":"api_request","requestId":"31db9df6-64a7-4b9b-abfa-01414bae2ff8","route":"admin/deletion-requests","method":"GET","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"f3ae0fce-cd57-450d-bcf3-b5ccd4934a3c","route":"database","method":"PUT","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"59ed2eff-20d9-4911-9c21-4cf9062becf5","route":"database","method":"PUT","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"553a3c50-1a25-480e-b225-6c6ecc779014","route":"admin/deletion-requests","method":"POST","client":"web","status":403,"durationMs":1}
+{"event":"api_request","requestId":"fd73d1c9-3674-4223-a2e9-37f457d96509","route":"admin/deletion-requests","method":"POST","client":"web","status":409,"durationMs":0}
+{"event":"api_request","requestId":"d722c970-667e-4609-aed6-5d0ce968d254","route":"account/delete","method":"POST","client":"web","status":409,"durationMs":81}
+{"event":"api_request","requestId":"f8ae4f0c-2084-46c5-aba4-91dc3bfb14a0","route":"admin/deletion-requests","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b8c281c0-7936-409b-bcef-e7a9ab6b6857","route":"account/deletion-receipt","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"5dfbf2d0-758a-4ac0-9c32-b4066b431ec3","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"6fe75ca5-b7c4-41c4-aef3-b6114accb60e","route":"admin/deletion-requests","method":"POST","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"1987a238-409e-45e1-bf66-9e290185a400","route":"admin/deletion-requests","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"bdb8f168-da52-4554-9936-101d44f5bd8d","route":"database","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"57a121aa-f8c7-45af-a2df-ec7cd01951f2","route":"account/deletion-receipt","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"a71efc13-4380-4204-8264-51ce82edb0a2","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":1}
+✔ account deletion requests preserve obligations, prevent spoofing, and complete with a private expiring receipt (776.640022ms)
+✔ public service configuration exposes only explicitly configured contacts and deletion URLs (37.552661ms)
+{"event":"api_request","requestId":"04a380d5-371a-4ae2-a639-f65aa4ceb2da","route":"login","method":"POST","client":"web","status":200,"durationMs":165}
+{"event":"api_request","requestId":"2e962a2f-d7cb-4517-b20a-b013878d02a0","route":"database","method":"PUT","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"4cd4b7c7-b66a-497c-8489-6fcdd1af1b9c","route":"database","method":"PUT","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"36079af4-338c-4518-9566-8b9a613524d9","route":"database","method":"PUT","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"85a361f2-7e8e-44c4-b113-e95582a70032","route":"database","method":"PUT","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"f48f1823-6bff-4b7d-9a4f-e2cef518d866","route":"database","method":"PUT","client":"web","status":400,"durationMs":0}
+{"event":"api_request","requestId":"dd59cb3b-aa90-4471-89b5-50263c2aeaeb","route":"database","method":"PUT","client":"web","status":400,"durationMs":0}
+✔ rejects malformed, scalar and excessively nested JSON without touching accounts (199.643082ms)
+{"event":"api_request","requestId":"d7359cd3-b325-490d-9add-0a17e5d0163b","route":"track","method":"GET","client":"web","status":404,"durationMs":83}
+{"event":"api_request","requestId":"fdd605d7-a692-4886-be09-b708b9ca5a9d","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"b1e28103-0e62-4d55-8721-76b49baad80e","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"74d43b54-ba3b-4cfd-9136-0b1177883087","route":"track","method":"GET","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"4cdaf0f6-f138-48e3-9ba2-a28511aa11b5","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"3a7f00b4-717e-4961-8179-885b0af00c4a","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"24033672-bad4-47e1-9183-34686b4a0616","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"7989fd72-145b-4228-ab05-e4c9f4f364ae","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"089360e4-a9b8-401c-ab4b-8721cc059861","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"7247c0e2-8908-4c03-9e18-f7bec87ad067","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"9f708483-2afc-40d3-888c-634be61dfd85","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"c056df14-1c3e-48da-bec6-ee47d6611a08","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"3f950c31-974b-4479-88ce-7d41033e42e3","route":"track","method":"GET","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"d4ed9d98-a004-4020-9c71-c06a55cdc496","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"f90e7141-ccc8-4dd2-91ff-59d7262955e8","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"a54e4393-3f87-4f9a-8fcf-1cad7c618e47","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"b27cdb7d-f5e8-4aca-93a7-461795547373","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"ec6f683c-a575-441a-92e3-868824652b1e","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"d0dafab8-a831-4674-ae17-d6f529b467e9","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"14abd46c-adc2-4e82-bca6-225b9a8983db","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"d1b70902-0c28-4b65-b696-8b328c6e733b","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"ef6bafe3-999e-4c7a-8dd1-9124df96f767","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"f7bcfb17-4c59-4ee5-9dd6-9edc8d93ba68","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"078a716e-5fb0-46e1-a0e0-67e48a5ca8d6","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"9e65f993-02d6-455e-8852-cc2cbfd68f9c","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"ff9bcdbb-97cf-41c9-8650-6f10f2779e8f","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"027f1b85-7607-4c52-8ac4-05c7a2fde8b1","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"257d6f4f-06c1-48a8-8f5b-b150909ec96e","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"999d928a-6953-45a2-935f-2a5b320c5f01","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"2f930f54-4672-4267-b86c-2ebb0ceb171e","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"d8f9370b-435f-44cd-bbb3-50dffa949bdb","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"61072963-0acb-4a95-bf8d-bddd49e1da48","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"3e4b94e0-1d2a-4f86-91e1-6f9a4321293a","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"e6363e71-30d2-4db0-9bfc-7810404f3167","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"6939832d-6270-4ff7-b092-718f29aa8620","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"3ee9b594-8722-4c48-b0ae-b5740ab74682","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"9131646e-2358-4c6b-85b3-c7af573dc88d","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"943bebdf-81dd-4af2-b208-e011dcd009e5","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"5472a9dd-3219-4c1a-bce9-554f1351123d","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"f739206d-3bac-40e4-8f83-6bb81183ea01","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"36fe5e4a-6a71-4b08-848e-4f8cb4df664e","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"74fe2fcc-6235-4a1c-b834-5d15b02a27c6","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"636d7172-ee47-456f-9f19-987a15e3d1b4","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"62247e98-7d56-42c4-ab5c-d493bd8c6e14","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"e8d7c11d-6f83-43c9-ae13-a290eb83a999","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"7eaaafc6-e5b8-4521-9ec7-fb05eaf03f4a","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"959b4771-3a00-4513-a266-0cf0edd44d0a","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"2d30f825-a288-4931-9d54-e9ee79fad244","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"554eaad4-5f6a-4bec-b131-9d95e60c3bd8","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"65ddb24f-377c-47da-b949-c0864e8a3c71","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"ccfdbf49-d9f3-4927-9c41-a04192ee5c0c","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"487f34ef-4245-40f8-b38b-7867e77407e5","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"ee73d4ce-201a-4954-b6a6-e7388e2b6804","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"4e1ba1dd-0ef4-4a8f-a545-e99e09fca6dd","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"94a36f62-bd32-4573-b0de-91e616cb953b","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"688aef94-8408-425b-9f27-d01cffb372f0","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"04ff7b92-d240-4e9e-981b-0cf633d7a0a9","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"1736f1e7-b7d5-4378-91a5-c4861f955d24","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"bcd54528-b72a-4996-993c-98e1ae3eaab3","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"a044a48b-99cc-4f92-8996-90c365576ee1","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"a35eb0a1-5803-49f5-8594-c3e020ed2287","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"e8909769-9057-4d33-affe-d35702b8941e","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"0867a0ce-a14b-4a24-9407-5ef9664ae06c","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b634c995-c4ee-4949-9f1d-fe5c31ac9564","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"c7617f8b-2651-400a-b1c8-958b0210de55","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"d63ef427-a7a0-4336-a85b-3cb6eebffff6","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"46c54c1d-6da8-44ae-a09e-8e34ee4366b9","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"52e63358-e915-40ee-b7aa-ec94f6edddfb","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"cbea6e73-381f-4c9a-a21b-a75cd8af6e58","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f81e78b8-07a1-4ed7-bbcb-b7ab23d3e054","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"cfd140a7-ae6b-4122-9378-ca0fb469ff25","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"d2ac30ab-5a00-46cd-8a2b-ac37eb04b95a","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"e58cb5b4-29b1-41e6-a0d2-5d19185147e0","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"a1bd54fb-422a-4ab2-ba74-9fa2e825b700","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"fda687d3-fbc1-451a-bd7e-eb055287e215","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"333b24c6-841b-4dff-87dc-70033e1874df","route":"track","method":"GET","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"7ab216cc-4bed-44af-9b9f-c80560a4777e","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"be74c3b0-9da4-4d41-a884-9dfbc036d02a","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"a36bf27c-68c7-42a4-b776-56c5f4745137","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"336d8a79-9239-4e29-aff8-a172dd074912","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"da17ac2e-feb4-4df4-8b91-ff0ef8e6fcf7","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"64cfe9fb-7ecc-4015-bf94-4b4f6d754489","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"0742e136-db9d-4047-b6e7-1c92fe71bba1","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"3e955967-ded6-45f1-884a-502b6c11568c","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"3a237503-7d4b-42b2-9534-968712ec5a62","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"c08f2922-022a-4526-bd29-9e2e9cb74871","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":1}
+{"event":"api_request","requestId":"c73e9e48-a9af-42ce-9096-e100948ed775","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"c71a2981-30c1-4414-8057-436771dd1cfe","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"6445a825-1d26-482e-8161-671b16b6d5aa","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"fddf4a66-7dc5-4982-b456-564393f7e5d8","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"e89c9c5a-d3ce-4948-932e-92cc7ffdaba9","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"e205eb8f-fc6c-4aea-b1fa-253c5fc3c13e","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"544d9bd2-f83d-42ff-ba86-4e1082bd2522","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"9cfb8bda-f049-4d93-92d0-b8a40bf41e18","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"610b2c0e-e0b3-46bb-b22e-586653edf6aa","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"fccab21c-cda6-4d30-a131-4bf29fba8601","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"23e3850f-1b48-439d-973e-962d5820ba6d","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"d8e42988-ec39-44ea-9a7a-a5244a07dfad","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":10}
+{"event":"api_request","requestId":"e0a03e8d-7437-41f7-b5e5-f128a1acadf0","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"63fbc3f7-dcad-4e2c-b785-d5715730cd77","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"731b2ed6-c823-4654-9142-bc816967b682","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"34629fee-cf30-4492-b4ec-7e4a5270fd30","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b477f8ad-4112-4546-822e-4148a7390571","route":"track","method":"GET","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"8dafaafe-1cdb-4340-aa0d-a5405db98a39","route":"account/deletion-receipt","method":"POST","client":"web","status":404,"durationMs":0}
+{"event":"api_request","requestId":"9f4ae75f-1f14-46aa-b91f-1595cf23682f","route":"geocode/reverse","method":"POST","client":"web","status":200,"durationMs":1}
+✔ unverified Render clients use short shared public budgets rather than ten-minute per-IP lockouts (163.504852ms)
+{"event":"api_request","requestId":"dcfb1942-a887-4b8a-bebd-cba2db5e8c21","route":"login","method":"POST","client":"web","status":200,"durationMs":163}
+{"event":"api_request","requestId":"5cded985-5902-42b9-91cb-57356ff4e808","route":"notices/clear","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"75f01823-712d-49ad-87f7-daf5c5b6d652","route":"orders","method":"POST","client":"web","status":429,"durationMs":0}
+{"event":"api_request","requestId":"dc9158c3-7c7a-419a-88f4-33106df11cae","route":"logout","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"8acd2928-c013-4548-a5e8-f986ed076f6d","route":"session","method":"GET","client":"web","status":401,"durationMs":0}
+✔ account write limits block excess mutations while preserving read and logout access (195.97165ms)
+✔ completed mouse and touch swipes stay open after the generated click (5.072828ms)
+✔ a fresh tap closes an open row, while a closed row still opens its details (1.018327ms)
+✔ swiping right closes, and short or cancelled swipes do not open the action (0.950716ms)
+✔ the exposed delete action stays clickable and triggers confirmation once (0.938547ms)
+✔ push endpoints allow browser services but reject internal and lookalike destinations (1.901391ms)
+✔ encrypts a standards-compatible Web Push payload and signs it with VAPID (25.608833ms)
+ℹ tests 180
+ℹ suites 0
+ℹ pass 179
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 26213.799721

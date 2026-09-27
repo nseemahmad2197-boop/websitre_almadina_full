@@ -298,3 +298,229 @@ test("real API rate limit prevents excessive submissions while reads remain avai
   const limited = await f.call("", create()); assert.equal(limited.status, 429); assert.ok(limited.headers.get("Retry-After"));
   assert.equal((await f.call("?orderId=parcel-1", undefined, {}, "GET")).status, 200);
 });
+
+const edit = (ticket, extra = {}) => ({ requestId: crypto.randomUUID(), expectedUpdatedAt: ticket.updatedAt, title: ticket.title, description: ticket.description, requestedPrice: ticket.requestedPrice, requestedAddress: ticket.requestedAddress, attachmentIds: ticket.attachments.map((item) => item.id), ...extra });
+test("versioned structured details and unique references are additive and never mutate parcel data", async () => {
+  const f = await fixture(); const original = structuredClone(f.context.state.orders);
+  for (const fields of [
+    { type: "price-change" }, { type: "price-change", requestedPrice: "1000000000" }, { type: "price-change", requestedPrice: "1.001" },
+    { type: "price-change", requestedPrice: "-1" }, { type: "price-change", requestedPrice: 12 }, { type: "price-change", requestedPrice: "1e2" },
+    { type: "address-change" }, { type: "address-change", requestedAddress: " " }, { type: "address-change", requestedAddress: "ع".repeat(1001) },
+    { type: "delivery-delay", requestedPrice: "20" }, { type: "damaged" }, { type: "lost" }, { type: "delivery-delay", detailsVersion: 2 },
+  ]) await rejectsStatus(f.call("", create({ detailsVersion: 1, ...fields })), 400);
+  const price = (await f.call("", create({ detailsVersion: 1, type: "price-change", requestedPrice: "0000012.50" }))).followup;
+  const address = (await f.call("", create({ detailsVersion: 1, type: "address-change", requestedAddress: "  العنوان الجديد  " }))).followup;
+  const zero = (await f.call("", create({ detailsVersion: 1, type: "price-change", requestedPrice: "0.00" }))).followup;
+  const ceiling = (await f.call("", create({ detailsVersion: 1, type: "price-change", requestedPrice: "999999999.99" }))).followup;
+  assert.equal(price.requestedPrice, "12.5"); assert.equal(zero.requestedPrice, "0"); assert.equal(ceiling.requestedPrice, "999999999.99");
+  assert.equal(address.requestedAddress, "العنوان الجديد"); assert.equal(price.trackingNumber, original[0].trackingNumber);
+  assert.match(price.ticketNumber, /^TK-\d{8,}$/); assert.notEqual(price.ticketNumber, address.ticketNumber);
+  assert.equal(f.database.connection.prepare("SELECT COUNT(DISTINCT ticket_number) AS count FROM almadina_followup_references").get().count, 4);
+  assert.equal(price.canEdit, true); assert.equal((await f.call(`/${price.id}`, undefined, courier)).followup.canEdit, false);
+  assert.deepEqual(f.context.state.orders, original);
+  assert.equal((await f.call("", create({ type: "price-change" }))).followup.requestedPrice, null); // Legacy request remains valid.
+});
+
+test("creator edits preserve immutable creation retries and enforce field, permission, status and timestamp guards", async () => {
+  const f = await fixture(); const body = create({ type: "price-change" });
+  const ticket = (await f.call("", body)).followup;
+  for (const account of [admin, courier]) await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(ticket, { requestedPrice: "10" }), account), 403);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(ticket, { requestedPrice: "10" }), other), 404);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(ticket)), 400);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(ticket, { requestedPrice: "10", type: "lost" })), 400);
+  const change = edit(ticket, { requestedPrice: "10", title: "عنوان محدث" });
+  const updated = (await f.call(`/${ticket.id}/edit`, change)).followup;
+  assert.equal(updated.title, change.title); assert.equal(updated.requestedPrice, "10"); assert.equal(updated.ticketNumber, ticket.ticketNumber);
+  assert.ok(updated.updatedAt > ticket.updatedAt); assert.equal(updated.createdAt, ticket.createdAt); assert.equal(updated.creatorId, ticket.creatorId);
+  assert.deepEqual((await f.call(`/${ticket.id}/edit`, change)).followup, updated);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, { ...change, title: "retry changed" }), 409);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(ticket, { requestedPrice: "20" })), 409);
+  assert.deepEqual((await f.call("", body)).followup, ticket);
+  await rejectsStatus(f.call("", { ...body, title: updated.title }), 409);
+  const resolved = (await f.call(`/${ticket.id}/status`, { status: "resolved", response: "تم" }, admin)).followup;
+  assert.equal(resolved.canEdit, false); assert.equal((await f.call(`/${ticket.id}`)).followup.canEdit, false);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(resolved, { requestedPrice: "30" })), 409);
+  assert.equal((await f.call(`/${ticket.id}/edit`, change)).followup.canEdit, false);
+  f.context.state.orders[0].merchantId = other.id;
+  for (const action of [() => f.call("", body), () => f.call(`/${ticket.id}/edit`, change)]) await rejectsStatus(action(), 404);
+});
+
+test("pre-upgrade creation payload is recorded before first edit so legacy retries remain safe", async () => {
+  const f = await fixture(); const body = create({ type: "delivery-delay" });
+  const ticket = (await f.call("", body)).followup;
+  f.database.connection.prepare("DELETE FROM almadina_followup_mutations").run();
+  await f.call(`/${ticket.id}/edit`, edit(ticket, { description: "edited after server upgrade" }));
+  assert.deepEqual((await f.call("", body)).followup, ticket);
+  await rejectsStatus(f.call("", { ...body, description: "edited after server upgrade" }), 409);
+});
+
+test("edit retains only selected ticket media; removed, borrowed, comment and foreign uploads cannot be attached", async () => {
+  const f = await fixture(); const saved = await upload(f); await saved.finish();
+  const body = create({ type: "delivery-delay", attachmentIds: [saved.uploadId] });
+  const ticket = (await f.call("", body)).followup;
+  const pending = await upload(f);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(ticket, { attachmentIds: [pending.uploadId] })), 409);
+  await pending.finish();
+  const changed = edit(ticket, { attachmentIds: [pending.uploadId] });
+  const updated = (await f.call(`/${ticket.id}/edit`, changed)).followup;
+  assert.equal((await f.call(`/attachments/${pending.uploadId}`)).attachment.id, pending.uploadId);
+  await rejectsStatus(f.call(`/attachments/${saved.uploadId}`), 404);
+  assert.deepEqual((await f.call("", body)).followup, ticket); // Snapshot retry cannot restore access.
+  await rejectsStatus(f.call(`/attachments/${saved.uploadId}`), 404);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(updated, { attachmentIds: [saved.uploadId] })), 409);
+  const cUpload = await upload(f); await cUpload.finish();
+  await f.call(`/${ticket.id}/comments`, { requestId: crypto.randomUUID(), text: "صورة للمحادثة", attachmentIds: [cUpload.uploadId] });
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(updated, { attachmentIds: [cUpload.uploadId] })), 409);
+  const another = (await f.call("", create({ type: "delivery-delay" }))).followup;
+  await rejectsStatus(f.call(`/${another.id}/edit`, edit(another, { attachmentIds: [pending.uploadId] })), 409);
+  const staffUpload = await f.call("/uploads", { ...saved.payload, requestId: crypto.randomUUID() }, courier);
+  await rejectsStatus(f.call(`/${ticket.id}/edit`, edit(updated, { attachmentIds: [staffUpload.uploadId] })), 404);
+});
+
+test("conversation validates payload, private media and immutable retries against current authorization", async () => {
+  const f = await fixture(); const ticket = (await f.call("", create({ type: "delivery-delay" }))).followup;
+  for (const body of [{ text: "", attachmentIds: [] }, { text: "x".repeat(4001) }, { text: "\u0000" }]) await rejectsStatus(f.call(`/${ticket.id}/comments`, { requestId: crypto.randomUUID(), ...body }), 400);
+  const pending = await upload(f); const body = { requestId: crypto.randomUUID(), text: "", attachmentIds: [pending.uploadId] };
+  await rejectsStatus(f.call(`/${ticket.id}/comments`, body), 409); await pending.finish();
+  const first = (await f.call(`/${ticket.id}/comments`, body)).comment;
+  assert.equal(first.followupId, ticket.id); assert.equal(first.authorRole, "merchant"); assert.equal(first.authorName, merchant.name);
+  assert.deepEqual((await f.call(`/${ticket.id}/comments`, body)).comment, first);
+  await rejectsStatus(f.call(`/${ticket.id}/comments`, { ...body, text: "changed retry" }), 409);
+  const staffBody = { requestId: crypto.randomUUID(), text: "تم استلام الطلب", attachmentIds: [] };
+  const staff = (await f.call(`/${ticket.id}/comments`, staffBody, courier)).comment;
+  assert.equal(staff.authorRole, "courier");
+  assert.equal((await f.call(`/attachments/${pending.uploadId}`, undefined, courier)).attachment.id, pending.uploadId);
+  await rejectsStatus(f.call(`/${ticket.id}/comments`, { requestId: crypto.randomUUID(), text: "borrow", attachmentIds: [pending.uploadId] }), 409);
+  for (const action of [() => f.call(`/${ticket.id}/comments`, undefined, other), () => f.call(`/${ticket.id}/comments`, staffBody, other), () => f.call(`/attachments/${pending.uploadId}`, undefined, other)]) await rejectsStatus(action(), 404);
+  assert.equal((await f.call(`/${ticket.id}`)).followup.attachments.length, 0);
+  assert.deepEqual(new Set((await f.call(`/${ticket.id}/comments`)).comments.map((item) => item.id)), new Set([first.id, staff.id]));
+  f.context.state.orders[0].merchantId = other.id;
+  await rejectsStatus(f.call(`/${ticket.id}/comments`, body), 404);
+  assert.equal((await f.call(`/attachments/${pending.uploadId}`, undefined, other)).attachment.id, pending.uploadId);
+  f.context.state.orders[0].deleted = true;
+  for (const account of [merchant, other, admin, courier]) {
+    await rejectsStatus(f.call(`/${ticket.id}/comments`, undefined, account), 404);
+    await rejectsStatus(f.call(`/${ticket.id}/comments`, staffBody, account), 404);
+    await rejectsStatus(f.call(`/attachments/${pending.uploadId}`, undefined, account), 404);
+  }
+});
+
+test("conversation returns newest fifty ascending, pages older rows without duplicates and refreshes recent messages", async () => {
+  const f = await fixture(); const ticket = (await f.call("", create({ type: "delivery-delay" }))).followup;
+  const sent = [];
+  for (let i = 0; i < 57; i++) sent.push((await f.call(`/${ticket.id}/comments`, { requestId: crypto.randomUUID(), text: `رسالة ${i}`, attachmentIds: [] })).comment);
+  const chronological = [...sent].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  const first = await f.call(`/${ticket.id}/comments`);
+  assert.equal(first.comments.length, 50); assert.ok(first.nextCursor); assert.deepEqual(first.comments, chronological.slice(7));
+  const older = await f.call(`/${ticket.id}/comments?cursor=${encodeURIComponent(first.nextCursor)}`);
+  assert.equal(older.comments.length, 7); assert.equal(older.nextCursor, null); assert.deepEqual(older.comments, chronological.slice(0, 7));
+  assert.equal(new Set([...older.comments, ...first.comments].map((item) => item.id)).size, 57);
+  const latest = (await f.call(`/${ticket.id}/comments`, { requestId: crypto.randomUUID(), text: "رسالة حديثة", attachmentIds: [] })).comment;
+  assert.ok((await f.call(`/${ticket.id}/comments`)).comments.some((item) => item.id === latest.id));
+  await rejectsStatus(f.call(`/${ticket.id}/comments?cursor=invalid`), 400);
+});
+
+test("concurrent edits yield one winner and idempotent repeated submissions return one committed result", async () => {
+  const f = await fixture(); const ticket = (await f.call("", create({ type: "delivery-delay" }))).followup;
+  const edits = [edit(ticket, { title: "تعديل واحد" }), edit(ticket, { title: "تعديل اثنان" })];
+  const changes = await Promise.allSettled(edits.map((body) => f.call(`/${ticket.id}/edit`, body)));
+  assert.equal(changes.filter((item) => item.status === "fulfilled").length, 1);
+  assert.equal(changes.find((item) => item.status === "rejected").reason.status, 409);
+  const saved = (await f.call(`/${ticket.id}`)).followup;
+  const retry = edit(saved, { description: "تعديل متزامن مكرر" });
+  const results = await Promise.all(Array.from({ length: 3 }, () => f.call(`/${ticket.id}/edit`, retry)));
+  assert.deepEqual(results[0], results[1]); assert.deepEqual(results[1], results[2]);
+  const commentBody = { requestId: crypto.randomUUID(), text: "نفس الرسالة", attachmentIds: [] };
+  const comments = await Promise.all(Array.from({ length: 3 }, () => f.call(`/${ticket.id}/comments`, commentBody)));
+  assert.deepEqual(comments[0], comments[1]); assert.deepEqual(comments[1], comments[2]);
+  assert.equal((await f.call(`/${ticket.id}/comments`)).comments.length, 1);
+  const creation = create({ type: "delivery-delay" });
+  const creations = await Promise.all(Array.from({ length: 3 }, () => f.call("", creation)));
+  assert.deepEqual(creations[0], creations[1]); assert.deepEqual(creations[1], creations[2]);
+});
+
+test("purge deletes authored conversation/media/receipts while preserving unrelated parent tickets", async () => {
+  const f = await fixture(); const ticket = (await f.call("", create({ type: "delivery-delay" }))).followup;
+  const u = await f.call("/uploads", { requestId: crypto.randomUUID(), orderId: "parcel-1", name: "photo.png", mimeType: "image/png", size: 16, chunkCount: 1 }, courier);
+  await f.call(`/uploads/${u.uploadId}/chunks`, { index: 0, dataBase64: png().toString("base64") }, courier);
+  const body = { requestId: crypto.randomUUID(), text: "staff media", attachmentIds: [u.uploadId] };
+  await f.call(`/${ticket.id}/comments`, body, courier);
+  await f.call(`/${ticket.id}/comments`, { requestId: crypto.randomUUID(), text: "merchant comment", attachmentIds: [] });
+  await f.database.batch(followupAccountPurge(f.database, courier));
+  assert.equal((await f.call(`/${ticket.id}`)).followup.id, ticket.id);
+  assert.equal((await f.call(`/${ticket.id}/comments`)).comments.length, 1);
+  for (const table of ["almadina_followup_uploads", "almadina_followup_chunks", "almadina_followup_comment_media"]) assert.equal(f.database.connection.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
+  assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followup_mutations WHERE actor_id = ?").get(courier.id).count, 0);
+  await rejectsStatus(f.call(`/attachments/${u.uploadId}`), 404);
+  await f.database.batch(followupAccountPurge(f.database, merchant));
+  for (const table of ["almadina_followups", "almadina_followup_comments", "almadina_followup_mutations", "almadina_followup_references", "almadina_followup_owners"]) assert.equal(f.database.connection.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
+});
+
+test("in-flight comment finalization cannot recreate data after parent or author account purge", async () => {
+  for (const purgeParent of [true, false]) {
+    const f = await fixture(); const ticket = (await f.call("", create({ type: "delivery-delay" }))).followup;
+    f.context.rateLimit = async (namespace) => { if (namespace === "followup-comment") await f.database.batch(followupAccountPurge(f.database, purgeParent ? merchant : courier)); };
+    await rejectsStatus(f.call(`/${ticket.id}/comments`, { requestId: crypto.randomUUID(), text: "must not resurrect deleted private data", attachmentIds: [] }, courier), 409);
+    assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followup_comments").get().count, 0);
+    assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followup_mutations WHERE actor_id = ?").get(courier.id).count, 0);
+    assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followups").get().count, purgeParent ? 0 : 1);
+    await rejectsStatus(f.call("", undefined, purgeParent ? merchant : courier), 401);
+  }
+});
+
+test("purge during upload or creation finalization does not restore deleted account files or tickets", async () => {
+  for (const namespace of ["followup-upload", "followup-create", "followup-chunk"]) {
+    const f = await fixture(); const pending = namespace === "followup-chunk" ? await upload(f) : null;
+    f.context.rateLimit = async (current) => { if (namespace === current) await f.database.batch(followupAccountPurge(f.database, merchant)); };
+    const action = namespace === "followup-upload" ? upload(f) : namespace === "followup-create" ? f.call("", create({ type: "delivery-delay" })) : pending.finish();
+    await assert.rejects(action, (error) => [401, 409, 429].includes(error.status));
+    for (const table of ["almadina_followups", "almadina_followup_comments", "almadina_followup_mutations", "almadina_followup_uploads", "almadina_followup_chunks", "almadina_followup_owners"]) assert.equal(f.database.connection.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
+  }
+});
+
+test("comment and edit endpoints inherit authentication, account switching, no-store and rate limits", async () => {
+  const f = await apiFixture();
+  const ticket = (await (await f.call("", create({ type: "delivery-delay" }))).json()).followup;
+  const path = `/${ticket.id}/comments`;
+  const body = { requestId: crypto.randomUUID(), text: "رسالة", attachmentIds: [] };
+  assert.equal((await handleAlmadinaApi(request(path), f.database)).status, 401);
+  assert.equal((await f.call(path, body, { "X-Almadina-Account": other.id })).status, 409);
+  assert.equal((await f.call(path, body, { Origin: "https://evil.example" })).status, 403);
+  assert.equal((await f.call(`/${ticket.id}/edit`, edit(ticket), { "X-Almadina-Account": other.id })).status, 409);
+  for (let i = 0; i < 60; i++) assert.equal((await f.call(path, { ...body, requestId: crypto.randomUUID() })).status, 200);
+  const limited = await f.call(path, body); assert.equal(limited.status, 429); assert.ok(limited.headers.get("Retry-After"));
+  const response = await f.call(path, undefined, {}, "GET"); assert.equal(response.status, 200); assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal((await response.json()).comments.length, 50);
+});
+
+test("identical media request replay succeeds when another request finalizes between ledger lookup and upload lookup", async () => {
+  for (const operation of ["create", "edit", "comment"]) {
+    const f = await fixture(); const u = await upload(f); await u.finish();
+    const ticket = operation === "create" ? null : (await f.call("", create({ type: "delivery-delay" }))).followup;
+    const path = operation === "create" ? "" : `/${ticket.id}/${operation === "edit" ? "edit" : "comments"}`;
+    const body = operation === "create" ? create({ type: "delivery-delay", attachmentIds: [u.uploadId] }) : operation === "edit" ? edit(ticket, { attachmentIds: [u.uploadId] }) : { requestId: crypto.randomUUID(), text: "private media", attachmentIds: [u.uploadId] };
+    const prepare = f.database.prepare.bind(f.database);
+    let intercepted = false; let signal; let release;
+    const reached = new Promise((resolve) => { signal = resolve; });
+    const continueLookup = new Promise((resolve) => { release = resolve; });
+    f.database.prepare = (sql) => {
+      const statement = prepare(sql);
+      if (sql !== "SELECT * FROM almadina_followup_uploads WHERE id = ? AND owner_id = ?") return statement;
+      const bind = statement.bind.bind(statement);
+      statement.bind = (...values) => {
+        const bound = bind(...values); const first = bound.first.bind(bound);
+        bound.first = async (...args) => {
+          if (!intercepted) { intercepted = true; signal(); await continueLookup; }
+          return first(...args);
+        };
+        return bound;
+      };
+      return statement;
+    };
+    const delayed = f.call(path, body);
+    await reached;
+    const winner = await f.call(path, body);
+    release();
+    assert.deepEqual(await delayed, winner, operation);
+  }
+});

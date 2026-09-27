@@ -181,6 +181,8 @@ class FakeD1Statement {
       return this.database.rateLimits.get(this.values[0]) ?? null;
     }
 
+    if (this.sql.startsWith("SELECT platform, model, os_version, app_version, label, location, location_updated_at FROM almadina_session_details WHERE token_hash")) return this.database.sessionDetails.get(this.values[0]) ?? null;
+
     if (this.sql.startsWith("SELECT user_id, expires_at, created_at FROM almadina_sessions")) {
       const session = this.database.sessions.get(this.values[0]);
       return session ? { user_id: session.user_id, expires_at: session.expires_at, created_at: session.created_at } : null;
@@ -282,6 +284,7 @@ class FakeD1Statement {
             device_type: device?.device_type ?? null,
             browser_name: device?.browser_name ?? null,
             last_active_at: device?.last_active_at ?? null,
+            ...(this.database.sessionDetails.get(session.token_hash) ?? {}),
           };
         })
         .sort((first, second) => (second.last_active_at ?? second.created_at).localeCompare(first.last_active_at ?? first.created_at));
@@ -308,8 +311,31 @@ class FakeD1Statement {
   async run() {
     if (this.sql.startsWith("CREATE TABLE") || this.sql.startsWith("CREATE INDEX")) return { success: true, meta: { changes: 0 } };
     if (this.sql.startsWith("DELETE FROM almadina_web_push_subscriptions")) return { success: true, meta: { changes: 0 } };
-    // This snapshot fixture has no follow-up rows; tests/followups.test.mjs executes their purge on real SQLite.
-    if (/^DELETE FROM almadina_followup(?:s|_uploads|_chunks|_owners)\b/.test(this.sql)) return { success: true, meta: { changes: 0 } };
+    // This snapshot fixture has no ticket/comment/media rows. The independent
+    // SQLite and PostgreSQL tests execute actual follow-up SQL and purge races.
+    // Model the exact singleton/revocation statements used during shared schema
+    // initialization and account deletion; unknown SQL must still fail loudly.
+    if (this.sql === "INSERT INTO almadina_followup_lifecycle (id, lock_version) VALUES ('main', 0) ON CONFLICT (id) DO NOTHING") {
+      const changes = Number(this.database.followupLifecycle === null);
+      this.database.followupLifecycle ??= 0;
+      return { success: true, meta: { changes } };
+    }
+    if (this.sql === "INSERT INTO almadina_followup_sequence (id, next_value) VALUES ('main', 0) ON CONFLICT (id) DO NOTHING") {
+      const changes = Number(this.database.followupSequence === null);
+      this.database.followupSequence ??= 0;
+      return { success: true, meta: { changes } };
+    }
+    if (this.sql === "UPDATE almadina_followup_lifecycle SET lock_version = lock_version + 1 WHERE id = 'main'") {
+      if (this.database.followupLifecycle === null) return { success: true, meta: { changes: 0 } };
+      this.database.followupLifecycle += 1;
+      return { success: true, meta: { changes: 1 } };
+    }
+    if (this.sql === "INSERT INTO almadina_followup_revoked (user_id) VALUES (?) ON CONFLICT (user_id) DO NOTHING") {
+      const changes = Number(!this.database.followupRevoked.has(this.values[0]));
+      this.database.followupRevoked.add(this.values[0]);
+      return { success: true, meta: { changes } };
+    }
+    if (/^DELETE FROM almadina_followup(?:s|_uploads|_chunks|_owners|_comments|_comment_media|_mutations|_references)\b/.test(this.sql)) return { success: true, meta: { changes: 0 } };
 
     if (this.sql.startsWith("INSERT INTO almadina_state") && this.sql.includes("ON CONFLICT (id) DO NOTHING")) {
       if (this.database.state) return { success: true, meta: { changes: 0 } };
@@ -366,8 +392,37 @@ class FakeD1Statement {
       return { success: true, meta: { changes: 1 } };
     }
 
+    if (this.sql.startsWith("INSERT INTO almadina_session_details")) {
+      const [token_hash, user_id, platform, model, os_version, app_version, label, location, location_updated_at] = this.values;
+      const session = this.database.sessions.get(token_hash);
+      if (!session || session.user_id !== user_id) return { success: true, meta: { changes: 0 } };
+      const old = this.database.sessionDetails.get(token_hash);
+      if (!old) this.database.sessionDetails.set(token_hash, { token_hash, user_id, platform, model, os_version, app_version, label, location, location_updated_at });
+      else if (old.user_id === user_id) {
+        const compatible = old.platform === 'unknown' || old.platform === platform;
+        if (compatible && model) old.model = model;
+        if (compatible && os_version) old.os_version = os_version;
+        if (compatible && app_version) old.app_version = app_version;
+        if (old.platform === 'unknown') old.platform = platform;
+        old.location ??= location; old.location_updated_at ??= location_updated_at;
+      }
+      return { success: true, meta: { changes: 1 } };
+    }
+    if (this.sql.startsWith("UPDATE almadina_session_details SET label")) {
+      const [label, hash, userId, expectedHash, expectedUser, now] = this.values;
+      const session = this.database.sessions.get(expectedHash), details = this.database.sessionDetails.get(hash);
+      if (!details || details.user_id !== userId || !session || session.user_id !== expectedUser || session.expires_at <= now) return { success: true, meta: { changes: 0 } };
+      details.label = label;
+      return { success: true, meta: { changes: 1 } };
+    }
+
     if (this.sql.startsWith("INSERT INTO almadina_session_devices")) {
-      const [tokenHash, userId, deviceName, deviceType, browserName, createdAt, lastActiveAt, staleBefore] = this.values;
+      const [tokenHash, userId, deviceName, deviceType, browserName, createdAt, lastActiveAt] = this.values;
+      const staleBefore = this.values.at(-1);
+      if (this.sql.includes("FROM almadina_sessions WHERE token_hash")) {
+        const parent = this.database.sessions.get(this.values[7]);
+        if (!parent || parent.user_id !== this.values[8] || parent.expires_at <= this.values[9]) return { success: true, meta: { changes: 0 } };
+      }
       const current = this.database.sessionDevices.get(tokenHash);
       if (!current) {
         this.database.sessionDevices.set(tokenHash, {
@@ -384,9 +439,9 @@ class FakeD1Statement {
       if (this.sql.includes("ON CONFLICT") && (current.last_active_at <= staleBefore || current.device_name !== deviceName)) {
         Object.assign(current, {
           user_id: userId,
-          device_name: deviceName,
-          device_type: deviceType,
-          browser_name: browserName,
+          device_name: deviceType === "unknown" ? current.device_name : deviceName,
+          device_type: deviceType === "unknown" ? current.device_type : deviceType,
+          browser_name: deviceType === "unknown" ? current.browser_name : browserName,
           last_active_at: lastActiveAt,
         });
         return { success: true, meta: { changes: 1 } };
@@ -399,6 +454,7 @@ class FakeD1Statement {
       for (const [tokenHash, session] of this.database.sessions) {
         if (session.user_id !== this.values[0]) continue;
         this.database.sessions.delete(tokenHash);
+        this.database.sessionDetails.delete(tokenHash); // ON DELETE CASCADE
         changes += 1;
       }
       return { success: true, meta: { changes } };
@@ -407,6 +463,7 @@ class FakeD1Statement {
     if (this.sql.startsWith("DELETE FROM almadina_sessions WHERE token_hash")) {
       const session = this.database.sessions.get(this.values[0]);
       if (this.sql.includes("AND user_id") && session?.user_id !== this.values[1]) return { success: true, meta: { changes: 0 } };
+      this.database.sessionDetails.delete(this.values[0]); // ON DELETE CASCADE
       return { success: true, meta: { changes: Number(this.database.sessions.delete(this.values[0])) } };
     }
 
@@ -742,6 +799,7 @@ class FakeD1Database {
   state = null;
   sessions = new Map();
   sessionDevices = new Map();
+  sessionDetails = new Map();
   appLocks = new Map();
   credentials = new Map();
   passkeyLoginCredentials = new Map();
@@ -750,6 +808,9 @@ class FakeD1Database {
   passwordResets = new Map();
   registrationRequests = new Map();
   registrationLocations = new Map();
+  followupLifecycle = null;
+  followupSequence = null;
+  followupRevoked = new Set();
 
   prepare(sql) {
     return new FakeD1Statement(this, sql);
@@ -4120,6 +4181,8 @@ test("deletes only the authenticated eligible account and preserves every other 
   });
   assert.equal(deleted.status, 200);
   assert.equal(deleted.body.success, true);
+  assert.equal(database.followupRevoked.has(merchant.body.userId), true);
+  assert.equal(database.followupRevoked.has(otherMerchant.body.userId), false);
   assert.match(deleted.headers.get("set-cookie") ?? "", /Max-Age=0/);
   assert.equal([...database.sessions.values()].some((session) => session.user_id === merchant.body.userId), false);
   assert.equal([...database.sessionDevices.values()].some((device) => device.user_id === merchant.body.userId), false);
@@ -4212,6 +4275,7 @@ test("deletes only the authenticated eligible account and preserves every other 
     payload: { password: "Courier@123", confirmation: "حذف حسابي" },
   });
   assert.equal(deletedCourier.status, 200);
+  assert.equal(database.followupRevoked.has(courier.id), true);
 
   const afterCourierDeletion = await call(worker, database, "database", { cookie: adminCookie });
   const preservedOrder = afterCourierDeletion.body.database.orders.find((order) => order.id === courierOrder.id);
@@ -4227,6 +4291,7 @@ test("deletes only the authenticated eligible account and preserves every other 
   });
   assert.equal(recreatedMerchant.status, 201);
   assert.notEqual(recreatedMerchant.body.userId, merchant.body.userId);
+  assert.equal(database.followupRevoked.has(recreatedMerchant.body.userId), false);
   assert.equal(recreatedMerchant.body.database.users.length, 1);
   assert.equal(recreatedMerchant.body.database.users[0].email, "delete-me@example.test");
   assert.equal(recreatedMerchant.body.database.users[0].phone, "0591111111");

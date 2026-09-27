@@ -25,19 +25,29 @@ test("PostgreSQL customer directory and selected followups agree from the first 
       outExtension: { ".js": ".mjs" }, packages: "external",
     });
     await symlink(join(process.cwd(), "node_modules"), join(temporary, "node_modules"), "dir");
-    const { handleFollowupRequest } = await import(pathToFileURL(join(temporary, "server-followups.mjs")));
+    const { handleFollowupRequest, followupAccountPurge } = await import(pathToFileURL(join(temporary, "server-followups.mjs")));
     const { handleAlmadinaApi } = await import(pathToFileURL(join(temporary, "server-database.mjs")));
     const { PostgresD1Database } = await import(pathToFileURL(join(temporary, "postgres-d1-adapter.mjs")));
+    // PGlite is one PostgreSQL session. Lease that session for complete batches
+    // so Promise.all exercises competing request snapshots without interleaving
+    // unrelated BEGIN/COMMIT statements on the same engine connection.
+    let sessionTail = Promise.resolve();
+    const acquire = async () => {
+      const previous = sessionTail;
+      let release;
+      sessionTail = new Promise((resolve) => { release = resolve; });
+      await previous;
+      return release;
+    };
+    const query = async (sql, values = []) => {
+      const result = await engine.query(sql, values);
+      const rows = result.rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) =>
+        [key, ["followup_count", "open_count"].includes(key) ? String(value) : value])));
+      return { rows, rowCount: result.affectedRows ?? rows.length };
+    };
     const pool = {
-      async query(sql, values = []) {
-        const result = await engine.query(sql, values);
-        // pg returns int8 aggregates as strings by default. Match that wire
-        // representation while executing the actual query with PostgreSQL.
-        const rows = result.rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) =>
-          [key, ["followup_count", "open_count"].includes(key) ? String(value) : value])));
-        return { rows, rowCount: result.affectedRows ?? rows.length };
-      },
-      async connect() { return { query: this.query.bind(this), release() {} }; },
+      async query(sql, values = []) { const release = await acquire(); try { return await query(sql, values); } finally { release(); } },
+      async connect() { const release = await acquire(); return { query, release }; },
       async end() {},
     };
     const database = new PostgresD1Database(pool);
@@ -129,6 +139,64 @@ test("PostgreSQL customer directory and selected followups agree from the first 
       assert.ok([...page1.followups, ...page2.followups].every((item) => item.merchantId === merchant.id));
       const directory = (await read("/customers", courier)).payload;
       assert.equal(directory.customers.find((item) => item.id === merchant.id).followupCount, 57);
+    });
+
+    await t.test("PostgreSQL structured edits, immutable retries, private conversation pages and optimistic conflicts", async () => {
+      const call = (path, body, account = merchant, rateLimit = async () => {}) => handleFollowupRequest(new Request(`${base}${path}`, {
+        ...(body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+      }), { database, state, account, rateLimit });
+      const originalOrders = structuredClone(state.orders);
+      const body = { requestId: crypto.randomUUID(), orderId: "parcel-first", type: "price-change", title: "تعديل السعر", description: "السعر المطلوب", detailsVersion: 1, requestedPrice: "120.00", attachmentIds: [] };
+      const original = (await call("", body)).followup;
+      assert.equal(original.requestedPrice, "120"); assert.match(original.ticketNumber, /^TK-\d{8,}$/);
+      const edit = (extra) => ({ requestId: crypto.randomUUID(), expectedUpdatedAt: original.updatedAt, title: original.title, description: original.description, requestedPrice: "150", attachmentIds: [], ...extra });
+      const changes = [edit({ title: "تعديل أول" }), edit({ title: "تعديل آخر" })];
+      const outcomes = await Promise.allSettled(changes.map((change) => call(`/${original.id}/edit`, change)));
+      assert.equal(outcomes.filter((item) => item.status === "fulfilled").length, 1);
+      assert.equal(outcomes.find((item) => item.status === "rejected").reason.status, 409);
+      const winnerIndex = outcomes.findIndex((item) => item.status === "fulfilled");
+      assert.deepEqual(await call(`/${original.id}/edit`, changes[winnerIndex]), outcomes[winnerIndex].value);
+      assert.deepEqual((await call("", body)).followup, original);
+      await assert.rejects(call(`/${original.id}/edit`, changes[winnerIndex], courier), (error) => error.status === 403);
+      const media = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+      const upload = await call("/uploads", { requestId: crypto.randomUUID(), orderId: "parcel-first", name: "evidence.png", mimeType: "image/png", size: media.length, chunkCount: 1 });
+      const commentBody = { requestId: crypto.randomUUID(), text: "صورة خاصة", attachmentIds: [upload.uploadId] };
+      await assert.rejects(call(`/${original.id}/comments`, commentBody), (error) => error.status === 409);
+      await call(`/uploads/${upload.uploadId}/chunks`, { index: 0, dataBase64: media.toString("base64") });
+      const mediaComment = (await call(`/${original.id}/comments`, commentBody)).comment;
+      assert.deepEqual((await call(`/${original.id}/comments`, commentBody)).comment, mediaComment);
+      const current = (await call(`/${original.id}`)).followup;
+      await assert.rejects(call(`/${original.id}/edit`, edit({ expectedUpdatedAt: current.updatedAt, attachmentIds: [upload.uploadId] })), (error) => error.status === 409);
+      assert.equal((await call(`/attachments/${upload.uploadId}`, undefined, courier)).dataBase64, media.toString("base64"));
+      await assert.rejects(call(`/attachments/${upload.uploadId}`, undefined, other), (error) => error.status === 404);
+      for (let index = 0; index < 56; index++) await call(`/${original.id}/comments`, { requestId: crypto.randomUUID(), text: `رسالة ${index}`, attachmentIds: [] }, courier);
+      const page1 = await call(`/${original.id}/comments`);
+      const page2 = await call(`/${original.id}/comments?cursor=${encodeURIComponent(page1.nextCursor)}`);
+      assert.equal(page1.comments.length, 50); assert.equal(page2.comments.length, 7); assert.equal(page2.nextCursor, null);
+      assert.equal(new Set([...page1.comments, ...page2.comments].map((comment) => comment.id)).size, 57);
+      assert.ok(page2.comments.some((comment) => comment.id === mediaComment.id));
+      const repeated = { requestId: crypto.randomUUID(), text: "متزامن", attachmentIds: [] };
+      const copies = await Promise.all([call(`/${original.id}/comments`, repeated), call(`/${original.id}/comments`, repeated)]);
+      assert.deepEqual(copies[0], copies[1]);
+      assert.deepEqual(state.orders, originalOrders);
+    });
+
+    await t.test("PostgreSQL finalization cannot restore parent or author data after account purge", async () => {
+      for (const purgeParent of [true, false]) {
+        const suffix = purgeParent ? "parent" : "author";
+        const isolatedMerchant = { ...merchant, id: `purge-merchant-${suffix}` };
+        const isolatedCourier = { ...courier, id: `purge-courier-${suffix}` };
+        const order = { ...state.orders[0], id: `purge-parcel-${suffix}`, merchantId: isolatedMerchant.id };
+        const isolatedState = { ...state, users: [...state.users, isolatedMerchant, isolatedCourier], orders: [...state.orders, order] };
+        const call = (path, body, account, rateLimit = async () => {}) => handleFollowupRequest(new Request(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), { database, state: isolatedState, account, rateLimit });
+        const ticket = (await call("", { requestId: crypto.randomUUID(), orderId: order.id, type: "delivery-delay", title: "متابعة", description: "تفاصيل", attachmentIds: [] }, isolatedMerchant)).followup;
+        await assert.rejects(call(`/${ticket.id}/comments`, { requestId: crypto.randomUUID(), text: "must not persist", attachmentIds: [] }, isolatedCourier, async (namespace) => {
+          if (namespace === "followup-comment") await database.batch(followupAccountPurge(database, purgeParent ? isolatedMerchant : isolatedCourier));
+        }), (error) => error.status === 409);
+        assert.equal(Number((await database.prepare("SELECT COUNT(*) AS count FROM almadina_followup_comments WHERE followup_id = ?").bind(ticket.id).first()).count), 0);
+        assert.equal(Number((await database.prepare("SELECT COUNT(*) AS count FROM almadina_followup_mutations WHERE actor_id = ?").bind(isolatedCourier.id).first()).count), 0);
+        assert.equal(Number((await database.prepare("SELECT COUNT(*) AS count FROM almadina_followups WHERE id = ?").bind(ticket.id).first()).count), purgeParent ? 0 : 1);
+      }
     });
 
     await t.test("fresh reads track current parcel ownership and exclude deleted parcels", async () => {

@@ -1,3 +1,4 @@
+import { copyTrustedClientAddress } from "../app/lib/trusted-client";
 import { logServiceEvent } from "../app/lib/security-events";
 /** Render/Node entry point for the Almadina Express application. */
 import { readFile } from "node:fs/promises";
@@ -137,6 +138,19 @@ function securityConfig(): SecurityConfig {
     requestsPerMinute: Number(process.env.ALMADINA_REQUEST_BUDGET_PER_MINUTE),
   };
 }
+// Called only inside OperationalSecurity's authenticated-edge action.
+// This preserves the public origin for CSRF, cookies and passkey RP validation
+// while the ingress-to-Render hop uses the fixed onrender.com origin.
+function publicEdgeRequest(request: Request): Request {
+  if (!process.env.ALMADINA_EDGE_TOKEN || !process.env.ALMADINA_PUBLIC_ORIGIN) return request;
+  let origin: URL;
+  try { origin = new URL(process.env.ALMADINA_PUBLIC_ORIGIN); } catch { throw new Error("Invalid public origin"); }
+  if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) throw new Error("Invalid public origin");
+  const source = new URL(request.url);
+  origin.pathname = source.pathname; origin.search = source.search;
+  return copyTrustedClientAddress(request, new Request(origin, request));
+}
+
 const worker = {
   async fetch(request: Request, env: Env | undefined, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -155,7 +169,7 @@ const worker = {
 
     if (url.pathname.startsWith("/api/almadina/")) {
       return withSecurityHeaders(request, await protection.run(request, securityConfig(), async () => { try {
-        return withSecurityHeaders(request, await handleAlmadinaApi(request, resolveDatabase(env), passwordResetDeliveryConfig(env, ctx)));
+        return withSecurityHeaders(request, await handleAlmadinaApi(publicEdgeRequest(request), resolveDatabase(env), passwordResetDeliveryConfig(env, ctx)));
       } catch (error) {
         logServiceEvent("database_unavailable");
         return withSecurityHeaders(request, unavailableDatabaseResponse());
@@ -163,7 +177,7 @@ const worker = {
     }
 
     return protection.run(request, securityConfig(), async () => {
-      const secured = documentRequest(request);
+      const secured = documentRequest(publicEdgeRequest(request));
       return withSecurityHeaders(secured, await handler.fetch(secured, env ?? {}, ctx));
     });
   },

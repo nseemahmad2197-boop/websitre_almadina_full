@@ -57,6 +57,7 @@ await page.route("**/api/almadina/**", async (route) => {
     if (delayed.has(key)) { const delay = delayed.get(key); delayed.delete(key); delay.accept(); await delay.released; }
     return fulfill({ followups: wrongScope && merchantId === "customer-a" ? [tickets[2]] : tickets.filter((item) => (!merchantId || item.merchantId === merchantId) && (!orderId || item.orderId === orderId)), nextCursor: null });
   }
+  if (path.endsWith("/comments") && request.method() === "GET") return fulfill({ comments: [], nextCursor: null });
   throw new Error(`Unexpected fixture API request: ${request.method()} ${url}`);
 });
 

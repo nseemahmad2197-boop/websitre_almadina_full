@@ -135,7 +135,7 @@ test("offers a responsive Brevo email-only password recovery flow backed by publ
   assert.match(worker, /PASSWORD_RESET_SENDER\?: PasswordResetSender/);
   assert.match(worker, /defer: \(promise\) => ctx\.waitUntil\(promise\)/);
   assert.match(worker, /handleAlmadinaApi\(request, env\.DB, passwordResetDeliveryConfig\(env, ctx\)\)/);
-  assert.match(renderWorker, /handleAlmadinaApi\(request, resolveDatabase\(env\), passwordResetDeliveryConfig\(env, ctx\)\)/);
+  assert.match(renderWorker, /handleAlmadinaApi\(publicEdgeRequest\(request\), resolveDatabase\(env\), passwordResetDeliveryConfig\(env, ctx\)\)/);
   assert.match(renderWorker, /process\.env\.BREVO_API_KEY/);
   assert.match(renderWorker, /process\.env\.BREVO_FROM_EMAIL/);
 
@@ -1644,8 +1644,13 @@ test("shows linked device names and safely revokes only another session", async 
   assert.match(settings, /export function LinkedDevicesPage\(\)/);
   assert.match(settings, /هذا الجهاز/);
   assert.match(settings, /لن تُحذف بيانات الحساب أو الطرود أو التحصيلات/);
-  assert.match(application, /fetch\("\/api\/almadina\/security\/devices"/);
-  assert.match(application, /fetch\("\/api\/almadina\/security\/devices\/revoke"/);
+  const deviceClient = await readFile(new URL("../app/lib/linked-devices.ts", import.meta.url), "utf8");
+  assert.match(application, /requestLinkedDevices\(\{ action: "list" \}, user\.id\)/);
+  assert.match(application, /requestLinkedDevices\(operation, user\.id\)/);
+  assert.match(deviceClient, /\/api\/almadina\/security\/devices/);
+  assert.match(deviceClient, /operation\.action === "revoke" \? "\/revoke"/);
+  assert.match(deviceClient, /credentials: "same-origin", cache: "no-store"/);
+  assert.match(deviceClient, /"X-Almadina-Account": accountId/);
   assert.match(server, /async function readLinkedDevices/);
   assert.match(server, /linked-device:\$\{tokenHash\}/);
   assert.match(server, /selectedTokenHash === session\.tokenHash/);

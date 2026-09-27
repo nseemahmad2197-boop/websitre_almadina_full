@@ -1,0 +1,14 @@
+✔ linked devices client accepts legacy records and keeps missing area unknown (3.463945ms)
+✔ device rename pins account and validates exact trimmed receipt; empty clears (1.691371ms)
+✔ old server or contradictory rename receipts cannot report success (1.967548ms)
+✔ malformed devices and duplicate or multiple-current identities are rejected (2.869899ms)
+✔ invalid aliases never send requests and use UTF-16 server limit (0.455758ms)
+✔ revoke requires the target to disappear and propagates authentication errors (0.67585ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 132.956022
