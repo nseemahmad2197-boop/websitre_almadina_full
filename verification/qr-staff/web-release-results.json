@@ -1,0 +1,23 @@
+{
+  "date": "2026-09-27",
+  "status": "passed",
+  "website": {
+    "build": "npm test / npm run build — passed on final product source",
+    "tests": {
+      "passed": 151,
+      "failed": 0,
+      "command": "npm test"
+    },
+    "typecheck": "passed",
+    "browser": {
+      "staff": "passed; real components with local mocked transport; see staff-verification-results.json",
+      "qr": "passed; real video frames and ZXing decoder; see QR verification report",
+      "followups": "passed; synthetic microphone, media upload/idempotent retries, account isolation, RTL at five viewports"
+    }
+  },
+  "limits": [
+    "No production deployment or live production database access.",
+    "No physical device camera tests.",
+    "Live PostgreSQL integration was not executed; SQL adapter covered with test client."
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "date": "2026-09-27",
+  "status": "passed",
+  "browser": {
+    "command": "npm run test:staff:browser",
+    "environment": "ALMADINA_BROWSER_EXECUTABLE selects the locally installed Chromium binary.",
+    "status": "passed",
+    "implementation": "Real React components and application CSS under StrictMode; locally mocked customer-directory and scoped-followup HTTP responses.",
+    "viewports": ["360x800 RTL", "1280x900 RTL"],
+    "checks": [
+      "Admin and courier customer names, stores and counts",
+      "Directory search, empty search results, cursor pagination and deduplication",
+      "Zero-count customer and empty parcel/followup views",
+      "Customer selection sends merchantId and displays only matching followups",
+      "Parcel tab excludes deleted parcels and opens real OrderDetail",
+      "Followup detail opens its parcel",
+      "Courier can open an unassigned parcel and toggle all/assigned dashboard parcels",
+      "Merchant is denied the staff directory without issuing staff API requests",
+      "Delayed search, account-switch and customer-followup responses do not leak stale content",
+      "Cross-customer followup responses fail closed",
+      "No horizontal overflow at the tested viewport sizes",
+      "No uncaught browser errors"
+    ],
+    "screenshots": [
+      "verification/qr-staff/web-staff-directory-mobile.png",
+      "verification/qr-staff/web-staff-customer-desktop.png"
+    ],
+    "visualInspection": "Both screenshots reviewed; no clipping or overflow observed.",
+    "appDefectsFound": []
+  },
+  "backend": {
+    "followupsAndPostgresAdapter": {
+      "command": "node --experimental-strip-types --test tests/followups.test.mjs tests/postgres-adapter.test.mjs",
+      "passed": 22,
+      "failed": 0,
+      "implementation": "Freshly bundled API source with real in-memory SQLite SQL/authentication; PostgreSQL adapter SQL translation tested with a fake PostgreSQL client.",
+      "checks": [
+        "Staff-wide active-parcel followup access and merchant isolation",
+        "Staff-only customer directory authentication and minimal fields",
+        "Stable pagination, Arabic/duplicate names, search and active-parcel counts",
+        "merchantId filter intersection and ownership on legacy responses",
+        "Deleted-parcel exclusion, private attachment access and preserved mutation validation",
+        "Account-switch and no-store security protections",
+        "PostgreSQL JSON scope and aggregate SQL translation"
+      ]
+    },
+    "sharedDatabase": {
+      "command": "node --experimental-strip-types --test tests/shared-database.test.mjs",
+      "environment": "ALMADINA_SERVER_TEST_MODULE pointed to a freshly esbuild-bundled server-database source module.",
+      "passed": 53,
+      "failed": 0,
+      "implementation": "Real API source exercised through the existing FakeD1Database test adapter.",
+      "checks": [
+        "All active assigned, unassigned and other-courier parcels are readable",
+        "Deleted parcels remain excluded from courier snapshots",
+        "Courier users remain self-only; merchant data remains isolated",
+        "Private notes, private tracking notes and collection details stay masked",
+        "Forged courier account/order/invoice writes preserve privileged records"
+      ]
+    }
+  },
+  "typecheck": {
+    "command": "npm run typecheck",
+    "status": "passed"
+  },
+  "limits": [
+    "Browser verification uses mocked local HTTP transport and does not exercise a deployed service.",
+    "Backend verification uses fresh API source, not the production dist worker.",
+    "No live PostgreSQL database or production data was accessed."
+  ]
+}

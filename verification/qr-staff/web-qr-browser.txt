@@ -1,0 +1,1 @@
+PASS: late permission cancellation, denied/retry, settings-grant recovery, unsupported permission query, live preview, real QR video decode in lookup/employee/assignment, one result, decoder-failure/camera-ended recovery, manual cleanup.

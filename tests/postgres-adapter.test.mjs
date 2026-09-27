@@ -50,6 +50,13 @@ test("translates authorized follow-up inbox scope into a single PostgreSQL JSON 
   );
 });
 
+test("translates customer directory status aggregates without loading private ticket payloads", () => {
+  assert.equal(
+    toPostgresSql("SELECT order_id, COUNT(*) AS followup_count, SUM(CASE WHEN json_extract(payload, '$.status') IN ('open', 'in_progress') THEN 1 ELSE 0 END) AS open_count FROM almadina_followups WHERE order_id IN (SELECT value FROM json_each(?)) GROUP BY order_id"),
+    "SELECT order_id, COUNT(*) AS followup_count, SUM(CASE WHEN (CAST(payload AS jsonb) ->> 'status') IN ('open', 'in_progress') THEN 1 ELSE 0 END) AS open_count FROM almadina_followups WHERE order_id IN (SELECT value FROM jsonb_array_elements_text(CAST($1 AS jsonb)) AS allowed_orders(value)) GROUP BY order_id",
+  );
+});
+
 test("maps PostgreSQL rows and row counts to the D1 statement contract", async () => {
   const pool = new FakePostgresPool();
   const database = new PostgresD1Database(pool);

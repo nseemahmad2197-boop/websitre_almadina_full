@@ -1,0 +1,51 @@
+{
+  "status": "passed",
+  "verifiedDate": "2026-09-27",
+  "environment": {
+    "browser": "Google Chrome for Testing 131.0.6778.204, headless Linux",
+    "viewport": "390x844, mobile/touch emulation",
+    "camera": "Synthetic canvas captureStream with real HTMLVideoElement playback; permission outcomes simulated",
+    "decoder": "Production CameraQrReader with @zxing/browser 0.2.1 and @zxing/library 0.23.0"
+  },
+  "checksPassed": [
+    "Late getUserMedia response after close is stopped before attaching to the detached preview",
+    "Denied permission shows retry; granted retry starts a live preview",
+    "Unsupported Permissions API query falls back to the native getUserMedia path",
+    "Known browser denial does not re-prompt; changed grant recovers on window focus",
+    "Rear-facing video preferred; microphone is never requested",
+    "Actual printed QR pixels decode through a real video element in lookup, courier shipping, and parcel-code assignment",
+    "Nine optical decode combinations: three purposes at 4, 8, and 16 pixels per QR module",
+    "Successful camera and manual completion occur once and stop every track",
+    "Unexpected decoder failure exposes retry and recovers",
+    "Camera-ended event exposes retry and recovers",
+    "Assignment remains camera-only"
+  ],
+  "baselineRegressions": {
+    "latePermission": "Original scanner failed the same browser assertion: one stream attached to a detached video after close; fixed source passed.",
+    "largeQr": "Original ZXing optical detection failed at 8 and 16 pixels/module for both the application generator and the ZXing reference writer. Matrix decoding passed. Bounded smaller-frame retries read those frames."
+  },
+  "fallbackBounds": "Normal full-frame decode first; only QR frame misses trigger up to two retries. Reused canvases have long edges capped at 640 and 320 pixels; small frames are skipped.",
+  "otherValidation": [
+    "Targeted ESLint passed",
+    "TypeScript check passed",
+    "Root verified fresh production build and all 151 tests"
+  ],
+  "evidence": [
+    "web-qr-browser.txt",
+    "web-qr-live-preview.png"
+  ],
+  "limitations": [
+    "No physical Android, iPhone, or iPad camera was available for this web verification.",
+    "Synthetic browser permission responses verify application behavior, not each operating system permission dialog.",
+    "The web findings are separate from the native Android Google Play scanner failure."
+  ],
+  "productFiles": [
+    "app/almadina-app.tsx (ScannerOverlay only)",
+    "app/lib/qr-camera-reader.ts"
+  ],
+  "testFiles": [
+    "tests/qr-camera.fixture.tsx",
+    "tests/qr-camera.browser.mjs",
+    "tests/rendered-html.test.mjs (scanner assertions only)"
+  ]
+}

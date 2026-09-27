@@ -1683,7 +1683,7 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(employeeDevice.status, 200);
   assert.equal(employeeDevice.body.database.users.length, 1);
   assert.equal(employeeDevice.body.database.users[0].role, "courier");
-  assert.deepEqual(employeeDevice.body.database.orders, []);
+  assert.deepEqual(employeeDevice.body.database.orders.map((item) => item.id), [order.id]);
   assert.deepEqual(employeeDevice.body.database.collections, []);
   const employeeCookie = sessionFrom(employeeDevice);
 
@@ -1692,7 +1692,7 @@ test("shares accounts and orders across devices while isolating customers and pr
     payload: { email: "employee-same-name@example.test", password: "Employee@123" },
   });
   assert.equal(sameNameEmployeeDevice.status, 200);
-  assert.deepEqual(sameNameEmployeeDevice.body.database.orders, []);
+  assert.deepEqual(sameNameEmployeeDevice.body.database.orders.map((item) => item.id), [order.id]);
   const sameNameEmployeeCookie = sessionFrom(sameNameEmployeeDevice);
 
   const merchantBroadcastAttempt = await call(worker, database, "notices/broadcast", {
@@ -2106,7 +2106,7 @@ test("shares accounts and orders across devices while isolating customers and pr
 
   const sameNameAfterScan = await call(worker, database, "database", { cookie: sameNameEmployeeCookie });
   assert.equal(sameNameAfterScan.status, 200);
-  assert.deepEqual(sameNameAfterScan.body.database.orders, []);
+  assert.deepEqual(sameNameAfterScan.body.database.orders.map((item) => item.id), [order.id]);
   assert.equal(sameNameAfterScan.body.database.notices.some((notice) => notice.title === "تعليمات جديدة للطرد"), false);
 
   const merchantAfterInstructionNotice = await call(worker, database, "database", { cookie: secondCookie });
@@ -2628,6 +2628,149 @@ test("shares accounts and orders across devices while isolating customers and pr
   assert.equal(revoked.status, 401);
   const stillSignedIn = await call(worker, database, "database", { cookie: firstCookie });
   assert.equal(stillSignedIn.status, 200);
+});
+
+test("couriers read every active parcel while private data and write permissions remain scoped", async () => {
+  const worker = await loadWorker();
+  const database = new FakeD1Database();
+  const merchant = await call(worker, database, "register", {
+    method: "POST", payload: accountPayload("التاجر الأول", "staff-read-owner@example.test", "0591000201"),
+  });
+  const otherMerchant = await call(worker, database, "register", {
+    method: "POST", payload: accountPayload("التاجر الثاني", "staff-read-other@example.test", "0591000202"),
+  });
+  const admin = await call(worker, database, "login", {
+    method: "POST", payload: { email: "admin@almadinaexpress.com", password: TEST_ADMIN_PASSWORD },
+  });
+  assert.equal(merchant.status, 201);
+  assert.equal(otherMerchant.status, 201);
+  assert.equal(admin.status, 200);
+  const adminCookie = sessionFrom(admin);
+  const time = new Date().toISOString();
+  const courierAccount = {
+    id: "courier-all-parcels", name: "موظف الطرود", email: "staff-read@example.test", phone: "0561000201",
+    store: "قسم التوصيل", password: "Courier@123", role: "courier", joinedAt: time, avatarColor: "#6655a6",
+  };
+  const otherCourier = { ...courierAccount, id: "courier-other-parcels", name: "موظف آخر", email: "staff-read-other-courier@example.test", phone: "0561000202" };
+  const created = await call(worker, database, "database", {
+    method: "PUT", cookie: adminCookie,
+    payload: {
+      revision: admin.body.revision,
+      database: { ...admin.body.database, users: [...admin.body.database.users, courierAccount, otherCourier] },
+    },
+  });
+  assert.equal(created.status, 200);
+
+  const order = (id, merchantId, status, assignedCourier, deleted = false) => ({
+    id, merchantId, merchantName: "تاجر الطرد", merchantStore: "متجر الطرد", trackingNumber: "",
+    recipientName: "مستلم الطرد", recipientPhone: "0591234567", governorate: "نابلس", city: "نابلس",
+    address: "عنوان المستلم", pickupAddress: "عنوان الاستلام", amount: 100, deliveryFee: 25, content: "ملابس",
+    weight: "0 - 5 كغم", dimensions: "20 × 20 × 20 سم", notes: `تعليمات التوصيل ${id}`,
+    privateNotes: `ملاحظة إدارية سرية ${id}`, reference: "", type: "طرد عادي", status,
+    ...(assignedCourier ? { courierId: assignedCourier.id } : {}), courierName: assignedCourier?.name ?? "بانتظار تعيين المندوب",
+    createdAt: time, updatedAt: time, deleted, ...(deleted ? { deletedAt: time } : {}),
+    trackingEvents: [
+      { id: `${id}-status`, kind: "status", status, title: "حالة الطرد", location: "نابلس", actor: "الإدارة", note: `تعليمات التوصيل ${id}`, createdAt: time },
+      { id: `${id}-private-note`, kind: "note", status, title: "ملاحظة خاصة", location: "نابلس", actor: "الإدارة", note: `تفاصيل تتبع خاصة ${id}`, createdAt: time },
+    ],
+  });
+  const seed = JSON.parse(database.state.payload);
+  seed.orders = [
+    order("staff-assigned", merchant.body.userId, "shipped", courierAccount),
+    order("staff-unassigned", otherMerchant.body.userId, "draft"),
+    order("staff-other-courier", otherMerchant.body.userId, "delivered", otherCourier),
+    order("staff-returned", merchant.body.userId, "returned"),
+    order("staff-deleted-self", merchant.body.userId, "shipped", courierAccount, true),
+    order("staff-deleted-other", otherMerchant.body.userId, "ready", otherCourier, true),
+  ];
+  const invoice = (id, status, verifiedById) => ({
+    id, merchantId: merchant.body.userId, merchantName: "التاجر الأول", invoiceNumber: `#${id}`, orderIds: ["staff-assigned"],
+    grossAmount: 100, deliveryFees: 25, returnFees: 0, netAmount: 75, deliveredCount: 1, returnedCount: 0,
+    status, verificationCode: "7391", authorizedRecipient: "المفوض السري", createdAt: time, updatedAt: time, scheduledAt: time,
+    returnPricingVersion: 1, returnPricingMembership: "standard", returnFeeDetails: [],
+    ...(status === "paid" ? { paidAt: time, verifiedAt: time, verifiedById, verifiedByName: "موظف التحصيل" } : {}),
+  });
+  seed.collections = [
+    invoice("staff-pending", "pending"), invoice("staff-ready", "ready"),
+    invoice("staff-paid-self", "paid", courierAccount.id), invoice("staff-paid-other", "paid", otherCourier.id),
+  ];
+  seed.recipients = [{ id: "staff-private-recipient", merchantId: merchant.body.userId, name: "عنوان محفوظ", phone: "0591234567", city: "نابلس", address: "العنوان الخاص", favorite: true }];
+  database.state.payload = JSON.stringify(seed);
+
+  const courier = await call(worker, database, "login", {
+    method: "POST", payload: { email: courierAccount.email, password: courierAccount.password },
+  });
+  assert.equal(courier.status, 200);
+  const courierCookie = sessionFrom(courier);
+  const current = await call(worker, database, "database", { cookie: courierCookie });
+  assert.equal(current.status, 200);
+  const expectedIds = seed.orders.filter((item) => !item.deleted).map((item) => item.id).sort();
+  for (const response of [courier, current]) {
+    const scoped = response.body.database;
+    assert.deepEqual(scoped.orders.map((item) => item.id).sort(), expectedIds);
+    assert.deepEqual(scoped.users.map((account) => account.id), [courierAccount.id]);
+    assert.equal(scoped.users[0].password, "");
+    assert.deepEqual(scoped.recipients, []);
+    assert.ok(scoped.notices.every((notice) => notice.userId === courierAccount.id));
+    assert.ok(Object.keys(scoped.preferences).every((id) => id === courierAccount.id));
+    for (const parcel of scoped.orders) {
+      assert.equal(parcel.notes, `تعليمات التوصيل ${parcel.id}`);
+      assert.equal(parcel.privateNotes, "");
+      assert.deepEqual(parcel.trackingEvents.map((event) => event.id), [`${parcel.id}-status`]);
+      assert.equal(parcel.trackingEvents[0].note, "تم إنشاء الطرد وهو قيد الإنشاء.");
+    }
+    assert.ok(!JSON.stringify(scoped).includes("ملاحظة إدارية سرية"));
+    assert.ok(!JSON.stringify(scoped).includes("تفاصيل تتبع خاصة"));
+    assert.deepEqual(scoped.collections.map((entry) => entry.id).sort(), ["staff-paid-self", "staff-pending", "staff-ready"]);
+    for (const entry of scoped.collections) {
+      assert.equal(entry.merchantId, "");
+      assert.deepEqual(entry.orderIds, []);
+      for (const field of ["grossAmount", "deliveryFees", "returnFees", "netAmount", "deliveredCount", "returnedCount"]) assert.equal(entry[field], 0);
+      for (const field of ["verificationCode", "authorizedRecipient", "createdAt", "updatedAt", "scheduledAt"]) assert.equal(entry[field], "");
+    }
+  }
+  for (const account of [merchant, otherMerchant]) {
+    const scoped = await call(worker, database, "database", { cookie: sessionFrom(account) });
+    assert.equal(scoped.status, 200);
+    assert.deepEqual(scoped.body.database.users.map((entry) => entry.id), [account.body.userId]);
+    assert.deepEqual(scoped.body.database.orders.map((entry) => entry.id).sort(), seed.orders.filter((entry) => entry.merchantId === account.body.userId).map((entry) => entry.id).sort());
+    assert.ok(scoped.body.database.collections.every((entry) => entry.merchantId === account.body.userId));
+  }
+
+  const before = await call(worker, database, "database", { cookie: adminCookie });
+  const forged = await call(worker, database, "database", {
+    method: "PUT", cookie: courierCookie,
+    payload: {
+      revision: current.body.revision,
+      database: {
+        ...current.body.database,
+        users: [
+          { ...current.body.database.users[0], role: "admin", name: "مسؤول مزور", email: "forged-staff@example.test", password: "Forged@123" },
+          { ...otherCourier, id: "forged-new-account", role: "admin", email: "forged-new-admin@example.test" },
+        ],
+        orders: current.body.database.orders.filter((entry) => entry.id !== "staff-other-courier").map((entry) => ({
+          ...entry, status: "delivered", deleted: true, deletedAt: time, courierId: courierAccount.id,
+          amount: 9999, recipientPhone: "0599999999", notes: "تعليمات مزورة", privateNotes: "ملاحظة مزورة", trackingEvents: [],
+        })),
+        collections: current.body.database.collections.filter((entry) => entry.id !== "staff-pending").map((entry) => ({
+          ...entry, status: "paid", paidAt: time, verificationCode: "1111", netAmount: 9999, authorizedRecipient: "مفوض مزور",
+        })),
+        nextOrder: 99999999,
+        nextCollection: 99999999,
+      },
+    },
+  });
+  assert.equal(forged.status, 200);
+  assert.equal(forged.body.database.users[0].role, "courier");
+  assert.deepEqual(forged.body.database.orders.map((entry) => entry.id).sort(), expectedIds);
+  const after = await call(worker, database, "database", { cookie: adminCookie });
+  assert.equal(after.status, 200);
+  for (const field of ["users", "orders", "collections", "recipients", "nextOrder", "nextCollection"]) {
+    assert.deepEqual(after.body.database[field], before.body.database[field], `courier must not change ${field}`);
+  }
+  const persisted = JSON.parse(database.state.payload);
+  assert.deepEqual(persisted.users, seed.users, "courier must not create, remove, promote, or change account credentials");
+  assert.deepEqual(persisted.orders, seed.orders, "courier must not edit, delete, reassign, or overwrite hidden parcel fields");
 });
 
 test("invoice list deletion synchronizes for its account and keeps paid records on the server", async () => {

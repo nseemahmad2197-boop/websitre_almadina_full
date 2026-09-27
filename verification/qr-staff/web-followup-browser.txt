@@ -1,0 +1,6 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> reference-website-recreation@0.1.0 test:followups:browser
+> node tests/followups.browser.mjs
+
+PASS: StrictMode, RTL 5 viewport sizes, keyboard-height layout, 7 types, browser recording with synthetic microphone, image upload/private preview, lost-response idempotent retry, staff response, global inbox, account isolation.

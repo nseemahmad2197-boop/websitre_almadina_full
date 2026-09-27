@@ -16,7 +16,9 @@
     "test:swipe": "node tests/swipe-delete.browser.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
-    "test:pricing": "node --experimental-strip-types --test tests/pricing-contract.test.mjs"
+    "test:pricing": "node --experimental-strip-types --test tests/pricing-contract.test.mjs",
+    "test:staff:browser": "node tests/staff-followups.browser.mjs",
+    "test:qr:browser": "node tests/qr-camera.browser.mjs"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",

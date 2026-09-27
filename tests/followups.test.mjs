@@ -59,20 +59,108 @@ test("independent persistent tickets survive old snapshots and idempotent retrie
   assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followups").get().count, 1);
 });
 
-test("every followup read, upload, chunk, download, and staff action checks current parcel access", async () => {
+test("merchant isolation and staff-wide followup access apply to reads, uploads, downloads, and responses", async () => {
   const f = await fixture(); const u = await upload(f); await u.finish();
   const ticket = (await f.call("", create({ attachmentIds: [u.uploadId] }))).followup;
   for (const action of [() => f.call(`/${ticket.id}`, undefined, other), () => f.call("?orderId=parcel-1", undefined, other), () => f.call("", create(), other), () => f.call("/uploads", u.payload, other), () => f.call(`/uploads/${u.uploadId}/chunks`, { index: 0, dataBase64: u.bytes.toString("base64") }, other), () => f.call(`/attachments/${u.uploadId}?chunk=0`, undefined, other), () => f.call(`/${ticket.id}/status`, { status: "resolved", response: "تم" }, other)]) await rejectsStatus(action(), 404);
   await rejectsStatus(f.call(`/${ticket.id}/status`, { status: "resolved" }), 403);
   assert.equal((await f.call(`/${ticket.id}/status`, { status: "in_progress", response: "قيد الفحص" }, courier)).followup.status, "in_progress");
   f.context.state.orders[0].courierId = "different-courier";
-  await rejectsStatus(f.call(`/${ticket.id}`, undefined, courier), 404);
-  await rejectsStatus(f.call(`/attachments/${u.uploadId}?chunk=0`, undefined, courier), 404);
-  await rejectsStatus(f.call(`/${ticket.id}/status`, { status: "resolved" }, courier), 404);
+  assert.equal((await f.call(`/${ticket.id}`, undefined, courier)).followup.id, ticket.id);
+  assert.equal((await f.call(`/attachments/${u.uploadId}?chunk=0`, undefined, courier)).attachment.id, u.uploadId);
+  assert.equal((await f.call(`/${ticket.id}/status`, { status: "resolved" }, courier)).followup.status, "resolved");
   assert.equal((await f.call(`/${ticket.id}/status`, { status: "resolved", response: "تم الإصلاح" }, admin)).followup.status, "resolved");
   assert.equal((await f.call("?orderId=parcel-2", undefined, other)).followups.length, 0);
   assert.equal((await f.call("", undefined, other)).followups.length, 0);
   assert.equal((await f.call("", undefined, admin)).followups.length, 1);
+  const staffTicket = (await f.call("", create({ orderId: "parcel-2" }), courier)).followup;
+  assert.equal(staffTicket.merchantId, other.id);
+  assert.equal((await f.call(`/${staffTicket.id}/status`, { status: "in_progress" }, courier)).followup.status, "in_progress");
+  assert.deepEqual(new Set((await f.call("", undefined, courier)).followups.map((item) => item.id)), new Set([ticket.id, staffTicket.id]));
+  assert.equal((await f.call("", undefined, merchant)).followups.length, 1);
+  f.context.state.orders[0].deleted = true;
+  for (const account of [merchant, courier, admin]) {
+    for (const action of [() => f.call(`/${ticket.id}`, undefined, account), () => f.call("?orderId=parcel-1", undefined, account), () => f.call("", create(), account), () => f.call("/uploads", u.payload, account), () => f.call(`/attachments/${u.uploadId}?chunk=0`, undefined, account), () => f.call(`/${ticket.id}/status`, { status: "open" }, account)]) await rejectsStatus(action(), 404);
+    assert.equal((await f.call("", undefined, account)).followups.some((item) => item.id === ticket.id), false);
+  }
+});
+
+test("merchant filters intersect current parcel access and return ownership for legacy followups", async () => {
+  const f = await fixture();
+  const owned = (await f.call("", create())).followup;
+  const foreign = (await f.call("", create({ orderId: "parcel-2" }), other)).followup;
+  const oldPayload = { ...owned }; delete oldPayload.merchantId;
+  f.database.connection.prepare("UPDATE almadina_followups SET payload = ?, merchant_id = ? WHERE id = ?").run(JSON.stringify(oldPayload), "stale-owner", owned.id);
+  for (const account of [admin, courier]) {
+    const results = await f.call(`?merchantId=${merchant.id}`, undefined, account);
+    assert.deepEqual(results.followups.map((item) => item.id), [owned.id]);
+    assert.equal(results.followups[0].merchantId, merchant.id);
+    assert.equal((await f.call(`/${owned.id}`, undefined, account)).followup.merchantId, merchant.id);
+    assert.deepEqual((await f.call(`?merchantId=${other.id}&orderId=parcel-1`, undefined, account)).followups, []);
+    assert.deepEqual((await f.call(`?merchantId=${other.id}&orderId=parcel-2`, undefined, account)).followups.map((item) => item.id), [foreign.id]);
+  }
+  assert.equal((await f.call("", create({ requestId: f.database.connection.prepare("SELECT request_id FROM almadina_followups WHERE id = ?").get(owned.id).request_id }))).followup.merchantId, merchant.id);
+  assert.deepEqual((await f.call(`?merchantId=${other.id}`, undefined, merchant)).followups, []);
+  assert.deepEqual((await f.call(`?merchantId=${merchant.id}&orderId=parcel-2`, undefined, other)).followups, []);
+  await rejectsStatus(f.call(`?merchantId=${other.id}&orderId=parcel-2`, undefined, merchant), 404);
+  await rejectsStatus(f.call("?merchantId="), 400);
+  await rejectsStatus(f.call("?merchantId=%27%20OR%201%3D1", undefined, admin), 400);
+});
+
+test("staff customer directory includes zero-count merchants and only active parcel followups without account secrets", async () => {
+  const f = await fixture();
+  const zero = { ...merchant, id: "merchant-zero", name: "عميل بلا طرود", store: "متجر جديد" };
+  f.context.state.users.push(zero);
+  const opened = (await f.call("", create())).followup;
+  const progressing = (await f.call("", create())).followup;
+  const resolved = (await f.call("", create())).followup;
+  await f.call(`/${progressing.id}/status`, { status: "in_progress" }, courier);
+  await f.call(`/${resolved.id}/status`, { status: "resolved" }, admin);
+  await f.call("", create({ orderId: "parcel-2" }), courier);
+  const deletedOrder = { ...f.context.state.orders[0], id: "deleted-parcel" };
+  f.context.state.orders.push(deletedOrder);
+  await f.call("", create({ orderId: deletedOrder.id }));
+  deletedOrder.deleted = true;
+  // Count against current parcel ownership, not potentially stale ticket metadata.
+  f.database.connection.prepare("UPDATE almadina_followups SET merchant_id = ? WHERE id = ?").run("stale-owner", opened.id);
+  for (const account of [admin, courier]) {
+    const page = await f.call("/customers", undefined, account);
+    assert.equal(page.nextCursor, null);
+    assert.equal(page.customers.length, 3);
+    assert.deepEqual(page.customers.find((customer) => customer.id === merchant.id), { id: merchant.id, name: merchant.name, store: merchant.store, orderCount: 1, followupCount: 3, openCount: 2 });
+    assert.deepEqual(page.customers.find((customer) => customer.id === other.id), { id: other.id, name: other.name, store: other.store, orderCount: 1, followupCount: 1, openCount: 1 });
+    assert.deepEqual(page.customers.find((customer) => customer.id === zero.id), { id: zero.id, name: zero.name, store: zero.store, orderCount: 0, followupCount: 0, openCount: 0 });
+    for (const customer of page.customers) assert.deepEqual(Object.keys(customer).sort(), ["id", "name", "store", "orderCount", "followupCount", "openCount"].sort());
+    for (const secret of [merchant.email, merchant.phone, merchant.password, courier.email, admin.email, opened.description]) assert.equal(JSON.stringify(page).includes(secret), false);
+  }
+  await rejectsStatus(f.call("/customers", undefined, merchant), 403);
+  await rejectsStatus(f.call("/customers?q=merchant-2", undefined, other), 403);
+});
+
+test("customer directory search and keyset pagination are bounded and stable for duplicate and Arabic names", async () => {
+  const f = await fixture();
+  const customers = Array.from({ length: 107 }, (_, index) => ({ ...merchant, id: `customer-${String(index).padStart(3, "0")}`, name: index < 54 ? "أحمد" : "محمود", store: index === 106 ? "Unique Shop" : "المتجر" }));
+  f.context.state.users = [courier, admin, ...customers.toReversed()];
+  const first = await f.call("/customers", undefined, courier);
+  assert.equal(first.customers.length, 50); assert.ok(first.nextCursor);
+  assert.deepEqual(first, await f.call("/customers", undefined, admin));
+  const second = await f.call(`/customers?cursor=${encodeURIComponent(first.nextCursor)}`, undefined, courier);
+  const third = await f.call(`/customers?cursor=${encodeURIComponent(second.nextCursor)}`, undefined, courier);
+  assert.equal(second.customers.length, 50); assert.ok(second.nextCursor);
+  assert.equal(third.customers.length, 7); assert.equal(third.nextCursor, null);
+  const all = [...first.customers, ...second.customers, ...third.customers];
+  assert.equal(new Set(all.map((customer) => customer.id)).size, 107);
+  assert.deepEqual(all.map((customer) => customer.id), customers.map((customer) => customer.id));
+  assert.deepEqual((await f.call("/customers?q=unique%20SHOP", undefined, admin)).customers.map((item) => item.id), [customers[106].id]);
+  assert.deepEqual((await f.call("/customers?q=customer-003", undefined, admin)).customers.map((item) => item.id), [customers[3].id]);
+  const arabic = await f.call(`/customers?q=${encodeURIComponent("أحمد")}`, undefined, courier);
+  assert.equal(arabic.customers.length, 50);
+  assert.equal((await f.call(`/customers?q=${encodeURIComponent("أحمد")}&cursor=${encodeURIComponent(arabic.nextCursor)}`, undefined, courier)).customers.length, 4);
+  assert.deepEqual(await f.call("/customers?q=no-match", undefined, courier), { customers: [], nextCursor: null });
+  // A cursor remains usable if its boundary customer is removed; it is not an offset.
+  f.context.state.users = f.context.state.users.filter((item) => item.id !== first.customers[49].id);
+  assert.deepEqual((await f.call(`/customers?cursor=${encodeURIComponent(first.nextCursor)}`, undefined, courier)).customers, second.customers);
+  for (const suffix of ["cursor=garbage", `cursor=${"x".repeat(4097)}`, `cursor=${btoa(JSON.stringify([1, "customer-1"]))}`, `q=${"x".repeat(201)}`, "q=%00"]) await rejectsStatus(f.call(`/customers?${suffix}`, undefined, courier), 400);
 });
 
 test("private multi-chunk media round-trips byte exactly; incomplete uploads never create tickets", async () => {
@@ -175,6 +263,23 @@ async function apiFixture() {
   const call = (path, body, headers = {}, method = "POST") => handleAlmadinaApi(new Request(`https://almadina.example/api/almadina/followups${path}`, { method, headers: { Cookie: `almadina_session=${token}`, "Content-Type": "application/json", ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), database);
   return { database, call };
 }
+test("customer directory API authenticates staff and preserves account switching and cache protections", async () => {
+  const f = await apiFixture();
+  const unsigned = await handleAlmadinaApi(request("/customers"), f.database);
+  assert.equal(unsigned.status, 401);
+  assert.equal((await f.call("/customers", undefined, {}, "GET")).status, 403);
+  for (const account of [courier, admin]) {
+    await f.database.prepare("UPDATE almadina_sessions SET user_id = ?").bind(account.id).run();
+    const response = await f.call("/customers", undefined, { "X-Almadina-Account": account.id }, "GET");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    const page = await response.json();
+    assert.deepEqual(page.customers.map((customer) => customer.id), [merchant.id, other.id]);
+    assert.ok(page.customers.every((customer) => customer.orderCount === 1 && customer.followupCount === 0));
+    assert.equal((await f.call("/customers", undefined, { "X-Almadina-Account": merchant.id }, "GET")).status, 409);
+  }
+});
 test("real API rejects unauthenticated, cross-origin, oversized bodies and account switching; preserves security headers", async () => {
   const f = await apiFixture();
   assert.equal((await f.call("", create(), { Origin: "https://evil.example" })).status, 403);
