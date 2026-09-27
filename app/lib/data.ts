@@ -13,6 +13,14 @@ export type LinkedDevice = {
   current: boolean;
   createdAt: string;
   lastActiveAt: string;
+  platform?: "android" | "ios" | "ipados" | "windows" | "macos" | "linux" | "unknown";
+  model?: string;
+  osVersion?: string;
+  appVersion?: string;
+  label?: string;
+  location?: string | null;
+  locationUpdatedAt?: string | null;
+  locationSource?: "ip" | "unknown";
 };
 export type OrderStatus =
   | "draft"

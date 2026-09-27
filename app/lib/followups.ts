@@ -16,7 +16,7 @@ export const FOLLOWUP_STATUSES = [
 export type FollowupType = typeof FOLLOWUP_TYPES[number]["value"];
 export type FollowupStatus = typeof FOLLOWUP_STATUSES[number]["value"];
 export const FOLLOWUP_LIMITS = {
-  title: 120, description: 4_000, response: 4_000,
+  title: 120, description: 4_000, response: 4_000, comment: 4_000, address: 1_000,
   files: 5, fileBytes: 10 * 1024 * 1024, totalBytes: 20 * 1024 * 1024,
   chunkBytes: 256 * 1024,
 } as const;
@@ -30,9 +30,16 @@ export type Followup = {
   id: string; orderId: string; creatorId: string; creatorName: string;
   /** Present on current API responses; optional for older persisted/client records. */
   merchantId?: string;
+  ticketNumber?: string; trackingNumber?: string; requestedPrice?: string | null;
+  requestedAddress?: string | null; canEdit?: boolean;
   type: FollowupType; title: string; description: string; status: FollowupStatus;
   response: string; createdAt: string; updatedAt: string; attachments: FollowupAttachment[];
 };
+export type FollowupComment = {
+  id: string; followupId: string; authorId: string; authorName: string;
+  authorRole: "merchant" | "courier" | "admin"; text: string; createdAt: string; attachments: FollowupAttachment[];
+};
+export type FollowupCommentList = { comments: FollowupComment[]; nextCursor: string | null };
 export type FollowupList = { followups: Followup[]; nextCursor: string | null };
 /** Staff directory deliberately excludes account contact and credential fields. */
 export type FollowupCustomer = {

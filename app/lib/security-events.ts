@@ -5,7 +5,7 @@ const API_ROUTES = new Set([
   "geocode/reverse", "register", "register/request", "register/verify",
   "password-reset/request", "password-reset/verify", "password-reset/complete",
   "passkey/login/options", "passkey/login/verify", "push/config", "push/subscribe",
-  "push/unsubscribe", "push/test", "security/devices", "security/devices/revoke",
+  "push/unsubscribe", "push/test", "security/devices", "security/devices/revoke", "security/devices/current",
   "security/status", "security/pin", "security/pin/verify", "security/disable",
   "security/webauthn/register/options", "security/webauthn/register/verify",
   "security/webauthn/authenticate/options", "security/webauthn/authenticate/verify",

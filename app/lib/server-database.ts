@@ -1,6 +1,8 @@
 import { followupAccountPurge, followupSchema, FollowupRequestError, handleFollowupRequest } from "./server-followups";
 import type { Followup } from "./followups";
 import { logRequestEvent, logServiceEvent } from "./security-events";
+import { describeSessionDevice, cleanDeviceText } from "./session-device";
+import { sessionDetailsSchema, sessionDetailsStatement, readSessionDetails, publicSessionDetails, type SessionDetailsRow } from "./session-device-store";
 import { copyTrustedClientAddress, trustedClientAddress } from "./trusted-client";
 import { BodyLimitError, readBoundedBody } from "./bounded-body";
 import { deletionPolicy, type AccountDeletionRequestRecord } from "./account-deletion";
@@ -81,7 +83,7 @@ type StateRow = { payload: string; revision: number };
 type SessionRow = { user_id: string; expires_at: number; created_at: string };
 type StoredState = { database: Database; revision: number };
 type AuthenticatedSession = { account: User; state: StoredState; token: string; tokenHash: string };
-type SessionDeviceRow = {
+type SessionDeviceRow = Partial<SessionDetailsRow> & {
   token_hash: string;
   created_at: string;
   device_name: string | null;
@@ -90,7 +92,7 @@ type SessionDeviceRow = {
   last_active_at: string | null;
 };
 type SessionTokenRow = { token_hash: string };
-type DeviceDescriptor = { name: string; type: LinkedDeviceType; browser: string };
+type DeviceDescriptor = ReturnType<typeof describeSessionDevice>;
 type WebAuthnChallengeKind = "registration" | "authentication" | "login";
 type AppLockRow = {
   user_id: string;
@@ -543,6 +545,7 @@ async function initializeDatabase(database: D1Database, config: AlmadinaApiConfi
       created_at TEXT NOT NULL
     )`),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_sessions_user_id_idx ON almadina_sessions (user_id)"),
+    ...sessionDetailsSchema(database),
     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_session_devices (
       token_hash TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL,
@@ -950,6 +953,7 @@ async function savePasswordChange(
   const replacementSessionToken = toHex(crypto.getRandomValues(new Uint8Array(32)));
   const replacementTokenHash = await sha256(replacementSessionToken);
   const currentTokenHash = await sha256(currentSessionToken);
+  const previousDetails = await readSessionDetails(database, currentTokenHash);
   const expiresAt = Math.floor(Date.now() / 1000) + SESSION_DURATION;
   const descriptor = describeDevice(request);
   const results = await database.batch<D1Result>([
@@ -962,6 +966,7 @@ async function savePasswordChange(
     database.prepare(`INSERT INTO almadina_session_devices (token_hash, user_id, device_name, device_type, browser_name, created_at, last_active_at)
       SELECT ?, ?, ?, ?, ?, ?, ? FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?`)
       .bind(replacementTokenHash, userId, descriptor.name, descriptor.type, descriptor.browser, updatedAt, updatedAt, "main", nextRevision, payload),
+    sessionDetailsStatement(database, replacementTokenHash, userId, request, previousDetails),
     database.prepare(`DELETE FROM almadina_password_reset_requests WHERE user_id = ? AND ${stateMatches}`).bind(userId, "main", nextRevision, payload),
   ]);
   const saved = (results[0]?.meta?.changes ?? 0) === 1;
@@ -1031,6 +1036,7 @@ async function saveVerifiedRegistration(
     database.prepare(`INSERT INTO almadina_session_devices (token_hash, user_id, device_name, device_type, browser_name, created_at, last_active_at)
       SELECT ?, ?, ?, ?, ?, ?, ? FROM almadina_state WHERE id = ? AND revision = ? AND payload = ?`)
       .bind(sessionTokenHash, accountId, descriptor.name, descriptor.type, descriptor.browser, createdAt, createdAt, "main", nextRevision, payload),
+    sessionDetailsStatement(database, sessionTokenHash, accountId, request),
   ]);
   const saved = (results[0]?.meta?.changes ?? 0) === 1;
   return { saved, ...(saved ? { sessionToken } : {}) };
@@ -1310,51 +1316,7 @@ async function enforceRegistrationRequestRateLimits(database: D1Database, reques
 }
 
 function describeDevice(request: Request): DeviceDescriptor {
-  const userAgent = (request.headers.get("user-agent") ?? "").slice(0, 1024);
-  const platformHint = (request.headers.get("sec-ch-ua-platform") ?? "").replace(/["']/g, "").toLowerCase();
-  const mobileHint = request.headers.get("sec-ch-ua-mobile") === "?1";
-
-  const browser = /EdgiOS|EdgA|Edg\//i.test(userAgent)
-    ? "Edge"
-    : /OPiOS|OPR\//i.test(userAgent)
-      ? "Opera"
-      : /SamsungBrowser/i.test(userAgent)
-        ? "Samsung Internet"
-        : /FxiOS|Firefox\//i.test(userAgent)
-          ? "Firefox"
-          : /CriOS|Chrome\//i.test(userAgent)
-            ? "Chrome"
-            : /Safari\//i.test(userAgent) && /Version\//i.test(userAgent)
-              ? "Safari"
-              : "متصفح";
-
-  let platform = "جهاز غير معروف";
-  let type: LinkedDeviceType = "unknown";
-  if (/iPad/i.test(userAgent) || platformHint === "ipados") {
-    platform = "iPad";
-    type = "tablet";
-  } else if (/iPhone|iPod/i.test(userAgent) || platformHint === "ios") {
-    platform = "iPhone";
-    type = "mobile";
-  } else if (/Android/i.test(userAgent) || platformHint === "android") {
-    const tablet = !/Mobile/i.test(userAgent) && !mobileHint;
-    platform = tablet ? "جهاز Android لوحي" : "هاتف Android";
-    type = tablet ? "tablet" : "mobile";
-  } else if (/Windows/i.test(userAgent) || platformHint === "windows") {
-    platform = "Windows";
-    type = "desktop";
-  } else if (/Macintosh|Mac OS X/i.test(userAgent) || platformHint === "macos") {
-    platform = "Mac";
-    type = "desktop";
-  } else if (/Linux/i.test(userAgent) || platformHint === "linux") {
-    platform = "Linux";
-    type = mobileHint ? "mobile" : "desktop";
-  } else if (mobileHint) {
-    platform = "هاتف";
-    type = "mobile";
-  }
-
-  return { name: browser === "متصفح" ? platform : `${browser} على ${platform}`, type, browser };
+  return describeSessionDevice(request);
 }
 
 async function rememberSessionDevice(database: D1Database, tokenHash: string, userId: string, createdAt: string, request: Request): Promise<void> {
@@ -1362,16 +1324,17 @@ async function rememberSessionDevice(database: D1Database, tokenHash: string, us
   const lastActiveAt = new Date().toISOString();
   const staleBefore = new Date(Date.now() - DEVICE_ACTIVITY_UPDATE_INTERVAL).toISOString();
   await database.prepare(`INSERT INTO almadina_session_devices (token_hash, user_id, device_name, device_type, browser_name, created_at, last_active_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    SELECT ?, ?, ?, ?, ?, ?, ? FROM almadina_sessions WHERE token_hash = ? AND user_id = ? AND expires_at > ?
     ON CONFLICT (token_hash) DO UPDATE SET
       user_id = excluded.user_id,
-      device_name = excluded.device_name,
-      device_type = excluded.device_type,
-      browser_name = excluded.browser_name,
+      device_name = CASE WHEN excluded.device_type <> 'unknown' THEN excluded.device_name ELSE almadina_session_devices.device_name END,
+      device_type = CASE WHEN excluded.device_type <> 'unknown' THEN excluded.device_type ELSE almadina_session_devices.device_type END,
+      browser_name = CASE WHEN excluded.device_type <> 'unknown' THEN excluded.browser_name ELSE almadina_session_devices.browser_name END,
       last_active_at = excluded.last_active_at
     WHERE almadina_session_devices.last_active_at <= ?
       OR almadina_session_devices.device_name <> excluded.device_name`)
-    .bind(tokenHash, userId, descriptor.name, descriptor.type, descriptor.browser, createdAt, lastActiveAt, staleBefore).run();
+    .bind(tokenHash, userId, descriptor.name, descriptor.type, descriptor.browser, createdAt, lastActiveAt, tokenHash, userId, Math.floor(Date.now() / 1000), staleBefore).run();
+  await sessionDetailsStatement(database, tokenHash, userId, request).run();
 }
 
 async function createSession(database: D1Database, userId: string, request: Request): Promise<string> {
@@ -1385,6 +1348,7 @@ async function createSession(database: D1Database, userId: string, request: Requ
       .bind(tokenHash, userId, expiresAt, createdAt),
     database.prepare("INSERT INTO almadina_session_devices (token_hash, user_id, device_name, device_type, browser_name, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .bind(tokenHash, userId, descriptor.name, descriptor.type, descriptor.browser, createdAt, createdAt),
+    sessionDetailsStatement(database, tokenHash, userId, request),
   ]);
   return token;
 }
@@ -1473,9 +1437,11 @@ async function recoverConfiguredAdministratorForLogin(
 async function readLinkedDevices(database: D1Database, userId: string, currentTokenHash: string): Promise<LinkedDevice[]> {
   const now = Math.floor(Date.now() / 1000);
   const result = await database.prepare(`SELECT sessions.token_hash, sessions.created_at,
-    devices.device_name, devices.device_type, devices.browser_name, devices.last_active_at
+    devices.device_name, devices.device_type, devices.browser_name, devices.last_active_at,
+    details.platform, details.model, details.os_version, details.app_version, details.label, details.location, details.location_updated_at
     FROM almadina_sessions AS sessions
     LEFT JOIN almadina_session_devices AS devices ON devices.token_hash = sessions.token_hash
+    LEFT JOIN almadina_session_details AS details ON details.token_hash = sessions.token_hash
     WHERE sessions.user_id = ? AND sessions.expires_at > ?
     ORDER BY COALESCE(devices.last_active_at, sessions.created_at) DESC`)
     .bind(userId, now).all<SessionDeviceRow>();
@@ -1488,12 +1454,31 @@ async function readLinkedDevices(database: D1Database, userId: string, currentTo
     current: row.token_hash === currentTokenHash,
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at || row.created_at,
+    ...publicSessionDetails(row),
   })));
 }
 
 async function linkedDevicesResponse(database: D1Database, session: AuthenticatedSession): Promise<Response> {
   const devices = await readLinkedDevices(database, session.account.id, session.tokenHash);
   return json({ count: devices.length, devices });
+}
+
+async function renameCurrentDevice(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
+  const expectedAccount = request.headers.get("X-Almadina-Account");
+  if (expectedAccount && expectedAccount !== session.account.id) return json({ error: "تغيّر الحساب أثناء الطلب. أعد فتح الأجهزة المرتبطة.", code: "accountchanged" }, 409);
+  let submitted: unknown;
+  try { submitted = await request.json(); } catch { return json({ error: "اسم الجهاز غير صالح." }, 400); }
+  if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)
+    || Object.keys(submitted).some((key) => key !== "label")) return json({ error: "يمكن تعديل اسم الجهاز الحالي فقط." }, 400);
+  const raw = (submitted as Record<string, unknown>).label;
+  if (typeof raw !== "string" || raw.trim().length > 80 || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(raw)) return json({ error: "اكتب اسمًا للجهاز لا يتجاوز 80 حرفًا." }, 400);
+  const label = cleanDeviceText(raw, 80);
+  const result = await database.prepare(`UPDATE almadina_session_details SET label = ? WHERE token_hash = ? AND user_id = ?
+    AND EXISTS (SELECT 1 FROM almadina_sessions WHERE token_hash = ? AND user_id = ? AND expires_at > ?)`)
+    .bind(label, session.tokenHash, session.account.id, session.tokenHash, session.account.id, Math.floor(Date.now() / 1000)).run();
+  if ((result.meta?.changes ?? 0) !== 1) return json({ error: "انتهت جلسة الجهاز. سجّل الدخول مجددًا." }, 401);
+  const devices = await readLinkedDevices(database, session.account.id, session.tokenHash);
+  return json({ success: true, count: devices.length, devices });
 }
 
 async function revokeLinkedDevice(database: D1Database, request: Request, session: AuthenticatedSession): Promise<Response> {
@@ -3947,8 +3932,17 @@ async function routeAlmadinaApi(request: Request, database: D1Database, config: 
       return await testWebPush(database, request, session, config);
     }
 
+    if (url.pathname === "/api/almadina/security/devices" || url.pathname.startsWith("/api/almadina/security/devices/")) {
+      const expectedAccount = request.headers.get("X-Almadina-Account");
+      if (expectedAccount && expectedAccount !== session.account.id) return json({ error: "تغيّر الحساب أثناء الطلب. أعد فتح الأجهزة المرتبطة.", code: "accountchanged" }, 409);
+    }
+
     if (url.pathname === "/api/almadina/security/devices" && request.method === "GET") {
       return await linkedDevicesResponse(database, session);
+    }
+
+    if (url.pathname === "/api/almadina/security/devices/current" && request.method === "POST") {
+      return await renameCurrentDevice(database, request, session);
     }
 
     if (url.pathname === "/api/almadina/security/devices/revoke" && request.method === "POST") {

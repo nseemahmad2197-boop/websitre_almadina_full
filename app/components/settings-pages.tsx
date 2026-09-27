@@ -3,9 +3,10 @@ import { DeletionRequestPanel } from "./deletion-request";
 import type { DeletionResponse } from "../lib/account-deletion";
 import { SupportContacts } from "./public-service";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useApp, type View } from "../lib/app-context";
 import { formatDate, relativeDate, type LinkedDevice } from "../lib/data";
+import { devicePlatformName } from "../lib/linked-devices";
 import { applicationPermissionDisclosures, LEGAL_DOCUMENT_VERSION, LEGAL_FINAL_NOTICE, privacyPolicySections, termsOfUseSections } from "../lib/legal";
 import { Icon, type IconName } from "./icon";
 import { Button, Field, Modal, PageHeader, SectionCard, Toggle } from "./ui";
@@ -89,66 +90,114 @@ function linkedDeviceCountLabel(count: number): string {
   return `${written} جهازًا مرتبطًا`;
 }
 
+function linkedDeviceDate(value: string): string {
+  return new Intl.DateTimeFormat("ar-PS", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
 function linkedDeviceIcon(device: LinkedDevice): IconName {
   return device.type === "mobile" || device.type === "tablet" ? "phone" : "monitor";
 }
 
 export function LinkedDevicesPage() {
-  const { setView, listLinkedDevices, revokeLinkedDevice, confirm } = useApp();
+  const { user } = useApp();
+  // Remount the request scope synchronously on account changes; never display a
+  // previous account's session list while the next account's request is pending.
+  return user ? <LinkedDevicesContent key={user.id} /> : null;
+}
+
+function LinkedDevicesContent() {
+  const { setView, listLinkedDevices, revokeLinkedDevice, renameCurrentDevice, confirm } = useApp();
   const [devices, setDevices] = useState<LinkedDevice[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState("");
+  const [mutationError, setMutationError] = useState("");
+  const mounted = useRef(false);
+  const requestVersion = useRef(0);
+  const mutationActive = useRef(false);
+  const actions = useRef({ listLinkedDevices, revokeLinkedDevice, renameCurrentDevice });
+  actions.current = { listLinkedDevices, revokeLinkedDevice, renameCurrentDevice };
 
   async function loadDevices() {
-    setLoading(true);
-    setFailed(false);
-    const result = await listLinkedDevices();
-    setLoading(false);
-    if (!result) return setFailed(true);
-    setDevices(result);
+    if (mutationActive.current) return;
+    const version = ++requestVersion.current;
+    setLoading(true); setFailed(false);
+    try {
+      const result = await actions.current.listLinkedDevices();
+      if (!mounted.current || version !== requestVersion.current) return;
+      if (!result) setFailed(true); else setDevices(result);
+    } catch {
+      if (mounted.current && version === requestVersion.current) setFailed(true);
+    } finally {
+      if (mounted.current && version === requestVersion.current) setLoading(false);
+    }
   }
 
   useEffect(() => {
-    let active = true;
-    void listLinkedDevices().then((result) => {
-      if (!active) return;
-      setLoading(false);
-      if (!result) return setFailed(true);
-      setDevices(result);
-    });
-    return () => { active = false; };
-    // The initial request intentionally runs once when this page opens.
+    mounted.current = true;
+    void loadDevices();
+    return () => { mounted.current = false; requestVersion.current += 1; };
+    // Functions read the latest context through actions; this effect owns only
+    // the lifetime of this account-keyed page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function mutate(operation: () => Promise<LinkedDevice[] | null>): Promise<boolean> {
+    if (!mounted.current || mutationActive.current) return false;
+    const version = ++requestVersion.current;
+    mutationActive.current = true; setBusy(true); setLoading(false); setMutationError("");
+    try {
+      const result = await operation();
+      if (!mounted.current || version !== requestVersion.current) return false;
+      if (!result) { setMutationError("تعذّر تأكيد التغيير. تحقق من الاتصال وحدّث القائمة ثم أعد المحاولة."); return false; }
+      setDevices(result); setFailed(false); return true;
+    } catch {
+      if (mounted.current && version === requestVersion.current) setMutationError("تعذّر حفظ التغيير. أعد المحاولة.");
+      return false;
+    } finally {
+      mutationActive.current = false;
+      if (mounted.current && version === requestVersion.current) setBusy(false);
+    }
+  }
+
   function requestRevoke(device: LinkedDevice) {
+    if (mutationActive.current || device.current) return;
     confirm({
-      title: `تسجيل خروج ${device.name}؟`,
+      title: `تسجيل خروج ${device.label || device.name}؟`,
       message: "ستنتهي جلسة هذا الجهاز فقط، ولن تُحذف بيانات الحساب أو الطرود أو التحصيلات.",
-      confirmLabel: "تسجيل خروج الجهاز",
-      danger: true,
-      onConfirm: async () => {
-        const result = await revokeLinkedDevice(device.id);
-        if (!result) return false;
-        setDevices(result);
-        return true;
-      },
+      confirmLabel: "تسجيل خروج الجهاز", danger: true,
+      onConfirm: () => mutate(() => actions.current.revokeLinkedDevice(device.id)),
     });
+  }
+
+  async function saveLabel(event: FormEvent) {
+    event.preventDefault();
+    if (label.trim().length > 80 || /[\p{Cc}\p{Cf}]/u.test(label.trim())) { setMutationError("اكتب اسمًا واضحًا حتى 80 حرفًا."); return; }
+    if (await mutate(() => actions.current.renameCurrentDevice(label.trim()))) setEditing(false);
   }
 
   const count = devices?.length ?? 0;
   return <div className="page-content linked-devices-page animate-page">
-    <PageHeader title="الأجهزة المرتبطة" subtitle="الجلسات المسجّل دخولها إلى حسابك" onBack={() => setView("security")} action={<Button type="button" variant="ghost" icon="refresh" loading={loading} disabled={loading} onClick={() => { void loadDevices(); }}>تحديث</Button>} />
-    <section className="linked-devices-summary" aria-live="polite"><span><Icon name="monitor" size={25} /></span><div><strong>{loading && !devices ? "جارٍ حساب الأجهزة..." : linkedDeviceCountLabel(count)}</strong><small>يمكنك مراجعة آخر نشاط وتسجيل خروج أي جهاز آخر.</small></div></section>
+    <PageHeader title="الأجهزة المرتبطة" subtitle="الجلسات المسجّل دخولها إلى حسابك" onBack={() => setView("security")} action={<Button type="button" variant="ghost" icon="refresh" loading={loading} disabled={loading || busy} onClick={() => { void loadDevices(); }}>تحديث</Button>} />
+    <section className="linked-devices-summary" aria-live="polite"><span><Icon name="monitor" size={25} /></span><div><strong>{loading && !devices ? "جارٍ حساب الأجهزة..." : linkedDeviceCountLabel(count)}</strong><small>راجع نوع الجهاز ومنطقة اتصاله التقريبية، وسجّل خروج أي جهاز لا تعرفه.</small></div></section>
+    {mutationError && !editing && <p className="linked-devices-message" role="alert">{mutationError}</p>}
     {loading && !devices ? <div className="linked-devices-loading" role="status"><span className="spinner" /><p>جارٍ تحميل الأجهزة المرتبطة...</p></div>
-      : failed ? <section className="linked-devices-error" role="alert"><Icon name="alert" size={30} /><h2>تعذّر تحميل الأجهزة</h2><p>تحقق من الاتصال ثم أعد المحاولة.</p><Button type="button" variant="outline" icon="refresh" onClick={() => { void loadDevices(); }}>إعادة المحاولة</Button></section>
+      : failed ? <section className="linked-devices-error" role="alert"><Icon name="alert" size={30} /><h2>تعذّر تحميل الأجهزة</h2><p>تحقق من الاتصال ثم أعد المحاولة.</p><Button type="button" variant="outline" icon="refresh" disabled={busy} onClick={() => { void loadDevices(); }}>إعادة المحاولة</Button></section>
         : devices?.length ? <div className="linked-device-list">{devices.map((device) => <article className={`linked-device-card ${device.current ? "is-current" : ""}`} key={device.id}>
           <span className="linked-device-card__icon"><Icon name={linkedDeviceIcon(device)} size={24} /></span>
-          <div className="linked-device-card__details"><div><strong>{device.name}</strong>{device.current && <span className="linked-device-current"><Icon name="check" size={13} />هذا الجهاز</span>}</div><p>{device.browser === "غير معروف" ? "جلسة قديمة؛ سيُحدّث اسمها عند استخدامها" : `${device.browser} · آخر نشاط ${relativeDate(device.lastActiveAt)}`}</p><small>تم تسجيل الدخول في {formatDate(device.createdAt)}</small></div>
-          {!device.current && <Button type="button" variant="outline" icon="logout" onClick={() => requestRevoke(device)}>تسجيل الخروج</Button>}
+          <div className="linked-device-card__details"><div><strong><bdi>{device.label || device.name}</bdi></strong>{device.current && <span className="linked-device-current"><Icon name="check" size={13} />هذا الجهاز</span>}</div>
+            <p className="linked-device-platform"><bdi>{devicePlatformName(device)}</bdi>{device.model && <> · <bdi>{device.model}</bdi></>}{device.osVersion && <> · <bdi>{device.osVersion}</bdi></>}</p>
+            <p>{device.browser === "غير معروف" ? "جلسة قديمة؛ تظهر تفاصيل الجهاز المتاحة عند استخدامها" : <><bdi>{device.browser}</bdi>{device.appVersion && <> · <bdi>{device.appVersion}</bdi></>}</>}</p>
+            <dl className="linked-device-facts"><div><dt>المنطقة التقريبية للجلسة</dt><dd><Icon name="mapPin" size={14} />{device.locationSource === "ip" && device.location ? <bdi>{device.location}</bdi> : "غير متاحة"}</dd></div><div><dt>تسجيل الدخول</dt><dd><time dateTime={device.createdAt}>{linkedDeviceDate(device.createdAt)}</time></dd></div><div><dt>آخر نشاط</dt><dd><time dateTime={device.lastActiveAt} title={linkedDeviceDate(device.lastActiveAt)}>{relativeDate(device.lastActiveAt)}</time></dd></div></dl>
+            {device.locationSource === "ip" && device.location && device.locationUpdatedAt && <small>وقت تحديد المنطقة: <time dateTime={device.locationUpdatedAt}>{linkedDeviceDate(device.locationUpdatedAt)}</time></small>}
+          </div>
+          {device.current ? <Button type="button" variant="outline" disabled={busy || loading} onClick={() => { setLabel(device.label ?? ""); setMutationError(""); setEditing(true); }}>تسمية هذا الجهاز</Button> : <Button type="button" variant="outline" icon="logout" disabled={busy || loading} onClick={() => requestRevoke(device)}>تسجيل الخروج</Button>}
         </article>)}</div>
           : <section className="linked-devices-error"><Icon name="monitor" size={34} /><h2>لا توجد أجهزة مرتبطة</h2><p>ستظهر جلسات تسجيل الدخول النشطة هنا.</p></section>}
-    <SectionCard className="security-note"><p><Icon name="shield" size={18} /> لا نعرض عنوان IP أو معلومات الجهاز الخام. الاسم تقريبي ويعتمد على نوع الجهاز والمتصفح حفاظًا على الخصوصية.</p></SectionCard>
+    <SectionCard className="security-note"><p><Icon name="shield" size={18} /> اسم الجهاز اختياري يكتبه مستخدمه، وليس إثباتًا لهوية مالكه. المنطقة تقريبية من شبكة الاتصال وقد تختلف مع VPN أو شبكة الهاتف؛ لا نستخدم GPS ولا نعرض عنوان IP.</p></SectionCard>
+    {editing && <Modal title="تسمية هذا الجهاز" closeDisabled={busy} onClose={() => { if (!mutationActive.current) { setEditing(false); setMutationError(""); } }}><form className="linked-device-name-form" onSubmit={saveLabel}><Field label="اسم الجهاز (اختياري)" aria-label="اسم الجهاز (اختياري)" placeholder="مثل: آيفون نسيم" value={label} onChange={(event) => setLabel(event.target.value)} disabled={busy} maxLength={80} autoComplete="off" hint="اختر اسمًا يساعدك على تمييز هذا الجهاز. اتركه فارغًا لإزالة الاسم المخصص." /><p>يظهر الاسم في حسابك على الموقع والتطبيقين. لا يمكن للتطبيق معرفة اسم المالك الحقيقي تلقائيًا.</p>{mutationError && <p className="linked-devices-message" role="alert">{mutationError}</p>}<Button type="submit" loading={busy} full>حفظ اسم الجهاز</Button></form></Modal>}
   </div>;
 }
 

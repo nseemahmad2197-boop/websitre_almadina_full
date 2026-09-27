@@ -84,6 +84,7 @@ export type AppContextValue = {
   changePassword: (currentPassword: string, newPassword: string, confirmPassword: string, signOutAllDevices: boolean) => Promise<boolean>;
   listLinkedDevices: () => Promise<LinkedDevice[] | null>;
   revokeLinkedDevice: (deviceId: string) => Promise<LinkedDevice[] | null>;
+  renameCurrentDevice: (label: string) => Promise<LinkedDevice[] | null>;
   submitDeletionOperation: (path: "account/deletion-request" | "admin/deletion-requests", payload: Record<string, unknown>) => Promise<unknown>;
   deleteAccount: (password: string, confirmation: string) => Promise<boolean>;
   prepareCollectionInvoice: (invoiceId: string) => Promise<boolean>;

@@ -1,5 +1,5 @@
 import { requestApiJSON } from "./api-transport";
-import { FOLLOWUP_LIMITS, FOLLOWUP_MIME_TYPES, FOLLOWUP_STATUSES, FOLLOWUP_TYPES, type Followup, type FollowupAttachment, type FollowupAttachmentChunk, type FollowupType } from "./followups";
+import { FOLLOWUP_LIMITS, FOLLOWUP_MIME_TYPES, FOLLOWUP_STATUSES, FOLLOWUP_TYPES, type Followup, type FollowupAttachment, type FollowupAttachmentChunk, type FollowupComment, type FollowupType } from "./followups";
 
 export class FollowupApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -72,6 +72,11 @@ export function validFollowup(value: unknown): value is Followup {
     && typeof value.orderId === "string" && value.orderId.length > 0 && value.orderId.length <= 160
     && typeof value.creatorId === "string" && value.creatorId.length > 0
     && typeof value.creatorName === "string"
+    && (value.ticketNumber === undefined || typeof value.ticketNumber === "string")
+    && (value.trackingNumber === undefined || typeof value.trackingNumber === "string")
+    && (value.canEdit === undefined || typeof value.canEdit === "boolean")
+    && (value.requestedPrice == null || typeof value.requestedPrice === "string" && canonicalFollowupPrice(value.requestedPrice) !== null)
+    && (value.requestedAddress == null || typeof value.requestedAddress === "string" && value.requestedAddress.length <= 1000)
     && FOLLOWUP_TYPES.some((entry) => entry.value === value.type)
     && FOLLOWUP_STATUSES.some((entry) => entry.value === value.status)
     && typeof value.title === "string" && value.title.trim().length > 0 && value.title.length <= FOLLOWUP_LIMITS.title
@@ -84,11 +89,46 @@ export function validFollowup(value: unknown): value is Followup {
     && value.attachments.reduce((sum, item) => sum + item.size, 0) <= FOLLOWUP_LIMITS.totalBytes;
 }
 
-export type FollowupDraft = { requestId: string; orderId: string; type: FollowupType; title: string; description: string; attachmentIds: string[] };
+export function canonicalFollowupPrice(value: string): string | null {
+  const normalized = value.trim().replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit))).replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit))).replace("٫", ".");
+  if (!/^\d{1,9}(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const number = Number(normalized);
+  return number <= 999999999.99 ? number.toFixed(2).replace(/\.?0+$/, "") || "0" : null;
+}
+export type FollowupDraft = { requestId: string; orderId: string; type: FollowupType; title: string; description: string; attachmentIds: string[]; detailsVersion: 1; requestedPrice?: string; requestedAddress?: string };
+export type FollowupEditDraft = { requestId: string; expectedUpdatedAt: string; title: string; description: string; attachmentIds: string[]; requestedPrice?: string; requestedAddress?: string };
+export type FollowupCommentDraft = { requestId: string; text: string; attachmentIds: string[] };
+export function validFollowupComment(value: unknown): value is FollowupComment {
+  return record(value) && typeof value.id === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value.id)
+    && typeof value.followupId === "string" && typeof value.authorId === "string" && typeof value.authorName === "string"
+    && ["merchant", "courier", "admin"].includes(String(value.authorRole)) && typeof value.text === "string" && value.text.length <= 4000
+    && typeof value.createdAt === "string" && Number.isFinite(Date.parse(value.createdAt))
+    && Array.isArray(value.attachments) && value.attachments.length <= FOLLOWUP_LIMITS.files && value.attachments.every(validAttachment)
+    && new Set(value.attachments.map((item) => item.id)).size === value.attachments.length
+    && value.attachments.reduce((sum, item) => sum + item.size, 0) <= FOLLOWUP_LIMITS.totalBytes
+    && (!!value.text.trim() || value.attachments.length > 0);
+}
+export async function editFollowup(id: string, draft: FollowupEditDraft, signal: AbortSignal): Promise<Followup> {
+  const result = await followupApi<{ followup: unknown }>(`followups/${encodeURIComponent(id)}/edit`, signal, draft);
+  if (!validFollowup(result.followup) || result.followup.id !== id || result.followup.title !== draft.title || result.followup.description !== draft.description
+    || draft.requestedPrice !== undefined && result.followup.requestedPrice !== draft.requestedPrice
+    || draft.requestedAddress !== undefined && result.followup.requestedAddress !== draft.requestedAddress
+    || JSON.stringify(result.followup.attachments.map((item) => item.id)) !== JSON.stringify(draft.attachmentIds)) throw new Error("لم يصل تأكيد التعديل كاملًا. أعد محاولة تأكيد الطلب نفسه.");
+  return result.followup;
+}
+export async function postFollowupComment(id: string, draft: FollowupCommentDraft, signal: AbortSignal): Promise<FollowupComment> {
+  const result = await followupApi<{ comment: unknown }>(`followups/${encodeURIComponent(id)}/comments`, signal, draft);
+  if (!validFollowupComment(result.comment) || result.comment.followupId !== id || result.comment.text !== draft.text
+    || JSON.stringify(result.comment.attachments.map((item) => item.id)) !== JSON.stringify(draft.attachmentIds)) throw new Error("لم يصل تأكيد إرسال الرسالة كاملًا. أعد تأكيد الرسالة نفسها.");
+  return result.comment;
+}
 export async function createFollowup(draft: FollowupDraft, signal: AbortSignal): Promise<Followup> {
   const result = await followupApi<{ followup: unknown }>("followups", signal, draft);
   if (!validFollowup(result.followup) || result.followup.orderId !== draft.orderId || result.followup.type !== draft.type
     || result.followup.title !== draft.title || result.followup.description !== draft.description
+    || typeof result.followup.ticketNumber !== "string" || !result.followup.ticketNumber || typeof result.followup.trackingNumber !== "string"
+    || draft.requestedPrice !== undefined && result.followup.requestedPrice !== draft.requestedPrice
+    || draft.requestedAddress !== undefined && result.followup.requestedAddress !== draft.requestedAddress
     || JSON.stringify(result.followup.attachments.map((item) => item.id)) !== JSON.stringify(draft.attachmentIds)) {
     // The server may have committed even if its response is incomplete. Keep the
     // immutable request available for a retry instead of declaring false success.
