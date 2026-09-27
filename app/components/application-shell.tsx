@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useDrawerModal } from "../lib/use-drawer-modal";
 import { useApp, type View } from "../lib/app-context";
 import { DeletionRequestsAdminPage } from "./deletion-admin";
 import { AdminDashboard } from "./admin";
@@ -17,7 +19,9 @@ import { Avatar, Brand, Button, EmptyState, Field, IconButton, Modal, StatusPill
 
 function NavigationDrawer({ onClose }: { onClose: () => void }) {
   const { user, setView, logout, confirm, openAccountSwitcher } = useApp();
-  if (!user) return null;
+  const drawerRef = useRef<HTMLElement>(null);
+  const releaseScroll = useDrawerModal(drawerRef, onClose);
+  if (!user || typeof document === "undefined") return null;
   const admin = user.role === "admin";
   const employee = user.role === "courier";
   const links: { icon: IconName; label: string; view: View }[] = admin ? [
@@ -46,7 +50,7 @@ function NavigationDrawer({ onClose }: { onClose: () => void }) {
     { icon: "settings", label: "الإعدادات", view: "settings" },
   ];
 
-  return <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><aside className="navigation-drawer"><div className="drawer-profile"><IconButton name="close" label="إغلاق القائمة" onClick={onClose} /><Avatar name={user.name} color="#ffffff" large /><strong>{admin ? "إدارة المدينة إكسبرس" : user.name}</strong><span>{employee ? `حساب موظف · ${user.store}` : user.store}</span><small><Icon name="mapPin" size={14} /> فلسطين</small></div><nav className="drawer-links">{links.map((item) => <button key={`${item.view}-${item.label}`} onClick={() => { setView(item.view); onClose(); }}><Icon name={item.icon} size={20} />{item.label}<Icon name="chevronLeft" size={16} /></button>)}</nav><footer className="drawer-footer"><button onClick={() => { onClose(); openAccountSwitcher(); }}><Icon name="switch" size={19} />تبديل الحساب</button><button className="drawer-logout" onClick={() => { onClose(); confirm({ title: "تسجيل الخروج؟", message: "يمكنك العودة إلى حسابك في أي وقت.", confirmLabel: "تسجيل الخروج", onConfirm: logout }); }}><Icon name="logout" size={19} />تسجيل الخروج</button><span>Version 1.0.0</span></footer></aside></div>;
+  return createPortal(<div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><aside ref={drawerRef} className="navigation-drawer" role="dialog" aria-modal="true" aria-label="القائمة الجانبية" tabIndex={-1}><div className="drawer-profile"><IconButton name="close" label="إغلاق القائمة" onClick={onClose} /><Avatar name={user.name} color="#ffffff" large /><strong>{admin ? "إدارة المدينة إكسبرس" : user.name}</strong><span>{employee ? `حساب موظف · ${user.store}` : user.store}</span><small><Icon name="mapPin" size={14} /> فلسطين</small></div><nav className="drawer-links">{links.map((item) => <button key={`${item.view}-${item.label}`} onClick={() => { releaseScroll(); setView(item.view); onClose(); }}><Icon name={item.icon} size={20} />{item.label}<Icon name="chevronLeft" size={16} /></button>)}</nav><footer className="drawer-footer"><button onClick={() => { onClose(); openAccountSwitcher(); }}><Icon name="switch" size={19} />تبديل الحساب</button><button className="drawer-logout" onClick={() => { onClose(); confirm({ title: "تسجيل الخروج؟", message: "يمكنك العودة إلى حسابك في أي وقت.", confirmLabel: "تسجيل الخروج", onConfirm: logout }); }}><Icon name="logout" size={19} />تسجيل الخروج</button><span>Version 1.0.0</span></footer></aside></div>, document.body);
 }
 
 function GlobalSearch({ onClose }: { onClose: () => void }) {
