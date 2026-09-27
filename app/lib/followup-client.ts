@@ -75,6 +75,7 @@ export function validFollowup(value: unknown): value is Followup {
     && (value.ticketNumber === undefined || typeof value.ticketNumber === "string")
     && (value.trackingNumber === undefined || typeof value.trackingNumber === "string")
     && (value.canEdit === undefined || typeof value.canEdit === "boolean")
+    && (value.canDelete === undefined || typeof value.canDelete === "boolean")
     && (value.requestedPrice == null || typeof value.requestedPrice === "string" && canonicalFollowupPrice(value.requestedPrice) !== null)
     && (value.requestedAddress == null || typeof value.requestedAddress === "string" && value.requestedAddress.length <= 1000)
     && FOLLOWUP_TYPES.some((entry) => entry.value === value.type)
@@ -98,6 +99,15 @@ export function canonicalFollowupPrice(value: string): string | null {
 export type FollowupDraft = { requestId: string; orderId: string; type: FollowupType; title: string; description: string; attachmentIds: string[]; detailsVersion: 1; requestedPrice?: string; requestedAddress?: string };
 export type FollowupEditDraft = { requestId: string; expectedUpdatedAt: string; title: string; description: string; attachmentIds: string[]; requestedPrice?: string; requestedAddress?: string };
 export type FollowupCommentDraft = { requestId: string; text: string; attachmentIds: string[] };
+export type FollowupDeleteDraft = { orderId: string; expectedUpdatedAt: string };
+export async function deleteFollowup(id: string, draft: FollowupDeleteDraft, signal: AbortSignal): Promise<void> {
+  const result = await followupApi<unknown>(`followups/${encodeURIComponent(id)}/delete`, signal, draft);
+  // A lost or malformed receipt may still follow a committed deletion. Retry the
+  // same scope/version; the server's tombstone makes that retry idempotent.
+  if (!record(result) || result.deleted !== true || result.followupId !== id || result.orderId !== draft.orderId) {
+    throw new Error("لم يصل تأكيد الحذف كاملًا. أعد محاولة حذف المتابعة نفسها.");
+  }
+}
 export function validFollowupComment(value: unknown): value is FollowupComment {
   return record(value) && typeof value.id === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value.id)
     && typeof value.followupId === "string" && typeof value.authorId === "string" && typeof value.authorName === "string"
