@@ -31,7 +31,7 @@ export type Followup = {
   /** Present on current API responses; optional for older persisted/client records. */
   merchantId?: string;
   ticketNumber?: string; trackingNumber?: string; requestedPrice?: string | null;
-  requestedAddress?: string | null; canEdit?: boolean;
+  requestedAddress?: string | null; canEdit?: boolean; canDelete?: boolean;
   type: FollowupType; title: string; description: string; status: FollowupStatus;
   response: string; createdAt: string; updatedAt: string; attachments: FollowupAttachment[];
 };

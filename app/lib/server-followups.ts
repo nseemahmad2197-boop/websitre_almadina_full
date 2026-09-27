@@ -42,7 +42,9 @@ function wireFollowup(context: FollowupContext, row: TicketRow): Followup {
   const order = authorizedOrder(context, row.order_id);
   // Derive ownership from the current parcel, including for legacy ticket payloads.
   const followup = JSON.parse(row.payload) as Followup;
-  return { ...followup, merchantId: order.merchantId, trackingNumber: order.trackingNumber, canEdit: followup.creatorId === context.account.id && followup.status !== "resolved" };
+  return { ...followup, merchantId: order.merchantId, trackingNumber: order.trackingNumber,
+    canEdit: row.creator_id === context.account.id && followup.status !== "resolved",
+    canDelete: row.creator_id === context.account.id || context.account.role === "admin" };
 }
 function objectBody(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail("بيانات الطلب غير صالحة.");
@@ -64,6 +66,10 @@ export function followupSchema(database: D1Database): D1PreparedStatement[] {
     )`),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_followups_order_idx ON almadina_followups (order_id, created_at, id)"),
     database.prepare("CREATE INDEX IF NOT EXISTS almadina_followups_page_idx ON almadina_followups (created_at, id)"),
+    // Additive tombstones retain the conversation and immutable retry ledger.
+    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_followup_deleted (
+      followup_id TEXT PRIMARY KEY NOT NULL, deleted_by TEXT, deleted_at TEXT NOT NULL
+    )`),
     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_followup_sequence (id TEXT PRIMARY KEY NOT NULL, next_value INTEGER NOT NULL)`),
     database.prepare("INSERT INTO almadina_followup_sequence (id, next_value) VALUES ('main', 0) ON CONFLICT (id) DO NOTHING"),
     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_followup_references (followup_id TEXT PRIMARY KEY NOT NULL, ticket_number TEXT NOT NULL UNIQUE)`),
@@ -106,6 +112,8 @@ export function followupAccountPurge(database: D1Database, account: User): D1Pre
     database.prepare("DELETE FROM almadina_followup_comments WHERE author_id = ? OR followup_id IN (SELECT id FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?)").bind(account.id, account.id, account.id),
     database.prepare("DELETE FROM almadina_followup_mutations WHERE actor_id = ? OR followup_id IN (SELECT id FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?)").bind(account.id, account.id, account.id),
     database.prepare("DELETE FROM almadina_followup_references WHERE followup_id IN (SELECT id FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?)").bind(account.id, account.id),
+    database.prepare("DELETE FROM almadina_followup_deleted WHERE followup_id IN (SELECT id FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?)").bind(account.id, account.id),
+    database.prepare("UPDATE almadina_followup_deleted SET deleted_by = NULL WHERE deleted_by = ?").bind(account.id),
     database.prepare(`DELETE FROM almadina_followup_uploads WHERE ${condition}`).bind(...values),
     database.prepare("DELETE FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?").bind(account.id, account.id),
     database.prepare("DELETE FROM almadina_followup_owners WHERE user_id = ?").bind(account.id),
@@ -127,6 +135,7 @@ async function ownerLock(database: D1Database, ownerId: string): Promise<D1Prepa
   return database.prepare("UPDATE almadina_followup_lifecycle SET lock_version = lock_version + 1 WHERE id = 'main'");
 }
 const activeAccountsSql = "NOT EXISTS (SELECT user_id FROM almadina_followup_revoked WHERE user_id = ? OR user_id = ?)";
+const activeTicketSql = "NOT EXISTS (SELECT followup_id FROM almadina_followup_deleted WHERE followup_id = ?)";
 async function requireActiveAccount(context: FollowupContext): Promise<void> {
   if (await context.database.prepare("SELECT user_id FROM almadina_followup_revoked WHERE user_id = ?").bind(context.account.id).first()) return fail("هذا الحساب لم يعد متاحًا.", 401);
 }
@@ -162,6 +171,7 @@ async function uploadForOwner(context: FollowupContext, id: string): Promise<Upl
   const upload = await context.database.prepare("SELECT * FROM almadina_followup_uploads WHERE id = ? AND owner_id = ?").bind(id, context.account.id).first<UploadRow>();
   if (!upload) return fail("المرفق غير موجود.", 404);
   authorizedOrder(context, upload.order_id);
+  if (upload.followup_id) await ticketRow(context, upload.followup_id);
   return upload;
 }
 async function beginUpload(context: FollowupContext, body: Record<string, unknown>): Promise<unknown> {
@@ -177,6 +187,7 @@ async function beginUpload(context: FollowupContext, body: Record<string, unknow
   const id = await stableId("fu-upload", context.account.id, token);
   const prior = await context.database.prepare("SELECT * FROM almadina_followup_uploads WHERE id = ?").bind(id).first<UploadRow>();
   if (prior) {
+    if (prior.followup_id) await ticketRow(context, prior.followup_id);
     if (prior.order_id !== order.id || prior.name !== name || prior.mime_type !== mimeType || prior.size !== size || prior.chunk_count !== chunkCount) return fail("معرّف الرفع مستخدم لمرفق مختلف.", 409);
     if (!prior.followup_id && prior.expires_at <= nowSeconds()) return fail("انتهت صلاحية رفع المرفق. أعد اختيار الملف.", 410);
     return { uploadId: id, chunkSize: FOLLOWUP_LIMITS.chunkBytes };
@@ -220,8 +231,9 @@ async function putChunk(context: FollowupContext, uploadId: string, body: Record
   if (!stored || stored.data_base64 !== body.dataBase64) return fail("جزء المرفق محفوظ ببيانات مختلفة أو انتهت صلاحيته.", 409);
   return { ok: true };
 }
-async function ticketRow(context: FollowupContext, id: string): Promise<TicketRow> {
-  const row = await context.database.prepare("SELECT * FROM almadina_followups WHERE id = ?").bind(id).first<TicketRow>();
+async function ticketRow(context: FollowupContext, id: string, includeDeleted = false): Promise<TicketRow> {
+  const row = await context.database.prepare(`SELECT * FROM almadina_followups WHERE id = ?${includeDeleted ? "" : ` AND ${activeTicketSql}`}`)
+    .bind(...(includeDeleted ? [id] : [id, id])).first<TicketRow>();
   if (!row) return fail("المتابعة غير موجودة.", 404);
   authorizedOrder(context, row.order_id);
   return row;
@@ -254,17 +266,19 @@ function creationFingerprint(followup: Pick<Followup, "orderId" | "type" | "titl
 }
 async function priorMutation(context: FollowupContext, token: string, fingerprint: string): Promise<MutationRow | null> {
   const prior = await context.database.prepare("SELECT * FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?").bind(context.account.id, token).first<MutationRow>();
+  // A receipt never grants access to a deleted ticket or its old private content.
+  if (prior) await ticketRow(context, prior.followup_id);
   if (prior && prior.fingerprint !== fingerprint) return fail("معرّف الطلب مستخدم لعملية مختلفة.", 409);
   return prior;
 }
 function wireMutationFollowup(context: FollowupContext, row: TicketRow, result: string): Followup {
   const current = wireFollowup(context, row);
-  return { ...wireFollowup(context, { ...row, payload: result }), canEdit: current.canEdit };
+  return { ...wireFollowup(context, { ...row, payload: result }), canEdit: current.canEdit, canDelete: current.canDelete };
 }
 function mutationStatement(context: FollowupContext, token: string, id: string, fingerprint: string, result: string, condition: string, values: unknown[]): D1PreparedStatement {
   return context.database.prepare(`INSERT INTO almadina_followup_mutations (actor_id, request_id, followup_id, fingerprint, result)
-    SELECT ?, ?, ?, ?, ? WHERE ${condition} ON CONFLICT (actor_id, request_id) DO NOTHING`)
-    .bind(context.account.id, token, id, fingerprint, result, ...values);
+    SELECT ?, ?, ?, ?, ? WHERE ${condition} AND ${activeTicketSql} ON CONFLICT (actor_id, request_id) DO NOTHING`)
+    .bind(context.account.id, token, id, fingerprint, result, ...values, id);
 }
 async function selectedUploads(context: FollowupContext, orderId: string, ids: string[], previous?: Followup): Promise<UploadRow[]> {
   const uploads: UploadRow[] = [];
@@ -316,7 +330,7 @@ async function createFollowup(context: FollowupContext, body: Record<string, unk
   if (prior) return { followup: wireMutationFollowup(context, await ticketRow(context, prior.followup_id), prior.result) };
   const existing = await context.database.prepare("SELECT * FROM almadina_followups WHERE id = ?").bind(id).first<TicketRow>();
   if (existing) {
-    const previous = wireFollowup(context, existing);
+    const previous = wireFollowup(context, await ticketRow(context, existing.id));
     if (creationFingerprint(previous, previous.attachments.map((item) => item.id)) !== fingerprint) return fail("معرّف الطلب مستخدم لمتابعة مختلفة.", 409);
     return { followup: previous };
   }
@@ -343,12 +357,12 @@ async function createFollowup(context: FollowupContext, body: Record<string, unk
   const results = await context.database.batch<D1Result>([
     await ownerLock(context.database, context.account.id),
     context.database.prepare(`INSERT INTO almadina_followups (id, order_id, creator_id, merchant_id, request_id, payload, created_at)
-      SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${guards.sql} AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?) ON CONFLICT (id) DO NOTHING`)
-      .bind(id, order.id, context.account.id, order.merchantId, token, payload, timestamp, ...guards.values, context.account.id, token),
-    context.database.prepare("INSERT INTO almadina_followup_references (followup_id, ticket_number) SELECT ?, ? WHERE EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?) ON CONFLICT (followup_id) DO NOTHING").bind(id, ticketNumber, id, payload),
+      SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${guards.sql} AND ${activeTicketSql} AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?) ON CONFLICT (id) DO NOTHING`)
+      .bind(id, order.id, context.account.id, order.merchantId, token, payload, timestamp, ...guards.values, id, context.account.id, token),
+    context.database.prepare(`INSERT INTO almadina_followup_references (followup_id, ticket_number) SELECT ?, ? WHERE EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?) AND ${activeTicketSql} ON CONFLICT (followup_id) DO NOTHING`).bind(id, ticketNumber, id, payload, id),
     mutationStatement(context, token, id, fingerprint, payload, "EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)", [id, payload]),
     ...uploads.map((upload) => context.database.prepare(`UPDATE almadina_followup_uploads SET followup_id = ? WHERE id = ? AND followup_id IS NULL
-      AND EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)`).bind(id, upload.id, id, payload)),
+      AND EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?) AND ${activeTicketSql}`).bind(id, upload.id, id, payload, id)),
   ]);
   const saved = await priorMutation(context, token, fingerprint);
   if (!saved) return fail("رفع المرفقات غير مكتمل أو لم تعد متاحة. أعد المحاولة.", 409);
@@ -382,7 +396,7 @@ async function editFollowup(context: FollowupContext, id: string, body: Record<s
     return { followup: wireMutationFollowup(context, await ticketRow(context, id), completed.result) };
   }
   await context.rateLimit("followup-edit", 30, 3600);
-  const { canEdit: _permission, trackingNumber: _tracking, ...persisted } = previous;
+  const { canEdit: _permission, canDelete: _deletePermission, trackingNumber: _tracking, ...persisted } = previous;
   const followup: Followup = { ...persisted, title, description, ...details, attachments: uploads.map(attachment), updatedAt: nextUpdatedAt(previous.updatedAt) };
   const payload = JSON.stringify(followup);
   const guards = uploadGuards(context, uploads, authorizedOrder(context, row.order_id).merchantId);
@@ -392,12 +406,12 @@ async function editFollowup(context: FollowupContext, id: string, body: Record<s
     // clients' retries even after ticket details or attachment selection changes.
     mutationStatement(context, row.request_id, id, creationFingerprint(previous, previous.attachments.map((item) => item.id)), row.payload,
       "EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)", [id, row.payload]),
-    context.database.prepare(`UPDATE almadina_followups SET payload = ? WHERE id = ? AND payload = ? AND ${guards.sql}
+    context.database.prepare(`UPDATE almadina_followups SET payload = ? WHERE id = ? AND payload = ? AND ${guards.sql} AND ${activeTicketSql}
       AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?)`)
-      .bind(payload, id, row.payload, ...guards.values, context.account.id, token),
+      .bind(payload, id, row.payload, ...guards.values, id, context.account.id, token),
     mutationStatement(context, token, id, fingerprint, payload, "EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)", [id, payload]),
     ...uploads.filter((upload) => !upload.followup_id).map((upload) => context.database.prepare(`UPDATE almadina_followup_uploads SET followup_id = ? WHERE id = ? AND followup_id IS NULL
-      AND EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)`).bind(id, upload.id, id, payload)),
+      AND EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?) AND ${activeTicketSql}`).bind(id, upload.id, id, payload, id)),
   ]);
   const saved = await priorMutation(context, token, fingerprint);
   if (!saved) return fail("تم تحديث المتابعة أو لم تكتمل المرفقات. أعد تحميلها قبل التعديل.", 409);
@@ -430,18 +444,19 @@ async function createComment(context: FollowupContext, id: string, body: Record<
   await context.database.batch([
     await ownerLock(context.database, context.account.id),
     context.database.prepare(`INSERT INTO almadina_followup_comments (id, followup_id, author_id, payload, created_at)
-      SELECT ?, ?, ?, ?, ? WHERE ${guards.sql} AND EXISTS (SELECT id FROM almadina_followups WHERE id = ?) AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?) ON CONFLICT (id) DO NOTHING`)
-      .bind(comment.id, id, context.account.id, payload, comment.createdAt, ...guards.values, id, context.account.id, token),
+      SELECT ?, ?, ?, ?, ? WHERE ${guards.sql} AND EXISTS (SELECT id FROM almadina_followups WHERE id = ?) AND ${activeTicketSql} AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?) ON CONFLICT (id) DO NOTHING`)
+      .bind(comment.id, id, context.account.id, payload, comment.createdAt, ...guards.values, id, id, context.account.id, token),
     mutationStatement(context, token, id, fingerprint, payload, "EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?)", [comment.id, payload]),
     ...uploads.flatMap((upload) => [
       context.database.prepare(`UPDATE almadina_followup_uploads SET followup_id = ? WHERE id = ? AND followup_id IS NULL
-        AND EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?)`).bind(id, upload.id, comment.id, payload),
+        AND EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?) AND ${activeTicketSql}`).bind(id, upload.id, comment.id, payload, id),
       context.database.prepare(`INSERT INTO almadina_followup_comment_media (upload_id, comment_id, followup_id)
-        SELECT ?, ?, ? WHERE EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?) ON CONFLICT (upload_id) DO NOTHING`).bind(upload.id, comment.id, id, comment.id, payload),
+        SELECT ?, ?, ? WHERE EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?) AND ${activeTicketSql} ON CONFLICT (upload_id) DO NOTHING`).bind(upload.id, comment.id, id, comment.id, payload, id),
     ]),
   ]);
   const saved = await priorMutation(context, token, fingerprint);
   if (!saved) return fail("رفع مرفقات الرسالة غير مكتمل أو لم تعد متاحة. أعد المحاولة.", 409);
+  await ticketRow(context, id);
   return { comment: JSON.parse(saved.result) as FollowupComment };
 }
 async function listComments(context: FollowupContext, id: string, url: URL): Promise<unknown> {
@@ -451,6 +466,7 @@ async function listComments(context: FollowupContext, id: string, url: URL): Pro
   let clause = "";
   if (cursor) { const [date, commentId] = decodeCursor(cursor); clause = " AND (created_at < ? OR (created_at = ? AND id < ?))"; values.push(date, date, commentId); }
   const rows = (await context.database.prepare(`SELECT * FROM almadina_followup_comments WHERE followup_id = ?${clause} ORDER BY created_at DESC, id DESC LIMIT 51`).bind(...values).all<CommentRow>()).results ?? [];
+  await ticketRow(context, id);
   const page = rows.slice(0, PAGE_SIZE);
   return { comments: [...page].reverse().map((item) => JSON.parse(item.payload) as FollowupComment), nextCursor: rows.length > PAGE_SIZE ? encodeCursor(page[page.length - 1]) : null };
 }
@@ -467,7 +483,7 @@ async function listFollowups(context: FollowupContext, url: URL): Promise<unknow
   const merchantId = url.searchParams.get("merchantId");
   if (merchantId !== null && !/^[a-zA-Z0-9_-]{1,160}$/.test(merchantId)) return fail("معرّف العميل غير صالح.");
   const values: unknown[] = [];
-  const clauses: string[] = [];
+  const clauses: string[] = ["NOT EXISTS (SELECT followup_id FROM almadina_followup_deleted WHERE followup_id = almadina_followups.id)"];
   const cursor = url.searchParams.get("cursor");
   if (cursor) { const [date, id] = decodeCursor(cursor); clauses.push("(created_at < ? OR (created_at = ? AND id < ?))"); values.push(date, date, id); }
   if (orderId !== null) authorizedOrder(context, orderId);
@@ -521,7 +537,8 @@ async function listCustomers(context: FollowupContext, url: URL): Promise<Follow
     // descriptions or customer account records to the directory consumer.
     const counts = (await context.database.prepare(`SELECT order_id, COUNT(*) AS followup_count,
       SUM(CASE WHEN json_extract(payload, '$.status') IN ('open', 'in_progress') THEN 1 ELSE 0 END) AS open_count
-      FROM almadina_followups WHERE order_id IN (SELECT value FROM json_each(?)) GROUP BY order_id`)
+      FROM almadina_followups WHERE order_id IN (SELECT value FROM json_each(?))
+      AND NOT EXISTS (SELECT followup_id FROM almadina_followup_deleted WHERE followup_id = almadina_followups.id) GROUP BY order_id`)
       .bind(JSON.stringify([...byOrder.keys()])).all<{ order_id: string; followup_count: number | string; open_count: number | string }>()).results ?? [];
     for (const count of counts) {
       const customer = byOrder.get(count.order_id);
@@ -545,6 +562,7 @@ async function downloadChunk(context: FollowupContext, id: string, url: URL): Pr
   await context.rateLimit("followup-download", 1200, 3600);
   const chunk = await context.database.prepare("SELECT data_base64, raw_size, chunk_index FROM almadina_followup_chunks WHERE upload_id = ? AND chunk_index = ?").bind(id, index).first<ChunkRow>();
   if (!chunk) return fail("تعذّر العثور على جزء المرفق.", 404);
+  await ticketRow(context, row.id);
   return { attachment: attachment(upload), index, chunkCount: upload.chunk_count, dataBase64: chunk.data_base64 };
 }
 async function updateStatus(context: FollowupContext, id: string, body: Record<string, unknown>): Promise<unknown> {
@@ -555,18 +573,42 @@ async function updateStatus(context: FollowupContext, id: string, body: Record<s
   const previous = wireFollowup(context, row);
   if (previous.status === body.status && previous.response === response) return { followup: previous };
   await context.rateLimit("followup-status", 60, 3600);
-  const { canEdit: _permission, trackingNumber: _tracking, ...persisted } = previous;
+  const { canEdit: _permission, canDelete: _deletePermission, trackingNumber: _tracking, ...persisted } = previous;
   const changed: Followup = { ...persisted, status: body.status as FollowupStatus, response, updatedAt: nextUpdatedAt(previous.updatedAt) };
   const payload = JSON.stringify(changed);
   const saved = await context.database.batch<D1Result>([
     await ownerLock(context.database, context.account.id),
-    context.database.prepare(`UPDATE almadina_followups SET payload = ? WHERE id = ? AND payload = ? AND ${activeAccountsSql}`)
-      .bind(payload, id, row.payload, context.account.id, authorizedOrder(context, row.order_id).merchantId),
+    context.database.prepare(`UPDATE almadina_followups SET payload = ? WHERE id = ? AND payload = ? AND ${activeAccountsSql} AND ${activeTicketSql}`)
+      .bind(payload, id, row.payload, context.account.id, authorizedOrder(context, row.order_id).merchantId, id),
   ]);
   if (!(saved[1].meta?.changes ?? 0)) return fail("تم تحديث المتابعة من جهاز آخر. أعد تحميلها.", 409);
-  const followup = wireFollowup(context, { ...row, payload });
+  const followup = wireFollowup(context, await ticketRow(context, id));
   await sendNotice(context, followup, true);
   return { followup };
+}
+async function deleteFollowup(context: FollowupContext, id: string, body: Record<string, unknown>): Promise<unknown> {
+  // Include the retained row only here, so an authorized lost-response retry can
+  // return its acknowledgement without exposing the deleted conversation.
+  const row = await ticketRow(context, id, true);
+  if (row.creator_id !== context.account.id && context.account.role !== "admin") return fail("حذف المتابعة متاح لمن أنشأها أو للمسؤول فقط.", 403);
+  if (body.orderId !== row.order_id) return fail("المتابعة لا تخص الطرد المحدد.", 400);
+  if (typeof body.expectedUpdatedAt !== "string" || body.expectedUpdatedAt.length > 40 || !Number.isFinite(Date.parse(body.expectedUpdatedAt))) return fail("وقت تحديث المتابعة غير صالح.");
+  const acknowledgement = { deleted: true, followupId: id, orderId: row.order_id };
+  const deleted = () => context.database.prepare("SELECT followup_id FROM almadina_followup_deleted WHERE followup_id = ?").bind(id).first();
+  if (await deleted()) return acknowledgement;
+  const previous = wireFollowup(context, row);
+  if (previous.updatedAt !== body.expectedUpdatedAt) return fail("تم تحديث المتابعة من جهاز آخر. أعد تحميلها قبل الحذف.", 409);
+  await context.rateLimit("followup-delete", 30, 3600);
+  await context.database.batch([
+    await ownerLock(context.database, context.account.id),
+    context.database.prepare(`INSERT INTO almadina_followup_deleted (followup_id, deleted_by, deleted_at)
+      SELECT ?, ?, ? WHERE EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND order_id = ? AND payload = ?)
+      AND ${activeAccountsSql} ON CONFLICT (followup_id) DO NOTHING`)
+      .bind(id, context.account.id, new Date().toISOString(), id, row.order_id, row.payload, context.account.id, authorizedOrder(context, row.order_id).merchantId),
+  ]);
+  if (await deleted()) return acknowledgement;
+  await ticketRow(context, id);
+  return fail("تم تحديث المتابعة من جهاز آخر. أعد تحميلها قبل الحذف.", 409);
 }
 /** Receives requests only after the existing authentication, origin, and 2 MiB checks. */
 export async function handleFollowupRequest(request: Request, context: FollowupContext): Promise<unknown> {
@@ -583,6 +625,8 @@ export async function handleFollowupRequest(request: Request, context: FollowupC
   if (media && request.method === "GET") return downloadChunk(context, media[1], url);
   const edit = /^([a-zA-Z0-9_-]{1,100})\/edit$/.exec(path);
   if (edit && request.method === "POST") return editFollowup(context, edit[1], objectBody(await request.json()));
+  const removal = /^([a-zA-Z0-9_-]{1,100})\/delete$/.exec(path);
+  if (removal && request.method === "POST") return deleteFollowup(context, removal[1], objectBody(await request.json()));
   const comments = /^([a-zA-Z0-9_-]{1,100})\/comments$/.exec(path);
   if (comments && request.method === "GET") { await context.rateLimit("followup-read", 180, 60); return listComments(context, comments[1], url); }
   if (comments && request.method === "POST") return createComment(context, comments[1], objectBody(await request.json()));

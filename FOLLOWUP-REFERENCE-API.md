@@ -31,3 +31,12 @@ Display existing staff response as legacy response (not duplicate on every refre
 - conversation `تواصل معنا`, media actions, send (explicit), readable thread, no fake actions
 - preserve keyboard, large text/small screen/fold adaptive layouts and accessible focus labels
 
+
+
+## Followup deletion — Android 2.9.23
+
+- `canDelete` is an optional boolean returned on a live followup. The server grants it to the original creator or an admin. Omission on an older server means false. Deletion is independent of edit permission and is allowed for resolved tickets too.
+- `POST followups/{id}/delete` with `{orderId, expectedUpdatedAt}` returns `{deleted:true, followupId:id, orderId}`. The endpoint authorizes the current account and checks the displayed ticket belongs to the supplied parcel. A changed live ticket returns 409 and must be reopened before confirmation. An authorized retry after successful deletion returns the same receipt.
+- Deletion removes only the selected followup from visible lists and customer counts and denies subsequent detail, conversation, and attachment access. The parcel and other followups are unchanged. Stored records are retained as a soft deletion; this endpoint does not hard-delete parcel or conversation data.
+- Android shows an explicit red «حذف المتابعة» button inside details, then identifies both followup and parcel in a confirmation dialog. It closes the detail only after validating the receipt and filters stale in-flight list responses so they cannot restore the deleted row.
+- Deploy the server update before installing Android 2.9.23; an older server has no delete permission/endpoint, so the button remains hidden.
