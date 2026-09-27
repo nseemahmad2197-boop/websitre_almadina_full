@@ -1,0 +1,1 @@
+PASS: real Chromium + simulated transport: StrictMode, RTL five viewports/keyboard height, default title/read-only parcel, conditional fields/Arabic price/evidence, synthetic microphone/draft previews/private downloads, immutable create/edit/comment retries, success dialog, rich details, creator guard/conflict/removal, older conversation paging, staff response, account isolation.

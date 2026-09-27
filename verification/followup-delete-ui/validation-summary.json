@@ -1,0 +1,32 @@
+{
+  "website": {
+    "typecheck": "passed",
+    "productionBuild": "passed",
+    "focusedDeletionChromium": "passed",
+    "existingFollowupsChromium": "passed",
+    "staffFollowupsChromium": "passed",
+    "transport": "simulated API; real Chromium rendering and interactions",
+    "screenshotsReviewed": [
+      390,
+      1280
+    ],
+    "responsiveAssertions": [
+      320,
+      390,
+      1280
+    ],
+    "productionAppFilesUnchangedAfterBuild": true,
+    "backend": "unchanged from previously verified deletion release; backend suite not rerun for UI-only update"
+  },
+  "ios": {
+    "release": "1.0.25",
+    "build": 26,
+    "staticChecks": "64/64 passed",
+    "pythonUpdaterToolingTests": "47 passed",
+    "swiftCoreTests": "95 supplied, not executed; 5 new deletion tests",
+    "nativeSwiftBuild": "not run: Swift/Xcode unavailable",
+    "deviceTests": "not run",
+    "ipa": "not built"
+  },
+  "deployment": "not performed"
+}

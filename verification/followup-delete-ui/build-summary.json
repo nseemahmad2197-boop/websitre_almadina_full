@@ -1,0 +1,23 @@
+[
+  {
+    "command": [
+      "npm",
+      "run",
+      "typecheck"
+    ],
+    "exitCode": 0,
+    "seconds": 4.88,
+    "log": "typecheck.txt"
+  },
+  {
+    "command": [
+      "timeout",
+      "180s",
+      "node_modules/.bin/vinext",
+      "build"
+    ],
+    "exitCode": 0,
+    "seconds": 6.53,
+    "log": "build.txt"
+  }
+]
