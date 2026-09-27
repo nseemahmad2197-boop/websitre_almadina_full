@@ -55,7 +55,16 @@ await page.route("**/api/almadina/**", async (route) => {
     if (failFollowups) return fulfill({ error: "تعذّر تحميل المتابعات. حاول مجددًا." }, 503);
     const key = `followups:${account}:${merchantId}`;
     if (delayed.has(key)) { const delay = delayed.get(key); delayed.delete(key); delay.accept(); await delay.released; }
-    return fulfill({ followups: wrongScope && merchantId === "customer-a" ? [tickets[2]] : tickets.filter((item) => (!merchantId || item.merchantId === merchantId) && (!orderId || item.orderId === orderId)), nextCursor: null });
+    return fulfill({ followups: (wrongScope && merchantId === "customer-a" ? [tickets[2]] : tickets.filter((item) => (!merchantId || item.merchantId === merchantId) && (!orderId || item.orderId === orderId))).map((item) => ({ ...item, canDelete: account === "staff-admin" || item.creatorId === account })), nextCursor: null });
+  }
+  if (path.endsWith("/delete") && request.method() === "POST") {
+    const id = path.split("/")[1], index = tickets.findIndex((item) => item.id === id), body = request.postDataJSON();
+    assert.ok(index >= 0); const item = tickets[index];
+    assert.equal(account, "staff-admin"); assert.equal(body.orderId, item.orderId); assert.equal(body.expectedUpdatedAt, item.updatedAt);
+    tickets.splice(index, 1);
+    const customer = customers.find((entry) => entry.id === item.merchantId);
+    customer.followupCount--; if (item.status !== "resolved") customer.openCount--;
+    return fulfill({ deleted: true, followupId: id, orderId: item.orderId });
   }
   if (path.endsWith("/comments") && request.method() === "GET") return fulfill({ comments: [], nextCursor: null });
   throw new Error(`Unexpected fixture API request: ${request.method()} ${url}`);
@@ -206,8 +215,26 @@ try {
   await page.getByRole("dialog", { name: "إنشاء متابعة", exact: true }).waitFor({ state: "detached" });
   assert.equal(await page.getByRole("dialog", { name: "إنشاء متابعة", exact: true }).count(), 0, "staff switch closes merchant composer");
   assert.equal(await page.getByRole("button", { name: "إنشاء متابعة", exact: true }).count(), 0);
+
+  // Deletion inside a selected customer preserves other tickets and returning
+  // to the directory refetches both follow-up and open counts from the server.
+  await page.getByTestId("open-directory").click(); await card(customers[0].name).click();
+  await page.getByRole("button", { name: /تأخر تسليم طلب الياسمين/ }).click();
+  await page.getByRole("button", { name: "حذف المتابعة", exact: true }).click();
+  const deletion = page.getByRole("dialog", { name: "حذف المتابعة؟", exact: true });
+  await deletion.getByText("ALX-20260101", { exact: true }).waitFor();
+  await deletion.getByRole("button", { name: "تأكيد حذف المتابعة", exact: true }).click();
+  await page.getByText("تم حذف المتابعة.", { exact: true }).waitFor();
+  assert.equal(await page.locator(".followup-row").count(), 1);
+  assert.match(await page.locator(".followup-row").innerText(), /تم تأكيد عنوان المستلم/);
+  const directoryReads = calls.filter((call) => call.path === "followups/customers").length;
+  await page.getByRole("button", { name: "العودة إلى أسماء المستخدمين", exact: true }).click();
+  await card(customers[0].name).waitFor();
+  assert.ok(calls.filter((call) => call.path === "followups/customers").length > directoryReads);
+  assert.deepEqual(await card(customers[0].name).locator("dd").allTextContents(), ["٢", "١", "٠"]);
+  assert.deepEqual(await card(customers[1].name).locator("dd").allTextContents(), ["١", "١", "١"]);
   assert.deepEqual(errors, []);
-  console.log("PASS: real staff components under StrictMode; first-entry admin/courier directory and scoped followups, counts, search/pagination, empty customer, parcel/detail navigation, all/assigned employee parcels, merchant denial, stale search/account/ticket responses, cross-customer rejection, failed initial request recovery, staff create hidden, merchant create retained and account-switch composer cleanup; 360px and 1280px RTL without overflow.");
+  console.log("PASS: real staff components under StrictMode; first-entry admin/courier directory and scoped followups, counts, search/pagination, empty customer, parcel/detail navigation, all/assigned employee parcels, merchant denial, stale search/account/ticket responses, cross-customer rejection, failed initial request recovery, staff create hidden, merchant create retained and account-switch composer cleanup; scoped admin deletion and refreshed customer/open counts preserve other tickets/parcels/customers; 360px and 1280px RTL without overflow.");
 } catch (error) {
   console.error("UI errors:", errors);
   console.error((await page.locator("body").innerText()).slice(0, 5000));
