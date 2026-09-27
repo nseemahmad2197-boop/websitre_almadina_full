@@ -1,0 +1,502 @@
+--- before/FOLLOWUP-REFERENCE-API.md
++++ after/FOLLOWUP-REFERENCE-API.md
+@@ -31,3 +31,12 @@
+ - conversation `تواصل معنا`, media actions, send (explicit), readable thread, no fake actions
+ - preserve keyboard, large text/small screen/fold adaptive layouts and accessible focus labels
+ 
++
++
++## Followup deletion — Android 2.9.23
++
++- `canDelete` is an optional boolean returned on a live followup. The server grants it to the original creator or an admin. Omission on an older server means false. Deletion is independent of edit permission and is allowed for resolved tickets too.
++- `POST followups/{id}/delete` with `{orderId, expectedUpdatedAt}` returns `{deleted:true, followupId:id, orderId}`. The endpoint authorizes the current account and checks the displayed ticket belongs to the supplied parcel. A changed live ticket returns 409 and must be reopened before confirmation. An authorized retry after successful deletion returns the same receipt.
++- Deletion removes only the selected followup from visible lists and customer counts and denies subsequent detail, conversation, and attachment access. The parcel and other followups are unchanged. Stored records are retained as a soft deletion; this endpoint does not hard-delete parcel or conversation data.
++- Android shows an explicit red «حذف المتابعة» button inside details, then identifies both followup and parcel in a confirmation dialog. It closes the detail only after validating the receipt and filters stale in-flight list responses so they cannot restore the deleted row.
++- Deploy the server update before installing Android 2.9.23; an older server has no delete permission/endpoint, so the button remains hidden.
+--- before/app/lib/followups.ts
++++ after/app/lib/followups.ts
+@@ -31,7 +31,7 @@
+   /** Present on current API responses; optional for older persisted/client records. */
+   merchantId?: string;
+   ticketNumber?: string; trackingNumber?: string; requestedPrice?: string | null;
+-  requestedAddress?: string | null; canEdit?: boolean;
++  requestedAddress?: string | null; canEdit?: boolean; canDelete?: boolean;
+   type: FollowupType; title: string; description: string; status: FollowupStatus;
+   response: string; createdAt: string; updatedAt: string; attachments: FollowupAttachment[];
+ };
+--- before/app/lib/server-followups.ts
++++ after/app/lib/server-followups.ts
+@@ -42,7 +42,9 @@
+   const order = authorizedOrder(context, row.order_id);
+   // Derive ownership from the current parcel, including for legacy ticket payloads.
+   const followup = JSON.parse(row.payload) as Followup;
+-  return { ...followup, merchantId: order.merchantId, trackingNumber: order.trackingNumber, canEdit: followup.creatorId === context.account.id && followup.status !== "resolved" };
++  return { ...followup, merchantId: order.merchantId, trackingNumber: order.trackingNumber,
++    canEdit: row.creator_id === context.account.id && followup.status !== "resolved",
++    canDelete: row.creator_id === context.account.id || context.account.role === "admin" };
+ }
+ function objectBody(value: unknown): Record<string, unknown> {
+   if (!value || typeof value !== "object" || Array.isArray(value)) return fail("بيانات الطلب غير صالحة.");
+@@ -64,6 +66,10 @@
+     )`),
+     database.prepare("CREATE INDEX IF NOT EXISTS almadina_followups_order_idx ON almadina_followups (order_id, created_at, id)"),
+     database.prepare("CREATE INDEX IF NOT EXISTS almadina_followups_page_idx ON almadina_followups (created_at, id)"),
++    // Additive tombstones retain the conversation and immutable retry ledger.
++    database.prepare(`CREATE TABLE IF NOT EXISTS almadina_followup_deleted (
++      followup_id TEXT PRIMARY KEY NOT NULL, deleted_by TEXT, deleted_at TEXT NOT NULL
++    )`),
+     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_followup_sequence (id TEXT PRIMARY KEY NOT NULL, next_value INTEGER NOT NULL)`),
+     database.prepare("INSERT INTO almadina_followup_sequence (id, next_value) VALUES ('main', 0) ON CONFLICT (id) DO NOTHING"),
+     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_followup_references (followup_id TEXT PRIMARY KEY NOT NULL, ticket_number TEXT NOT NULL UNIQUE)`),
+@@ -106,6 +112,8 @@
+     database.prepare("DELETE FROM almadina_followup_comments WHERE author_id = ? OR followup_id IN (SELECT id FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?)").bind(account.id, account.id, account.id),
+     database.prepare("DELETE FROM almadina_followup_mutations WHERE actor_id = ? OR followup_id IN (SELECT id FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?)").bind(account.id, account.id, account.id),
+     database.prepare("DELETE FROM almadina_followup_references WHERE followup_id IN (SELECT id FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?)").bind(account.id, account.id),
++    database.prepare("DELETE FROM almadina_followup_deleted WHERE followup_id IN (SELECT id FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?)").bind(account.id, account.id),
++    database.prepare("UPDATE almadina_followup_deleted SET deleted_by = NULL WHERE deleted_by = ?").bind(account.id),
+     database.prepare(`DELETE FROM almadina_followup_uploads WHERE ${condition}`).bind(...values),
+     database.prepare("DELETE FROM almadina_followups WHERE creator_id = ? OR merchant_id = ?").bind(account.id, account.id),
+     database.prepare("DELETE FROM almadina_followup_owners WHERE user_id = ?").bind(account.id),
+@@ -127,6 +135,7 @@
+   return database.prepare("UPDATE almadina_followup_lifecycle SET lock_version = lock_version + 1 WHERE id = 'main'");
+ }
+ const activeAccountsSql = "NOT EXISTS (SELECT user_id FROM almadina_followup_revoked WHERE user_id = ? OR user_id = ?)";
++const activeTicketSql = "NOT EXISTS (SELECT followup_id FROM almadina_followup_deleted WHERE followup_id = ?)";
+ async function requireActiveAccount(context: FollowupContext): Promise<void> {
+   if (await context.database.prepare("SELECT user_id FROM almadina_followup_revoked WHERE user_id = ?").bind(context.account.id).first()) return fail("هذا الحساب لم يعد متاحًا.", 401);
+ }
+@@ -162,6 +171,7 @@
+   const upload = await context.database.prepare("SELECT * FROM almadina_followup_uploads WHERE id = ? AND owner_id = ?").bind(id, context.account.id).first<UploadRow>();
+   if (!upload) return fail("المرفق غير موجود.", 404);
+   authorizedOrder(context, upload.order_id);
++  if (upload.followup_id) await ticketRow(context, upload.followup_id);
+   return upload;
+ }
+ async function beginUpload(context: FollowupContext, body: Record<string, unknown>): Promise<unknown> {
+@@ -177,6 +187,7 @@
+   const id = await stableId("fu-upload", context.account.id, token);
+   const prior = await context.database.prepare("SELECT * FROM almadina_followup_uploads WHERE id = ?").bind(id).first<UploadRow>();
+   if (prior) {
++    if (prior.followup_id) await ticketRow(context, prior.followup_id);
+     if (prior.order_id !== order.id || prior.name !== name || prior.mime_type !== mimeType || prior.size !== size || prior.chunk_count !== chunkCount) return fail("معرّف الرفع مستخدم لمرفق مختلف.", 409);
+     if (!prior.followup_id && prior.expires_at <= nowSeconds()) return fail("انتهت صلاحية رفع المرفق. أعد اختيار الملف.", 410);
+     return { uploadId: id, chunkSize: FOLLOWUP_LIMITS.chunkBytes };
+@@ -220,8 +231,9 @@
+   if (!stored || stored.data_base64 !== body.dataBase64) return fail("جزء المرفق محفوظ ببيانات مختلفة أو انتهت صلاحيته.", 409);
+   return { ok: true };
+ }
+-async function ticketRow(context: FollowupContext, id: string): Promise<TicketRow> {
+-  const row = await context.database.prepare("SELECT * FROM almadina_followups WHERE id = ?").bind(id).first<TicketRow>();
++async function ticketRow(context: FollowupContext, id: string, includeDeleted = false): Promise<TicketRow> {
++  const row = await context.database.prepare(`SELECT * FROM almadina_followups WHERE id = ?${includeDeleted ? "" : ` AND ${activeTicketSql}`}`)
++    .bind(...(includeDeleted ? [id] : [id, id])).first<TicketRow>();
+   if (!row) return fail("المتابعة غير موجودة.", 404);
+   authorizedOrder(context, row.order_id);
+   return row;
+@@ -254,17 +266,19 @@
+ }
+ async function priorMutation(context: FollowupContext, token: string, fingerprint: string): Promise<MutationRow | null> {
+   const prior = await context.database.prepare("SELECT * FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?").bind(context.account.id, token).first<MutationRow>();
++  // A receipt never grants access to a deleted ticket or its old private content.
++  if (prior) await ticketRow(context, prior.followup_id);
+   if (prior && prior.fingerprint !== fingerprint) return fail("معرّف الطلب مستخدم لعملية مختلفة.", 409);
+   return prior;
+ }
+ function wireMutationFollowup(context: FollowupContext, row: TicketRow, result: string): Followup {
+   const current = wireFollowup(context, row);
+-  return { ...wireFollowup(context, { ...row, payload: result }), canEdit: current.canEdit };
++  return { ...wireFollowup(context, { ...row, payload: result }), canEdit: current.canEdit, canDelete: current.canDelete };
+ }
+ function mutationStatement(context: FollowupContext, token: string, id: string, fingerprint: string, result: string, condition: string, values: unknown[]): D1PreparedStatement {
+   return context.database.prepare(`INSERT INTO almadina_followup_mutations (actor_id, request_id, followup_id, fingerprint, result)
+-    SELECT ?, ?, ?, ?, ? WHERE ${condition} ON CONFLICT (actor_id, request_id) DO NOTHING`)
+-    .bind(context.account.id, token, id, fingerprint, result, ...values);
++    SELECT ?, ?, ?, ?, ? WHERE ${condition} AND ${activeTicketSql} ON CONFLICT (actor_id, request_id) DO NOTHING`)
++    .bind(context.account.id, token, id, fingerprint, result, ...values, id);
+ }
+ async function selectedUploads(context: FollowupContext, orderId: string, ids: string[], previous?: Followup): Promise<UploadRow[]> {
+   const uploads: UploadRow[] = [];
+@@ -316,7 +330,7 @@
+   if (prior) return { followup: wireMutationFollowup(context, await ticketRow(context, prior.followup_id), prior.result) };
+   const existing = await context.database.prepare("SELECT * FROM almadina_followups WHERE id = ?").bind(id).first<TicketRow>();
+   if (existing) {
+-    const previous = wireFollowup(context, existing);
++    const previous = wireFollowup(context, await ticketRow(context, existing.id));
+     if (creationFingerprint(previous, previous.attachments.map((item) => item.id)) !== fingerprint) return fail("معرّف الطلب مستخدم لمتابعة مختلفة.", 409);
+     return { followup: previous };
+   }
+@@ -343,12 +357,12 @@
+   const results = await context.database.batch<D1Result>([
+     await ownerLock(context.database, context.account.id),
+     context.database.prepare(`INSERT INTO almadina_followups (id, order_id, creator_id, merchant_id, request_id, payload, created_at)
+-      SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${guards.sql} AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?) ON CONFLICT (id) DO NOTHING`)
+-      .bind(id, order.id, context.account.id, order.merchantId, token, payload, timestamp, ...guards.values, context.account.id, token),
+-    context.database.prepare("INSERT INTO almadina_followup_references (followup_id, ticket_number) SELECT ?, ? WHERE EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?) ON CONFLICT (followup_id) DO NOTHING").bind(id, ticketNumber, id, payload),
++      SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${guards.sql} AND ${activeTicketSql} AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?) ON CONFLICT (id) DO NOTHING`)
++      .bind(id, order.id, context.account.id, order.merchantId, token, payload, timestamp, ...guards.values, id, context.account.id, token),
++    context.database.prepare(`INSERT INTO almadina_followup_references (followup_id, ticket_number) SELECT ?, ? WHERE EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?) AND ${activeTicketSql} ON CONFLICT (followup_id) DO NOTHING`).bind(id, ticketNumber, id, payload, id),
+     mutationStatement(context, token, id, fingerprint, payload, "EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)", [id, payload]),
+     ...uploads.map((upload) => context.database.prepare(`UPDATE almadina_followup_uploads SET followup_id = ? WHERE id = ? AND followup_id IS NULL
+-      AND EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)`).bind(id, upload.id, id, payload)),
++      AND EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?) AND ${activeTicketSql}`).bind(id, upload.id, id, payload, id)),
+   ]);
+   const saved = await priorMutation(context, token, fingerprint);
+   if (!saved) return fail("رفع المرفقات غير مكتمل أو لم تعد متاحة. أعد المحاولة.", 409);
+@@ -382,7 +396,7 @@
+     return { followup: wireMutationFollowup(context, await ticketRow(context, id), completed.result) };
+   }
+   await context.rateLimit("followup-edit", 30, 3600);
+-  const { canEdit: _permission, trackingNumber: _tracking, ...persisted } = previous;
++  const { canEdit: _permission, canDelete: _deletePermission, trackingNumber: _tracking, ...persisted } = previous;
+   const followup: Followup = { ...persisted, title, description, ...details, attachments: uploads.map(attachment), updatedAt: nextUpdatedAt(previous.updatedAt) };
+   const payload = JSON.stringify(followup);
+   const guards = uploadGuards(context, uploads, authorizedOrder(context, row.order_id).merchantId);
+@@ -392,12 +406,12 @@
+     // clients' retries even after ticket details or attachment selection changes.
+     mutationStatement(context, row.request_id, id, creationFingerprint(previous, previous.attachments.map((item) => item.id)), row.payload,
+       "EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)", [id, row.payload]),
+-    context.database.prepare(`UPDATE almadina_followups SET payload = ? WHERE id = ? AND payload = ? AND ${guards.sql}
++    context.database.prepare(`UPDATE almadina_followups SET payload = ? WHERE id = ? AND payload = ? AND ${guards.sql} AND ${activeTicketSql}
+       AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?)`)
+-      .bind(payload, id, row.payload, ...guards.values, context.account.id, token),
++      .bind(payload, id, row.payload, ...guards.values, id, context.account.id, token),
+     mutationStatement(context, token, id, fingerprint, payload, "EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)", [id, payload]),
+     ...uploads.filter((upload) => !upload.followup_id).map((upload) => context.database.prepare(`UPDATE almadina_followup_uploads SET followup_id = ? WHERE id = ? AND followup_id IS NULL
+-      AND EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?)`).bind(id, upload.id, id, payload)),
++      AND EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND payload = ?) AND ${activeTicketSql}`).bind(id, upload.id, id, payload, id)),
+   ]);
+   const saved = await priorMutation(context, token, fingerprint);
+   if (!saved) return fail("تم تحديث المتابعة أو لم تكتمل المرفقات. أعد تحميلها قبل التعديل.", 409);
+@@ -430,18 +444,19 @@
+   await context.database.batch([
+     await ownerLock(context.database, context.account.id),
+     context.database.prepare(`INSERT INTO almadina_followup_comments (id, followup_id, author_id, payload, created_at)
+-      SELECT ?, ?, ?, ?, ? WHERE ${guards.sql} AND EXISTS (SELECT id FROM almadina_followups WHERE id = ?) AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?) ON CONFLICT (id) DO NOTHING`)
+-      .bind(comment.id, id, context.account.id, payload, comment.createdAt, ...guards.values, id, context.account.id, token),
++      SELECT ?, ?, ?, ?, ? WHERE ${guards.sql} AND EXISTS (SELECT id FROM almadina_followups WHERE id = ?) AND ${activeTicketSql} AND NOT EXISTS (SELECT request_id FROM almadina_followup_mutations WHERE actor_id = ? AND request_id = ?) ON CONFLICT (id) DO NOTHING`)
++      .bind(comment.id, id, context.account.id, payload, comment.createdAt, ...guards.values, id, id, context.account.id, token),
+     mutationStatement(context, token, id, fingerprint, payload, "EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?)", [comment.id, payload]),
+     ...uploads.flatMap((upload) => [
+       context.database.prepare(`UPDATE almadina_followup_uploads SET followup_id = ? WHERE id = ? AND followup_id IS NULL
+-        AND EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?)`).bind(id, upload.id, comment.id, payload),
++        AND EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?) AND ${activeTicketSql}`).bind(id, upload.id, comment.id, payload, id),
+       context.database.prepare(`INSERT INTO almadina_followup_comment_media (upload_id, comment_id, followup_id)
+-        SELECT ?, ?, ? WHERE EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?) ON CONFLICT (upload_id) DO NOTHING`).bind(upload.id, comment.id, id, comment.id, payload),
++        SELECT ?, ?, ? WHERE EXISTS (SELECT id FROM almadina_followup_comments WHERE id = ? AND payload = ?) AND ${activeTicketSql} ON CONFLICT (upload_id) DO NOTHING`).bind(upload.id, comment.id, id, comment.id, payload, id),
+     ]),
+   ]);
+   const saved = await priorMutation(context, token, fingerprint);
+   if (!saved) return fail("رفع مرفقات الرسالة غير مكتمل أو لم تعد متاحة. أعد المحاولة.", 409);
++  await ticketRow(context, id);
+   return { comment: JSON.parse(saved.result) as FollowupComment };
+ }
+ async function listComments(context: FollowupContext, id: string, url: URL): Promise<unknown> {
+@@ -451,6 +466,7 @@
+   let clause = "";
+   if (cursor) { const [date, commentId] = decodeCursor(cursor); clause = " AND (created_at < ? OR (created_at = ? AND id < ?))"; values.push(date, date, commentId); }
+   const rows = (await context.database.prepare(`SELECT * FROM almadina_followup_comments WHERE followup_id = ?${clause} ORDER BY created_at DESC, id DESC LIMIT 51`).bind(...values).all<CommentRow>()).results ?? [];
++  await ticketRow(context, id);
+   const page = rows.slice(0, PAGE_SIZE);
+   return { comments: [...page].reverse().map((item) => JSON.parse(item.payload) as FollowupComment), nextCursor: rows.length > PAGE_SIZE ? encodeCursor(page[page.length - 1]) : null };
+ }
+@@ -467,7 +483,7 @@
+   const merchantId = url.searchParams.get("merchantId");
+   if (merchantId !== null && !/^[a-zA-Z0-9_-]{1,160}$/.test(merchantId)) return fail("معرّف العميل غير صالح.");
+   const values: unknown[] = [];
+-  const clauses: string[] = [];
++  const clauses: string[] = ["NOT EXISTS (SELECT followup_id FROM almadina_followup_deleted WHERE followup_id = almadina_followups.id)"];
+   const cursor = url.searchParams.get("cursor");
+   if (cursor) { const [date, id] = decodeCursor(cursor); clauses.push("(created_at < ? OR (created_at = ? AND id < ?))"); values.push(date, date, id); }
+   if (orderId !== null) authorizedOrder(context, orderId);
+@@ -521,7 +537,8 @@
+     // descriptions or customer account records to the directory consumer.
+     const counts = (await context.database.prepare(`SELECT order_id, COUNT(*) AS followup_count,
+       SUM(CASE WHEN json_extract(payload, '$.status') IN ('open', 'in_progress') THEN 1 ELSE 0 END) AS open_count
+-      FROM almadina_followups WHERE order_id IN (SELECT value FROM json_each(?)) GROUP BY order_id`)
++      FROM almadina_followups WHERE order_id IN (SELECT value FROM json_each(?))
++      AND NOT EXISTS (SELECT followup_id FROM almadina_followup_deleted WHERE followup_id = almadina_followups.id) GROUP BY order_id`)
+       .bind(JSON.stringify([...byOrder.keys()])).all<{ order_id: string; followup_count: number | string; open_count: number | string }>()).results ?? [];
+     for (const count of counts) {
+       const customer = byOrder.get(count.order_id);
+@@ -545,6 +562,7 @@
+   await context.rateLimit("followup-download", 1200, 3600);
+   const chunk = await context.database.prepare("SELECT data_base64, raw_size, chunk_index FROM almadina_followup_chunks WHERE upload_id = ? AND chunk_index = ?").bind(id, index).first<ChunkRow>();
+   if (!chunk) return fail("تعذّر العثور على جزء المرفق.", 404);
++  await ticketRow(context, row.id);
+   return { attachment: attachment(upload), index, chunkCount: upload.chunk_count, dataBase64: chunk.data_base64 };
+ }
+ async function updateStatus(context: FollowupContext, id: string, body: Record<string, unknown>): Promise<unknown> {
+@@ -555,18 +573,42 @@
+   const previous = wireFollowup(context, row);
+   if (previous.status === body.status && previous.response === response) return { followup: previous };
+   await context.rateLimit("followup-status", 60, 3600);
+-  const { canEdit: _permission, trackingNumber: _tracking, ...persisted } = previous;
++  const { canEdit: _permission, canDelete: _deletePermission, trackingNumber: _tracking, ...persisted } = previous;
+   const changed: Followup = { ...persisted, status: body.status as FollowupStatus, response, updatedAt: nextUpdatedAt(previous.updatedAt) };
+   const payload = JSON.stringify(changed);
+   const saved = await context.database.batch<D1Result>([
+     await ownerLock(context.database, context.account.id),
+-    context.database.prepare(`UPDATE almadina_followups SET payload = ? WHERE id = ? AND payload = ? AND ${activeAccountsSql}`)
+-      .bind(payload, id, row.payload, context.account.id, authorizedOrder(context, row.order_id).merchantId),
++    context.database.prepare(`UPDATE almadina_followups SET payload = ? WHERE id = ? AND payload = ? AND ${activeAccountsSql} AND ${activeTicketSql}`)
++      .bind(payload, id, row.payload, context.account.id, authorizedOrder(context, row.order_id).merchantId, id),
+   ]);
+   if (!(saved[1].meta?.changes ?? 0)) return fail("تم تحديث المتابعة من جهاز آخر. أعد تحميلها.", 409);
+-  const followup = wireFollowup(context, { ...row, payload });
++  const followup = wireFollowup(context, await ticketRow(context, id));
+   await sendNotice(context, followup, true);
+   return { followup };
++}
++async function deleteFollowup(context: FollowupContext, id: string, body: Record<string, unknown>): Promise<unknown> {
++  // Include the retained row only here, so an authorized lost-response retry can
++  // return its acknowledgement without exposing the deleted conversation.
++  const row = await ticketRow(context, id, true);
++  if (row.creator_id !== context.account.id && context.account.role !== "admin") return fail("حذف المتابعة متاح لمن أنشأها أو للمسؤول فقط.", 403);
++  if (body.orderId !== row.order_id) return fail("المتابعة لا تخص الطرد المحدد.", 400);
++  if (typeof body.expectedUpdatedAt !== "string" || body.expectedUpdatedAt.length > 40 || !Number.isFinite(Date.parse(body.expectedUpdatedAt))) return fail("وقت تحديث المتابعة غير صالح.");
++  const acknowledgement = { deleted: true, followupId: id, orderId: row.order_id };
++  const deleted = () => context.database.prepare("SELECT followup_id FROM almadina_followup_deleted WHERE followup_id = ?").bind(id).first();
++  if (await deleted()) return acknowledgement;
++  const previous = wireFollowup(context, row);
++  if (previous.updatedAt !== body.expectedUpdatedAt) return fail("تم تحديث المتابعة من جهاز آخر. أعد تحميلها قبل الحذف.", 409);
++  await context.rateLimit("followup-delete", 30, 3600);
++  await context.database.batch([
++    await ownerLock(context.database, context.account.id),
++    context.database.prepare(`INSERT INTO almadina_followup_deleted (followup_id, deleted_by, deleted_at)
++      SELECT ?, ?, ? WHERE EXISTS (SELECT id FROM almadina_followups WHERE id = ? AND order_id = ? AND payload = ?)
++      AND ${activeAccountsSql} ON CONFLICT (followup_id) DO NOTHING`)
++      .bind(id, context.account.id, new Date().toISOString(), id, row.order_id, row.payload, context.account.id, authorizedOrder(context, row.order_id).merchantId),
++  ]);
++  if (await deleted()) return acknowledgement;
++  await ticketRow(context, id);
++  return fail("تم تحديث المتابعة من جهاز آخر. أعد تحميلها قبل الحذف.", 409);
+ }
+ /** Receives requests only after the existing authentication, origin, and 2 MiB checks. */
+ export async function handleFollowupRequest(request: Request, context: FollowupContext): Promise<unknown> {
+@@ -583,6 +625,8 @@
+   if (media && request.method === "GET") return downloadChunk(context, media[1], url);
+   const edit = /^([a-zA-Z0-9_-]{1,100})\/edit$/.exec(path);
+   if (edit && request.method === "POST") return editFollowup(context, edit[1], objectBody(await request.json()));
++  const removal = /^([a-zA-Z0-9_-]{1,100})\/delete$/.exec(path);
++  if (removal && request.method === "POST") return deleteFollowup(context, removal[1], objectBody(await request.json()));
+   const comments = /^([a-zA-Z0-9_-]{1,100})\/comments$/.exec(path);
+   if (comments && request.method === "GET") { await context.rateLimit("followup-read", 180, 60); return listComments(context, comments[1], url); }
+   if (comments && request.method === "POST") return createComment(context, comments[1], objectBody(await request.json()));
+--- before/tests/followups-postgres.integration.mjs
++++ after/tests/followups-postgres.integration.mjs
+@@ -199,6 +199,61 @@
+       }
+     });
+ 
++    await t.test("PostgreSQL soft delete keeps private records, filters counts and denies content and receipt replays", async () => {
++      const call = (path, body, account = merchant, rateLimit = async () => {}) => handleFollowupRequest(new Request(`${base}${path}`, {
++        ...(body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
++      }), { database, state, account, rateLimit });
++      const originalOrders = structuredClone(state.orders);
++      const body = { requestId: crypto.randomUUID(), orderId: "parcel-first", type: "delivery-delay", title: "متابعة للحذف", description: "بيانات خاصة محفوظة", attachmentIds: [] };
++      const ticket = (await call("", body)).followup;
++      const media = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
++      const upload = await call("/uploads", { requestId: crypto.randomUUID(), orderId: ticket.orderId, name: "private.png", mimeType: "image/png", size: media.length, chunkCount: 1 });
++      await call(`/uploads/${upload.uploadId}/chunks`, { index: 0, dataBase64: media.toString("base64") });
++      const comment = { requestId: crypto.randomUUID(), text: "محادثة محفوظة", attachmentIds: [upload.uploadId] };
++      await call(`/${ticket.id}/comments`, comment);
++      const changed = (await call(`/${ticket.id}/status`, { status: "resolved" }, admin)).followup;
++      const deletion = { orderId: ticket.orderId, expectedUpdatedAt: changed.updatedAt };
++      await assert.rejects(call(`/${ticket.id}/delete`, deletion, courier), (error) => error.status === 403);
++      await assert.rejects(call(`/${ticket.id}/delete`, deletion, other), (error) => error.status === 404);
++      await assert.rejects(call(`/${ticket.id}/delete`, { ...deletion, expectedUpdatedAt: ticket.updatedAt }), (error) => error.status === 409);
++      const countsBefore = (await read("/customers", admin)).payload.customers.find((item) => item.id === merchant.id);
++      const replies = await Promise.all([call(`/${ticket.id}/delete`, deletion), call(`/${ticket.id}/delete`, deletion, admin)]);
++      assert.deepEqual(replies[0], { deleted: true, followupId: ticket.id, orderId: ticket.orderId });
++      assert.deepEqual(replies[0], replies[1]);
++      assert.deepEqual(await call(`/${ticket.id}/delete`, deletion), replies[0]);
++      for (const [path, replay] of [[`/${ticket.id}`], [`/${ticket.id}/comments`], [`/${ticket.id}/comments`, comment], ["", body], [`/attachments/${upload.uploadId}`], [`/${ticket.id}/status`, { status: "open" }]]) {
++        await assert.rejects(call(path, replay), (error) => error.status === 404);
++      }
++      assert.equal((await read("?orderId=parcel-first", admin)).payload.followups.some((item) => item.id === ticket.id), false);
++      const countsAfter = (await read("/customers", admin)).payload.customers.find((item) => item.id === merchant.id);
++      assert.equal(countsAfter.followupCount, countsBefore.followupCount - 1);
++      assert.equal(countsAfter.openCount, countsBefore.openCount);
++      for (const [table, column, value] of [["almadina_followups", "id", ticket.id], ["almadina_followup_comments", "followup_id", ticket.id], ["almadina_followup_chunks", "upload_id", upload.uploadId], ["almadina_followup_deleted", "followup_id", ticket.id]]) {
++        assert.equal(Number((await database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`).bind(value).first()).count), 1);
++      }
++      assert.deepEqual(state.orders, originalOrders);
++    });
++
++    await t.test("PostgreSQL lifecycle guards serialize deletion against pending edit, comment and status finalization", async () => {
++      const call = (path, body, account = merchant, rateLimit = async () => {}) => handleFollowupRequest(new Request(`${base}${path}`, {
++        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
++      }), { database, state, account, rateLimit });
++      for (const operation of ["edit", "comment", "status"]) {
++        const ticket = await create("parcel-first");
++        const before = (await database.prepare("SELECT payload FROM almadina_followups WHERE id = ?").bind(ticket.id).first()).payload;
++        const token = crypto.randomUUID();
++        const body = operation === "edit" ? { requestId: token, expectedUpdatedAt: ticket.updatedAt, title: "cannot persist", description: ticket.description, attachmentIds: [] }
++          : operation === "comment" ? { requestId: token, text: "cannot persist", attachmentIds: [] }
++          : { status: "resolved", response: "cannot persist" };
++        await assert.rejects(call(`/${ticket.id}/${operation === "comment" ? "comments" : operation}`, body, operation === "status" ? admin : merchant, async (namespace) => {
++          if (namespace === `followup-${operation}`) await call(`/${ticket.id}/delete`, { orderId: ticket.orderId, expectedUpdatedAt: ticket.updatedAt });
++        }), (error) => error.status === 409);
++        assert.equal((await database.prepare("SELECT payload FROM almadina_followups WHERE id = ?").bind(ticket.id).first()).payload, before);
++        assert.equal(Number((await database.prepare("SELECT COUNT(*) AS count FROM almadina_followup_comments WHERE followup_id = ?").bind(ticket.id).first()).count), 0);
++        assert.equal(Number((await database.prepare("SELECT COUNT(*) AS count FROM almadina_followup_mutations WHERE request_id = ?").bind(token).first()).count), 0);
++      }
++    });
++
+     await t.test("fresh reads track current parcel ownership and exclude deleted parcels", async () => {
+       state.orders[0].deleted = true;
+       state.orders[1].merchantId = other.id;
+--- before/tests/followups.test.mjs
++++ after/tests/followups.test.mjs
+@@ -524,3 +524,151 @@
+     assert.deepEqual(await delayed, winner, operation);
+   }
+ });
++
++const deletion = (ticket, extra = {}) => ({ orderId: ticket.orderId, expectedUpdatedAt: ticket.updatedAt, ...extra });
++
++test("delete permission belongs to the creator or admin in every status and is scoped to the current parcel", async () => {
++  const f = await fixture();
++  for (const status of ["open", "in_progress", "resolved"]) {
++    for (const creator of [merchant, courier]) {
++      let ticket = (await f.call("", create({ type: "delivery-delay" }), creator)).followup;
++      if (status !== "open") ticket = (await f.call(`/${ticket.id}/status`, { status }, admin)).followup;
++      assert.equal((await f.call(`/${ticket.id}`, undefined, creator)).followup.canDelete, true);
++      assert.equal((await f.call(`/${ticket.id}`, undefined, admin)).followup.canDelete, true);
++      const observer = creator.id === merchant.id ? courier : merchant;
++      assert.equal((await f.call(`/${ticket.id}`, undefined, observer)).followup.canDelete, false);
++      await rejectsStatus(f.call(`/${ticket.id}/delete`, deletion(ticket), observer), 403);
++      await rejectsStatus(f.call(`/${ticket.id}/delete`, deletion(ticket), other), 404);
++      await rejectsStatus(f.call(`/${ticket.id}/delete`, deletion(ticket, { orderId: "parcel-2" }), admin), 400);
++      await rejectsStatus(f.call(`/${ticket.id}/delete`, undefined, creator), 404);
++      const expected = { deleted: true, followupId: ticket.id, orderId: ticket.orderId };
++      assert.deepEqual(await f.call(`/${ticket.id}/delete`, deletion(ticket), creator), expected);
++      assert.deepEqual(await f.call(`/${ticket.id}/delete`, deletion(ticket), admin), expected);
++      await rejectsStatus(f.call(`/${ticket.id}/delete`, deletion(ticket), observer), 403);
++    }
++  }
++  const staffTicket = (await f.call("", create({ type: "delivery-delay" }), courier)).followup;
++  assert.equal((await f.call(`/${staffTicket.id}/delete`, deletion(staffTicket), admin)).deleted, true);
++  f.context.state.orders[0].merchantId = other.id;
++  await rejectsStatus(f.call(`/${staffTicket.id}/delete`, deletion(staffTicket), merchant), 404);
++  f.context.state.orders[0].deleted = true;
++  await rejectsStatus(f.call(`/${staffTicket.id}/delete`, deletion(staffTicket), admin), 404);
++});
++
++test("soft deletion hides only the selected ticket from lists, counts, direct content, media and all mutation replays", async () => {
++  const f = await fixture(); const originalOrders = structuredClone(f.context.state.orders);
++  const media = await upload(f); await media.finish();
++  const body = create({ type: "delivery-delay", attachmentIds: [media.uploadId] });
++  const initial = (await f.call("", body)).followup;
++  const change = edit(initial, { title: "عنوان محدث" });
++  const ticket = (await f.call(`/${initial.id}/edit`, change)).followup;
++  const commentMedia = await upload(f); await commentMedia.finish();
++  const commentBody = { requestId: crypto.randomUUID(), text: "محادثة خاصة", attachmentIds: [commentMedia.uploadId] };
++  await f.call(`/${ticket.id}/comments`, commentBody);
++  const sibling = (await f.call("", create({ type: "delivery-delay" }))).followup;
++  const foreign = (await f.call("", create({ orderId: "parcel-2", type: "delivery-delay" }), other)).followup;
++  const preserved = ["almadina_followups", "almadina_followup_comments", "almadina_followup_chunks", "almadina_followup_uploads", "almadina_followup_mutations", "almadina_followup_references", "almadina_followup_comment_media"];
++  const before = preserved.map((table) => f.database.connection.prepare(`SELECT * FROM ${table}`).all());
++  await f.call(`/${ticket.id}/delete`, deletion(ticket));
++  assert.deepEqual(preserved.map((table) => f.database.connection.prepare(`SELECT * FROM ${table}`).all()), before);
++  assert.deepEqual(f.context.state.orders, originalOrders);
++  for (const account of [merchant, courier, admin]) {
++    assert.deepEqual((await f.call("?orderId=parcel-1", undefined, account)).followups.map((item) => item.id), [sibling.id]);
++    for (const [path, payload] of [
++      [`/${ticket.id}`], [`/${ticket.id}/comments`], [`/${ticket.id}/comments`, commentBody],
++      [`/${ticket.id}/comments`, { ...commentBody, requestId: crypto.randomUUID() }],
++      [`/${ticket.id}/edit`, change], [`/${ticket.id}/status`, { status: "resolved" }],
++      [`/attachments/${media.uploadId}`], [`/attachments/${commentMedia.uploadId}`],
++    ]) await rejectsStatus(f.call(path, payload, account), 404);
++  }
++  for (const action of [
++    () => f.call("", body), () => f.call("/uploads", media.payload),
++    () => f.call(`/uploads/${media.uploadId}/chunks`, { index: 0, dataBase64: media.bytes.toString("base64") }),
++    () => f.call("", create({ type: "delivery-delay", attachmentIds: [media.uploadId] })),
++  ]) await rejectsStatus(action(), 404);
++  const customers = (await f.call("/customers", undefined, admin)).customers;
++  assert.equal(customers.find((item) => item.id === merchant.id).followupCount, 1);
++  assert.equal(customers.find((item) => item.id === merchant.id).openCount, 1);
++  assert.equal((await f.call(`/${foreign.id}`, undefined, other)).followup.id, foreign.id);
++  // A pre-upgrade ticket without mutation receipts cannot be resurrected either.
++  f.database.connection.prepare("DELETE FROM almadina_followup_mutations WHERE followup_id = ?").run(ticket.id);
++  await rejectsStatus(f.call("", body), 404);
++  assert.equal((await f.call("", create({ type: "delivery-delay" }))).followup.orderId, ticket.orderId);
++});
++
++test("delete detects stale details, validates scope and timestamp, and acknowledges simultaneous retries once", async () => {
++  const f = await fixture(); const initial = (await f.call("", create({ type: "delivery-delay" }))).followup;
++  const ticket = (await f.call(`/${initial.id}/status`, { status: "in_progress" }, admin)).followup;
++  await rejectsStatus(f.call(`/${ticket.id}/delete`, deletion(initial)), 409);
++  for (const extra of [{ expectedUpdatedAt: "" }, { expectedUpdatedAt: "invalid" }, { expectedUpdatedAt: null }, { orderId: null }]) {
++    await rejectsStatus(f.call(`/${ticket.id}/delete`, deletion(ticket, extra)), 400);
++  }
++  assert.equal((await f.call(`/${ticket.id}`)).followup.updatedAt, ticket.updatedAt);
++  const results = await Promise.all(Array.from({ length: 3 }, () => f.call(`/${ticket.id}/delete`, deletion(ticket))));
++  assert.deepEqual(results[0], results[1]); assert.deepEqual(results[1], results[2]);
++  assert.deepEqual(await f.call(`/${ticket.id}/delete`, deletion(initial)), results[0]);
++  assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followup_deleted").get().count, 1);
++});
++
++test("lifecycle transaction guards prevent in-flight edit, comment and status writes after deletion", async () => {
++  for (const operation of ["edit", "comment", "status"]) {
++    const f = await fixture(); const ticket = (await f.call("", create({ type: "delivery-delay" }))).followup;
++    const pending = await upload(f); await pending.finish();
++    const original = f.database.connection.prepare("SELECT payload FROM almadina_followups WHERE id = ?").get(ticket.id).payload;
++    const token = crypto.randomUUID();
++    f.context.rateLimit = async (namespace) => {
++      if (namespace === `followup-${operation}`) await f.call(`/${ticket.id}/delete`, deletion(ticket));
++    };
++    const body = operation === "edit" ? edit(ticket, { requestId: token, attachmentIds: [pending.uploadId] })
++      : operation === "comment" ? { requestId: token, text: "cannot persist", attachmentIds: [pending.uploadId] }
++      : { status: "resolved", response: "cannot persist" };
++    const path = `/${ticket.id}/${operation === "comment" ? "comments" : operation}`;
++    await rejectsStatus(f.call(path, body, operation === "status" ? admin : merchant), 409);
++    assert.equal(f.database.connection.prepare("SELECT payload FROM almadina_followups WHERE id = ?").get(ticket.id).payload, original);
++    assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followup_comments WHERE followup_id = ?").get(ticket.id).count, 0);
++    assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followup_mutations WHERE request_id = ?").get(token).count, 0);
++    assert.equal(f.database.connection.prepare("SELECT followup_id FROM almadina_followup_uploads WHERE id = ?").get(pending.uploadId).followup_id, null);
++  }
++});
++
++test("an update committed during delete preflight wins and private download stops if deletion commits during it", async () => {
++  const f = await fixture(); const media = await upload(f); await media.finish();
++  const ticket = (await f.call("", create({ type: "delivery-delay", attachmentIds: [media.uploadId] }))).followup;
++  f.context.rateLimit = async (namespace) => {
++    if (namespace === "followup-delete") await f.call(`/${ticket.id}/status`, { status: "in_progress" }, admin);
++  };
++  await rejectsStatus(f.call(`/${ticket.id}/delete`, deletion(ticket)), 409);
++  const changed = (await f.call(`/${ticket.id}`)).followup;
++  assert.equal(changed.status, "in_progress");
++  assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followup_deleted").get().count, 0);
++  f.context.rateLimit = async (namespace) => {
++    if (namespace === "followup-download") await f.call(`/${ticket.id}/delete`, deletion(changed));
++  };
++  await rejectsStatus(f.call(`/attachments/${media.uploadId}`), 404);
++});
++
++test("delete endpoint inherits real API authentication, CSRF, account switch and no-store protections", async () => {
++  const f = await apiFixture(); const saved = await f.call("", create({ type: "delivery-delay" }));
++  const ticket = (await saved.json()).followup; const path = `/${ticket.id}/delete`;
++  assert.equal((await handleAlmadinaApi(request(path, deletion(ticket)), f.database)).status, 401);
++  assert.equal((await f.call(path, deletion(ticket), { Origin: "https://evil.example" })).status, 403);
++  assert.equal((await f.call(path, deletion(ticket), { "Sec-Fetch-Site": "cross-site" })).status, 403);
++  assert.equal((await f.call(path, deletion(ticket), { "X-Almadina-Account": other.id })).status, 409);
++  const removed = await f.call(path, deletion(ticket), { "X-Almadina-Account": merchant.id });
++  assert.equal(removed.status, 200); assert.equal(removed.headers.get("Cache-Control"), "no-store");
++  assert.equal(removed.headers.get("X-Content-Type-Options"), "nosniff");
++  assert.deepEqual(await removed.json(), { deleted: true, followupId: ticket.id, orderId: ticket.orderId });
++  assert.equal((await f.call(path, deletion(ticket))).status, 200);
++  assert.equal((await f.call(`/${ticket.id}`, undefined, {}, "GET")).status, 404);
++});
++
++test("account purge cleans tombstones without restoring tickets deleted by that administrator", async () => {
++  const f = await fixture(); const ticket = (await f.call("", create({ type: "delivery-delay" }))).followup;
++  await f.call(`/${ticket.id}/delete`, deletion(ticket), admin);
++  await f.database.batch(followupAccountPurge(f.database, admin));
++  const tombstone = f.database.connection.prepare("SELECT * FROM almadina_followup_deleted WHERE followup_id = ?").get(ticket.id);
++  assert.equal(tombstone.deleted_by, null);
++  await rejectsStatus(f.call(`/${ticket.id}`), 404);
++  await f.database.batch(followupAccountPurge(f.database, merchant));
++  assert.equal(f.database.connection.prepare("SELECT COUNT(*) AS count FROM almadina_followup_deleted").get().count, 0);
++});

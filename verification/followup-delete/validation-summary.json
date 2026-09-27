@@ -1,0 +1,21 @@
+{
+  "android": {
+    "unit_tests": 125,
+    "failed": 0,
+    "new_deletion_tests": 7,
+    "build": true,
+    "lint_errors": 0,
+    "lint_warnings": 6,
+    "device_tests": false
+  },
+  "server": {
+    "sqlite_tests": 35,
+    "postgres_tests_including_parent": 9,
+    "failed": 0,
+    "skipped": 0,
+    "typecheck": true,
+    "build": true,
+    "production_or_render_tested": false
+  },
+  "deployed": false
+}

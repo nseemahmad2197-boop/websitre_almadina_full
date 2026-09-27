@@ -1,0 +1,152 @@
+✔ independent persistent tickets survive old snapshots and idempotent retries without altering parcel finances (20.98729ms)
+✔ merchant isolation and staff-wide followup access apply to reads, uploads, downloads, and responses (14.276599ms)
+✔ merchant filters intersect current parcel access and return ownership for legacy followups (4.19133ms)
+✔ staff customer directory includes zero-count merchants and only active parcel followups without account secrets (5.843853ms)
+✔ customer directory search and keyset pagination are bounded and stable for duplicate and Arabic names (3.78612ms)
+✔ private multi-chunk media round-trips byte exactly; incomplete uploads never create tickets (107.381433ms)
+✔ chunk retries are immutable; invalid base64, signatures, indexes, MIME and sizes are rejected (4.799167ms)
+✔ limits validate fields, attachment ownership/count/total and bounded reservation quotas (15.925405ms)
+✔ orphan expiry purges only pending uploads and preserves finalized media (4.222127ms)
+✔ merchant and creator deletion purge all linked tickets and private chunks (3.218904ms)
+✔ cursor paging has no duplicates and rejects malformed cursors (30.429698ms)
+{"event":"api_request","requestId":"a5949df9-4a73-4f1c-8c87-e6ba1155b044","route":"unknown","method":"GET","client":"web","status":401,"durationMs":3}
+✔ notification failure never masks a committed submission (2.005514ms)
+✔ allowed native/browser containers match magic and executable content is rejected (0.368095ms)
+{"event":"api_request","requestId":"b89df3c2-2b01-4089-99b6-cf558123fec6","route":"unknown","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"0e60ca3e-ab8f-4914-a33b-55f09ac7b0e7","route":"unknown","method":"GET","client":"web","status":403,"durationMs":2}
+{"event":"api_request","requestId":"ec17224b-7bb7-443a-b52b-1b18e963e5d7","route":"unknown","method":"GET","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"e86b42b7-3906-443d-934f-bfd4d92e0729","route":"unknown","method":"GET","client":"web","status":409,"durationMs":0}
+{"event":"api_request","requestId":"a3527bd7-6580-44d6-8523-d4f41010260a","route":"unknown","method":"GET","client":"web","status":401,"durationMs":2}
+✔ customer directory API authenticates staff and preserves account switching and cache protections (9.96664ms)
+{"event":"api_request","requestId":"04ec3daa-8a0a-4d20-bb3f-c6b32b55552c","route":"unknown","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"24f02479-0bbf-4455-ab7e-00dfdcc19f65","route":"unknown","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"28d68506-7649-4481-b712-1acce34a933b","route":"unknown","method":"POST","client":"web","status":409,"durationMs":3}
+{"event":"api_request","requestId":"5895eace-26d8-426e-8ac3-d8120df45077","route":"unknown","method":"POST","client":"web","status":413,"durationMs":1}
+{"event":"api_request","requestId":"7041bb02-dafc-4218-b6f2-3b8c8129699a","route":"unknown","method":"POST","client":"web","status":200,"durationMs":3}
+{"event":"api_request","requestId":"a33a1a82-c47a-4016-b5fd-a5a4084b16ea","route":"unknown","method":"GET","client":"web","status":401,"durationMs":1}
+✔ real API rejects unauthenticated, cross-origin, oversized bodies and account switching; preserves security headers (22.050151ms)
+{"event":"api_request","requestId":"c16d2667-a14e-4a4e-a61d-7c9a01376855","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"cfed42fb-ef05-466c-90fe-3fc8ab05aaa1","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"aab7d068-ebe8-4332-83da-77e8158b1cd5","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"5c0d63a8-3671-41fa-8115-706d0837dd99","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"d0a945c8-2303-459f-b891-7e74486e7d17","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"8d8e046f-8891-471f-be33-89e01f21ef31","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"70742051-c192-4936-8c6b-7641385b1db1","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"85f32d9e-c13c-440e-bf08-38e1f19817af","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"1580b486-e656-49bd-820f-ea5fc98984f7","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"9b4fb030-86fd-433d-81a2-133435de32e7","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"1b5594fe-68a3-4e0c-9c50-265be378a894","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"7716ccb4-8ad9-4aa1-bfaf-87f8388c3e72","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"a7b0fd7c-053a-4a64-883d-e6538227c8b4","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"af03d64f-3647-44a1-8fcb-440789c010a2","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"cc014637-36c4-4d84-a2bc-f92591189096","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"d80e4f19-01ff-43c8-907e-405ebb559151","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"bfa49e76-e765-4f6f-a2da-86da69c5e363","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"cb8a9baf-5f49-4f45-9afe-27b21a108d66","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"162fac7f-ee8b-4a4b-b9d7-9325dd36681e","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"311eb988-44b6-4aba-b118-17811c6775f4","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"3c847e76-b158-4d96-940c-2321353396b2","route":"unknown","method":"POST","client":"web","status":429,"durationMs":1}
+✔ real API rate limit prevents excessive submissions while reads remain available (45.668198ms)
+✔ versioned structured details and unique references are additive and never mutate parcel data (6.862528ms)
+✔ creator edits preserve immutable creation retries and enforce field, permission, status and timestamp guards (6.419291ms)
+✔ pre-upgrade creation payload is recorded before first edit so legacy retries remain safe (3.466268ms)
+✔ edit retains only selected ticket media; removed, borrowed, comment and foreign uploads cannot be attached (18.079555ms)
+✔ conversation validates payload, private media and immutable retries against current authorization (8.253837ms)
+✔ conversation returns newest fifty ascending, pages older rows without duplicates and refreshes recent messages (35.265451ms)
+✔ concurrent edits yield one winner and idempotent repeated submissions return one committed result (5.459012ms)
+✔ purge deletes authored conversation/media/receipts while preserving unrelated parent tickets (3.914353ms)
+✔ in-flight comment finalization cannot recreate data after parent or author account purge (3.876025ms)
+{"event":"api_request","requestId":"c93e2b01-af6f-45dd-8c0c-623e1e3d3853","route":"unknown","method":"GET","client":"web","status":401,"durationMs":2}
+✔ purge during upload or creation finalization does not restore deleted account files or tickets (4.127814ms)
+{"event":"api_request","requestId":"274c3a7b-bbea-4c47-95da-0c0db1cc897b","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"e4536839-1ca9-4c9f-a7ab-e39af36d93c0","route":"unknown","method":"GET","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"2be18d2e-9ee0-4819-b6e8-e6b3bd104e3d","route":"unknown","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"e035cf23-ff95-49bc-b145-b2b657843379","route":"unknown","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"16138f05-8baf-4064-8a9c-c3ffc0ee0f9c","route":"unknown","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"331ed3f1-1b1f-471d-9771-acc4fc2286c1","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"1ae02a09-8ff9-4f70-9755-e560ac35ef32","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"8ac6d201-caa3-405b-8bd8-bb370fc0fd07","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"23778859-6d8f-4701-a11b-244ac98bdec9","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"0f3bbb20-a3e1-4d46-9aa6-93ff8bd85574","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"e8f81871-10be-4799-9178-f0a34a6d0a4d","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"513e5cac-ed35-4bec-be0a-2438a51666f4","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b2d62260-0f7e-4818-8449-bc6285de9f14","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"a5acae55-1832-4b2e-a4d7-0cf0b8af7442","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"cdbb37b8-2ba2-4215-bb35-3b4059fbe64e","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f46d57d9-1f98-4329-b953-1e392fa16b4b","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"fdce032e-9edb-48b6-9414-5a4be7f87099","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"649f12b8-f02c-48ad-b78f-363a3c3800f1","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"e498cde9-6d7a-45ae-b6ce-869fc39f07f8","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"beecfd42-039b-4e1a-8844-70b7cfc7a2fa","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"52ac72b9-20e1-422d-8f87-1a188330c557","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"7598242a-5d44-4188-844e-e6ee372527fe","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"ed8ed232-c8d7-43c1-8a14-5c286cc01c33","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"17fddbe3-4ac3-4e35-9dc8-da65812d7707","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"e3883d60-6fd1-41fd-b154-bcb4194e77ff","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"612aa5d0-69b2-4662-a499-b3e2f82bd3fb","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"50fb857e-a383-4137-9a8c-36b192d42cc8","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"fb7d0787-efe3-4af6-b2b2-0a99d2e5a695","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"4e40c12b-d333-4b90-af02-2d8b66e0a647","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b583a88f-6800-47c0-82d3-8161750be370","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"9631ab8a-9905-4b87-ba7f-9ab343cc1e6b","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"0866713d-4ff9-43f2-b3c2-61fab41601d9","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"d8fe70d1-3610-453b-a8a3-e0a0d1338bf9","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"170366a1-084d-4924-8a28-c8a821b55125","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"b5c7aca8-5725-41dd-9b61-18466e54765d","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"77142557-de36-4526-b07b-6196d434b384","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"866841ed-3f2c-4fcc-ae38-5d785e6e193e","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"4319e9c2-6a2e-44eb-8324-c147d323b9b7","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"3a1a115b-5756-41de-b98a-33dc407f4904","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"ee957431-78b2-4c43-b81b-7649beb11e05","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"28c44d7b-8ccc-44af-aeda-a6030e43f420","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"4c220f10-a168-4913-8708-26e22b0b52d0","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"f43e10f9-3265-4a95-ae9d-c3ff792ea160","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"dd05adb1-0978-4247-b9aa-0fe30e4fa077","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"fcdfbb1d-b3de-48fb-9043-21296cac685b","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"cabbe5c7-069b-4a0a-a435-29d95e19bae4","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"966b1377-5c0d-432d-a5e3-06794f71e5d8","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"eaf8c821-cea1-47e1-b360-a81357d7fdda","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"6be24972-d499-4fcc-9cc3-106aa9fb3e2f","route":"unknown","method":"POST","client":"web","status":200,"durationMs":14}
+{"event":"api_request","requestId":"cb1348e7-f925-4c9b-a02a-80e691edbd93","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"0a1f8563-6f8d-4a3e-b0a2-7845374915d4","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"02afa198-22b9-45ef-8b68-dd229a1db8fb","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"2095df01-68d6-4abc-96a9-9b8e05e859a8","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"184ae44b-7721-491b-b1b3-ae4a4fa0db54","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"10381138-64b0-40a6-8963-71ab9772344c","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"dab49479-0aef-4054-8966-977291b45606","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"02af8fda-7a8d-478b-bdbd-369b2d054b2e","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"40603bbb-2f25-4b65-aaae-44630e95cf10","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"ab01c602-14fe-47a1-b51f-d1384e927921","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"35a301df-abd9-4286-be66-5e794d6a159a","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"c75ac3c4-5779-444c-9f78-8850f4c204fc","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"3a58fc67-7b71-4ad8-a48d-6f0556291a02","route":"unknown","method":"POST","client":"web","status":200,"durationMs":2}
+{"event":"api_request","requestId":"a1617b6c-885b-4c67-a8dd-79ceae77e55c","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"722324f6-55dc-4231-95f7-50ca9e38f05b","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"eac44a57-92c7-4a00-817d-86ca5eb3bf88","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"8d3527df-d7d1-42c0-8ab3-bb3540e7bbeb","route":"unknown","method":"POST","client":"web","status":429,"durationMs":2}
+✔ comment and edit endpoints inherit authentication, account switching, no-store and rate limits (103.622925ms)
+✔ identical media request replay succeeds when another request finalizes between ledger lookup and upload lookup (11.258568ms)
+✔ delete permission belongs to the creator or admin in every status and is scoped to the current parcel (15.179842ms)
+✔ soft deletion hides only the selected ticket from lists, counts, direct content, media and all mutation replays (11.552251ms)
+✔ delete detects stale details, validates scope and timestamp, and acknowledges simultaneous retries once (3.220547ms)
+✔ lifecycle transaction guards prevent in-flight edit, comment and status writes after deletion (7.111594ms)
+{"event":"api_request","requestId":"1f7da57c-83af-483e-9504-2f633ccf18a8","route":"unknown","method":"GET","client":"web","status":401,"durationMs":2}
+✔ an update committed during delete preflight wins and private download stops if deletion commits during it (3.307258ms)
+{"event":"api_request","requestId":"dd1fa006-8320-41f0-a0c6-9c830ec30323","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"f23dccd3-0b93-489f-bab5-ecf984f5317e","route":"unknown","method":"POST","client":"web","status":401,"durationMs":0}
+{"event":"api_request","requestId":"24effc29-e192-454f-b3d4-b9aec3e1e50f","route":"unknown","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"c0cb1aef-ac8a-4f0b-a9c9-3d64fed4641f","route":"unknown","method":"POST","client":"web","status":403,"durationMs":0}
+{"event":"api_request","requestId":"6f5dd3cb-e441-40d5-ab29-bd8086d86750","route":"unknown","method":"POST","client":"web","status":409,"durationMs":1}
+{"event":"api_request","requestId":"d4498cd1-5694-4e4d-aaa1-af85b0219a18","route":"unknown","method":"POST","client":"web","status":200,"durationMs":1}
+{"event":"api_request","requestId":"70db55a3-1f48-4265-b739-97b61c1d721e","route":"unknown","method":"POST","client":"web","status":200,"durationMs":0}
+{"event":"api_request","requestId":"462fe3d7-78c2-4f49-9078-be4a434f2b86","route":"unknown","method":"GET","client":"web","status":404,"durationMs":1}
+✔ delete endpoint inherits real API authentication, CSRF, account switch and no-store protections (8.151262ms)
+✔ account purge cleans tombstones without restoring tickets deleted by that administrator (2.503125ms)
+ℹ tests 35
+ℹ suites 0
+ℹ pass 35
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 846.188673

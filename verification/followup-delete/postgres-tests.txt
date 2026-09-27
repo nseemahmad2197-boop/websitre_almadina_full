@@ -1,0 +1,23 @@
+{"event":"api_request","requestId":"86726518-cc5b-46ec-90bd-0c0827ae7489","route":"unknown","method":"GET","client":"web","status":401,"durationMs":78}
+▶ PostgreSQL customer directory and selected followups agree from the first authenticated request
+  ✔ first directory entry and immediate customer selection return both tickets for each staff role (39.86562ms)
+{"event":"api_request","requestId":"0de904aa-93f5-4eec-9bdd-a6fcf80792e6","route":"unknown","method":"GET","client":"web","status":403,"durationMs":5}
+{"event":"api_request","requestId":"bec02f36-7885-4d6e-a8fc-c007034732c2","route":"unknown","method":"GET","client":"web","status":409,"durationMs":3}
+  ✔ legacy ownership payloads, merchant isolation and account switching remain enforced (32.218176ms)
+  ✔ filtered PostgreSQL cursor pages preserve all tickets exactly once (436.182829ms)
+  ✔ PostgreSQL structured edits, immutable retries, private conversation pages and optimistic conflicts (421.857741ms)
+  ✔ PostgreSQL finalization cannot restore parent or author data after account purge (41.141858ms)
+  ✔ PostgreSQL soft delete keeps private records, filters counts and denies content and receipt replays (71.703065ms)
+  ✔ PostgreSQL lifecycle guards serialize deletion against pending edit, comment and status finalization (51.742752ms)
+{"event":"api_request","requestId":"930fab7b-87f5-4dc5-bf02-8169d96cd539","route":"unknown","method":"GET","client":"web","status":404,"durationMs":5}
+  ✔ fresh reads track current parcel ownership and exclude deleted parcels (19.607992ms)
+✔ PostgreSQL customer directory and selected followups agree from the first authenticated request (3023.522174ms)
+ℹ PostgreSQL 18.3 (PGlite 0.5.8) on wasm32-unknown-emscripten, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3135.935429
