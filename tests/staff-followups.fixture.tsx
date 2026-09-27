@@ -39,6 +39,7 @@ function Fixture() {
       <button data-testid="open-directory" onClick={() => setView("customer-followups")}>دليل المتابعة</button>
       <button data-testid="open-home" onClick={() => setView("home")}>لوحة الموظف</button>
       <button data-testid="open-shipments" onClick={() => setView("shipments")}>قائمة الطرود</button>
+      <button data-testid="open-parcel" onClick={() => { setSelectedOrderId("parcel-a"); setView("order-detail"); }}>طرد المستخدم</button>
     </nav>
     <main data-testid="feature-surface" dir="rtl">
       {view === "order-detail" ? <OrderDetail /> : view === "shipments" ? <Shipments /> : view === "home" ? <EmployeeDashboard /> : <CustomerFollowupsPage />}

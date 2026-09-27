@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-27",
+  "build": "passed",
+  "typecheck": "passed",
+  "unit_and_API_tests": {
+    "passed": 151,
+    "failed": 0
+  },
+  "browser_staff": "passed: first load, scoped customer list, retry after errors, staff create hidden, merchant retained, account isolation",
+  "browser_merchant": "passed: create, attachments, retry, staff response",
+  "postgres_engine": "5 integration scenarios passed on isolated PostgreSQL18.3/PGlite0.5.8; live Render not tested",
+  "previous_sidebar_fix": "preserved; source matches prior release",
+  "deployment": "not deployed by this task"
+}

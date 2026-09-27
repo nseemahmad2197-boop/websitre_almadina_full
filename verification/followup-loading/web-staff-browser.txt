@@ -1,0 +1,6 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> reference-website-recreation@0.1.0 test:staff:browser
+> node tests/staff-followups.browser.mjs
+
+PASS: real staff components under StrictMode; first-entry admin/courier directory and scoped followups, counts, search/pagination, empty customer, parcel/detail navigation, all/assigned employee parcels, merchant denial, stale search/account/ticket responses, cross-customer rejection, failed initial request recovery, staff create hidden, merchant create retained and account-switch composer cleanup; 360px and 1280px RTL without overflow.

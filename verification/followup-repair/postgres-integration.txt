@@ -1,0 +1,19 @@
+{"event":"api_request","requestId":"685455de-41a0-44a7-9a21-f366d96704e4","route":"unknown","method":"GET","client":"web","status":401,"durationMs":60}
+▶ PostgreSQL customer directory and selected followups agree from the first authenticated request
+  ✔ first directory entry and immediate customer selection return both tickets for each staff role (36.78068ms)
+{"event":"api_request","requestId":"532cbd08-84b5-4760-bfa8-4e117e140524","route":"unknown","method":"GET","client":"web","status":403,"durationMs":4}
+{"event":"api_request","requestId":"f5d5d7ba-433f-4a76-a0c9-ebec9490f2d3","route":"unknown","method":"GET","client":"web","status":409,"durationMs":2}
+  ✔ legacy ownership payloads, merchant isolation and account switching remain enforced (25.288958ms)
+  ✔ filtered PostgreSQL cursor pages preserve all tickets exactly once (208.979581ms)
+{"event":"api_request","requestId":"a42b26d0-b86c-4018-9f31-656bf1930f74","route":"unknown","method":"GET","client":"web","status":404,"durationMs":4}
+  ✔ fresh reads track current parcel ownership and exclude deleted parcels (14.66353ms)
+✔ PostgreSQL customer directory and selected followups agree from the first authenticated request (2386.379595ms)
+ℹ PostgreSQL 18.3 (PGlite 0.5.8) on wasm32-unknown-emscripten, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2512.531424
