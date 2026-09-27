@@ -5,6 +5,7 @@ import { useApp, type View } from "../lib/app-context";
 import { DeletionRequestsAdminPage } from "./deletion-admin";
 import { AdminDashboard } from "./admin";
 import { Dashboard, OrderDetail, Shipments } from "./dashboard";
+import { FollowupsPage } from "./followups";
 import { EmployeeDashboard } from "./employee";
 import { CollectionsPage, ImportPage, NotificationsPage, ProfilePage, RecipientsPage, ReturnsPage, TrashPage } from "./management-pages";
 import { ParcelCodeBatchesPage } from "./parcel-code-batches";
@@ -24,10 +25,12 @@ function NavigationDrawer({ onClose }: { onClose: () => void }) {
     { icon: "qrCode", label: "أكواد الطرود للطباعة", view: "parcel-codes" },
     { icon: "bell", label: "الإشعارات", view: "notifications" },
     { icon: "trash", label: "الطرود المحذوفة", view: "trash" },
+    { icon: "message", label: "المتابعات", view: "followups" },
     { icon: "settings", label: "الإعدادات", view: "settings" },
   ] : employee ? [
     { icon: "scan", label: "مسح كود الطرد", view: "home" },
     { icon: "bell", label: "الإشعارات", view: "notifications" },
+    { icon: "message", label: "المتابعات", view: "followups" },
     { icon: "settings", label: "إعدادات الموظف", view: "settings" },
   ] : [
     { icon: "home", label: "الرئيسية", view: "home" },
@@ -35,6 +38,7 @@ function NavigationDrawer({ onClose }: { onClose: () => void }) {
     { icon: "layers", label: "الطرود", view: "shipments" },
     { icon: "return", label: "الرواجع", view: "returns" },
     { icon: "receipt", label: "التحصيلات", view: "collections" },
+    { icon: "message", label: "المتابعات", view: "followups" },
     { icon: "settings", label: "الإعدادات", view: "settings" },
   ];
 
@@ -73,6 +77,7 @@ function CurrentPage() {
     case "parcel-codes": return <ParcelCodeBatchesPage />;
     case "new-order": return <NewOrder />;
     case "order-detail": return <OrderDetail />;
+    case "followups": return <FollowupsPage />;
     case "recipients": return <RecipientsPage />;
     case "settings": return <SettingsPage />;
     case "security": return <SecurityPage />;

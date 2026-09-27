@@ -1,3 +1,5 @@
+import { followupAccountPurge, followupSchema, FollowupRequestError, handleFollowupRequest } from "./server-followups";
+import type { Followup } from "./followups";
 import { logRequestEvent, logServiceEvent } from "./security-events";
 import { copyTrustedClientAddress, trustedClientAddress } from "./trusted-client";
 import { BodyLimitError, readBoundedBody } from "./bounded-body";
@@ -527,6 +529,7 @@ async function synchronizeSecondaryAdministrator(database: D1Database, config: A
 
 async function initializeDatabase(database: D1Database, config: AlmadinaApiConfig): Promise<void> {
   await database.batch([
+    ...followupSchema(database),
     database.prepare(`CREATE TABLE IF NOT EXISTS almadina_state (
       id TEXT PRIMARY KEY NOT NULL,
       payload TEXT NOT NULL,
@@ -2823,6 +2826,7 @@ async function removeAccountCredentials(database: D1Database, account: User): Pr
     const registrationEmailKey = await sha256(`registration:request-email:${normalizedEmail}`);
 
     await database.batch([
+      ...followupAccountPurge(database, account),
       database.prepare("DELETE FROM almadina_web_push_subscriptions WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_session_devices WHERE user_id = ?").bind(account.id),
       database.prepare("DELETE FROM almadina_sessions WHERE user_id = ?").bind(account.id),
@@ -3841,6 +3845,29 @@ async function verifyCollection(database: D1Database, request: Request, session:
   return json({ error: "تم تحديث الفاتورة من جهاز آخر. حاول قراءة الكود مجددًا." }, 409);
 }
 
+async function notifyFollowup(database: D1Database, actorId: string, followup: Followup, changed: boolean, origin: string, config: AlmadinaApiConfig): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const state = await readState(database);
+    const order = state.database.orders.find((entry) => entry.id === followup.orderId);
+    if (!order) return;
+    const recipients = state.database.users.filter((account) => account.id !== actorId && (
+      account.id === order.merchantId || account.id === order.courierId || account.role === "admin"
+    ));
+    const notices: Notice[] = (await Promise.all(recipients.map(async (account): Promise<Notice> => ({
+      id: `fu-notice-${await sha256(`${followup.id}:${changed ? followup.updatedAt : "new"}:${account.id}`)}`,
+      userId: account.id, orderId: order.id, title: changed ? "تحديث متابعة طرد" : "متابعة طرد جديدة",
+      message: changed ? "تم تحديث حالة المتابعة. افتح تفاصيل الطرد للاطلاع على الرد." : "تم إنشاء متابعة جديدة. افتح تفاصيل الطرد للاطلاع عليها.",
+      icon: "bell", read: false, createdAt: followup.updatedAt,
+    })))).filter((notice) => !state.database.notices.some((existing) => existing.id === notice.id));
+    if (!notices.length) return;
+    const next: Database = { ...state.database, notices: [...notices, ...state.database.notices] };
+    if (await saveState(database, next, state.revision)) {
+      scheduleWebPushNotices(database, next, notices, origin, config);
+      return;
+    }
+  }
+}
+
 async function routeAlmadinaApi(request: Request, database: D1Database, config: AlmadinaApiConfig): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -3891,6 +3918,17 @@ async function routeAlmadinaApi(request: Request, database: D1Database, config: 
     if (request.method === "POST" || request.method === "PUT") {
       await enforceEndpointRateLimit(database, "account-write", session.account.id, 120, 60,
         "طلبات كثيرة خلال وقت قصير. انتظر قليلًا ثم أعد المحاولة.");
+    }
+
+    if (url.pathname === "/api/almadina/followups" || url.pathname.startsWith("/api/almadina/followups/")) {
+      const expectedAccount = request.headers.get("X-Almadina-Account");
+      if (expectedAccount && expectedAccount !== session.account.id) return json({ error: "تغيّر الحساب أثناء الطلب. أعد فتح تفاصيل الطرد.", code: "accountchanged" }, 409);
+      const result = await handleFollowupRequest(request, {
+        database, account: session.account, state: session.state.database,
+        rateLimit: (namespace, limit, windowSeconds) => enforceEndpointRateLimit(database, namespace, session.account.id, limit, windowSeconds, "طلبات متابعة كثيرة. انتظر قليلًا ثم أعد المحاولة."),
+        notify: (followup, changed) => notifyFollowup(database, session.account.id, followup, changed, url.origin, config),
+      });
+      return json(result);
     }
 
     if (url.pathname === "/api/almadina/push/config" && request.method === "GET") {
@@ -4040,6 +4078,11 @@ async function routeAlmadinaApi(request: Request, database: D1Database, config: 
         return account ? json({ error: "تم تحديث البيانات من جهاز آخر.", ...snapshot(latest, account) }, 409) : json({ error: "لم يعد الحساب متاحًا." }, 401);
       }
 
+      // Legacy administration clients can remove users through a snapshot save.
+      // Their independent private follow-up media must be purged on that path too.
+      for (const removed of session.state.database.users.filter((previous) => !next.users.some((entry) => entry.id === previous.id))) {
+        await database.batch(followupAccountPurge(database, removed));
+      }
       const account = next.users.find((entry) => entry.id === session.account.id);
       if (!account) return json({ error: "لم يعد الحساب متاحًا." }, 401);
       scheduleWebPushNotices(database, next, newNotices, url.origin, config);
@@ -4048,6 +4091,7 @@ async function routeAlmadinaApi(request: Request, database: D1Database, config: 
 
     return json({ error: "المسار المطلوب غير موجود." }, 404);
   } catch (error) {
+    if (error instanceof FollowupRequestError) return json({ error: error.message }, error.status);
     if (error instanceof ApiRequestError) return json({ error: error.message }, error.status,
       error.retryAfterSeconds ? { "Retry-After": String(error.retryAfterSeconds) } : {});
     if (error instanceof SyntaxError) return json({ error: "بيانات الطلب غير صالحة. تحقق منها وحاول مجددًا." }, 400);

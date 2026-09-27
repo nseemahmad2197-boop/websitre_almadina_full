@@ -7,7 +7,7 @@ import { Icon } from "./icon";
 import { Button, CollectionAmount, EmptyState, Field, Modal, PageHeader, StatusPill } from "./ui";
 
 export function EmployeeDashboard() {
-  const { database, user, openScanner, prepareCollectionInvoice, verifyCollectionCode } = useApp();
+  const { database, user, openScanner, prepareCollectionInvoice, verifyCollectionCode, setSelectedOrderId, setView } = useApp();
   const [collectionVerification, setCollectionVerification] = useState<{ invoiceId: string; invoiceNumber: string; code: string } | null>(null);
   const [verifyingCollection, setVerifyingCollection] = useState(false);
   const [preparingCollectionId, setPreparingCollectionId] = useState<string | null>(null);
@@ -97,6 +97,7 @@ export function EmployeeDashboard() {
                 <span className="employee-order-card__icon" style={{ color: status.color, background: status.surface }}><Icon name={status.icon} size={21} /></span>
                 <div><strong dir="ltr">{order.trackingNumber}</strong><span>{order.recipientName} · {order.city}</span><div className="employee-order-card__contacts"><a href={`tel:${order.recipientPhone}`} dir="ltr">{order.recipientPhone}</a><a href={`sms:${order.recipientPhone}`}><Icon name="message" size={14} />إشعار العميل</a></div></div>
                 <StatusPill status={order.status} />
+                <Button variant="outline" onClick={() => { setSelectedOrderId(order.id); setView("order-detail"); }}>تفاصيل الطرد والمتابعات</Button>
                 {order.notes && <div className="employee-order-card__instructions"><span><Icon name="message" size={16} /></span><div><strong>تعليمات المندوب</strong><p>{order.notes}</p></div></div>}
               </article>;
             })}

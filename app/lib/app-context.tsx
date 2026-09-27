@@ -12,6 +12,7 @@ export type View =
   | "collections"
   | "new-order"
   | "order-detail"
+  | "followups"
   | "recipients"
   | "settings"
   | "security"

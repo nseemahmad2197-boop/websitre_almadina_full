@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { ParcelFollowups } from "./followups";
 import { useApp } from "../lib/app-context";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, normalizeMembership, normalizeParcelCode, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
 import { createQrMatrix } from "../lib/qr-code";
@@ -239,7 +240,7 @@ export function OrderDetail() {
   const [trackingNote, setTrackingNote] = useState("");
   const [statusUpdate, setStatusUpdate] = useState<{ status: OrderStatus; note: string } | null>(null);
   const noteComposerTarget = useRef<HTMLDivElement>(null);
-  const order = database.orders.find((item) => item.id === selectedOrderId && (user?.role === "admin" || item.merchantId === user?.id));
+  const order = database.orders.find((item) => item.id === selectedOrderId && (user?.role === "admin" || item.merchantId === user?.id || (user?.role === "courier" && item.courierId === user.id)));
 
   useEffect(() => {
     if (!selectedOrderId) return;
@@ -262,7 +263,7 @@ export function OrderDetail() {
     };
   }, [selectedOrderId]);
 
-  if (!order) return <div className="page-content"><EmptyState icon="package" title="الطرد غير موجود" description="ربما حُذف هذا الطرد أو تغيّر رقم التتبع." action="العودة للطرود" onAction={() => setView(user?.role === "admin" ? "admin" : "shipments")} /></div>;
+  if (!order) return <div className="page-content"><EmptyState icon="package" title="الطرد غير موجود" description="ربما حُذف هذا الطرد أو تغيّر رقم التتبع." action="العودة للطرود" onAction={() => setView(user?.role === "admin" ? "admin" : user?.role === "courier" ? "home" : "shipments")} /></div>;
   const weightFee = order.weightFee ?? 0;
   const oversizeFee = order.oversizeFee ?? 0;
   const baseDeliveryFee = Math.max(order.deliveryFee - weightFee - oversizeFee, 0);
@@ -296,7 +297,7 @@ export function OrderDetail() {
   function removeOrder() {
     const currentOrder = order;
     if (!currentOrder) return;
-    confirm({ title: "حذف الطرد؟", message: `سيُنقل الطرد ${currentOrder.trackingNumber} إلى المحذوفات ويمكنك استعادته لاحقًا.`, confirmLabel: "نقل إلى المحذوفات", danger: true, onConfirm: () => { updateDatabase((current) => ({ ...current, orders: current.orders.map((item) => item.id === currentOrder.id ? { ...item, deleted: true } : item) })); showToast("تم نقل الطرد إلى المحذوفات."); setView(user?.role === "admin" ? "admin" : "shipments"); } });
+    confirm({ title: "حذف الطرد؟", message: `سيُنقل الطرد ${currentOrder.trackingNumber} إلى المحذوفات ويمكنك استعادته لاحقًا.`, confirmLabel: "نقل إلى المحذوفات", danger: true, onConfirm: () => { updateDatabase((current) => ({ ...current, orders: current.orders.map((item) => item.id === currentOrder.id ? { ...item, deleted: true } : item) })); showToast("تم نقل الطرد إلى المحذوفات."); setView(user?.role === "admin" ? "admin" : user?.role === "courier" ? "home" : "shipments"); } });
   }
 
   async function copyTrackingNumber() {
@@ -312,20 +313,21 @@ export function OrderDetail() {
 
   return (
     <div className="page-content animate-page order-detail-page">
-      <PageHeader title="تفاصيل الطرد" subtitle={order.trackingNumber} onBack={() => setView(user?.role === "admin" ? "admin" : "shipments")} />
+      <PageHeader title="تفاصيل الطرد" subtitle={order.trackingNumber} onBack={() => setView(user?.role === "admin" ? "admin" : user?.role === "courier" ? "home" : "shipments")} />
       <SectionCard className="detail-hero"><div><Icon name="package" size={30} /><div><strong dir={order.trackingNumber ? "ltr" : "rtl"}>{order.trackingNumber || "بانتظار إضافة كود QR"}</strong><span>أُنشئ في {formatDate(order.createdAt)}</span></div></div><StatusPill status={order.status} /></SectionCard>
-      {!order.trackingNumber.trim() && <ParcelCodeEntry key={order.id} order={order} />}
+      {user?.role !== "courier" && !order.trackingNumber.trim() && <ParcelCodeEntry key={order.id} order={order} />}
+      <ParcelFollowups order={order} />
       <Segmented className="order-detail-tabs" value={detailTab} onChange={(value) => setDetailTab(value as "tracking" | "details")} items={[{ value: "tracking", label: "التتبّع" }, { value: "details", label: "تفاصيل الطرد" }]} />
       {detailTab === "tracking" ? (
         <div className="order-tracking-panel animate-page">
           {user?.role === "admin" && <SectionCard title="تحديث حالة الطرد" icon="settings"><p className="tracking-note-intro">اختر الحالة الجديدة، ثم أضف ملاحظة اختيارية قبل الحفظ.</p><div className="status-actions">{statusDefinitions.map((entry) => <button key={entry.id} className={`status-action ${order.status === entry.id ? "is-active" : ""}`} disabled={order.status === entry.id} style={{ "--status-color": entry.color } as CSSProperties} onClick={() => changeStatus(entry.id)}><Icon name={entry.icon} size={15} />{entry.label}</button>)}</div></SectionCard>}
           <TrackingHistory order={order} />
-          <div ref={noteComposerTarget} className="tracking-note-target">
+          {user?.role !== "courier" && <div ref={noteComposerTarget} className="tracking-note-target">
             <SectionCard title="إضافة ملاحظة للحالة الحالية" icon="message">
               <p className="tracking-note-intro">ستُحفظ الملاحظة مع حالة «{getStatus(order.status).label}» واسم كاتبها ووقت إضافتها.</p>
               <TrackingNoteComposer status={order.status} value={trackingNote} onChange={setTrackingNote} onSubmit={addTrackingNote} />
             </SectionCard>
-          </div>
+          </div>}
         </div>
       ) : (
         <div className="order-detail-panel animate-page">
@@ -333,7 +335,7 @@ export function OrderDetail() {
             <button type="button" disabled={!order.trackingNumber.trim()} onClick={() => setLabelOpen(true)}><span><Icon name="qrCode" size={23} /></span><strong>ملصق الشحن</strong></button>
             <button type="button" disabled={!order.trackingNumber.trim()} onClick={() => { void copyTrackingNumber(); }}><span><Icon name="copy" size={22} /></span><strong>نسخ الرقم</strong></button>
             <button type="button" onClick={() => window.print()}><span><Icon name="printer" size={22} /></span><strong>طباعة البيانات</strong></button>
-            <button type="button" className="is-danger" onClick={removeOrder}><span><Icon name="trash" size={22} /></span><strong>حذف</strong></button>
+            {user?.role !== "courier" && <button type="button" className="is-danger" onClick={removeOrder}><span><Icon name="trash" size={22} /></span><strong>حذف</strong></button>}
           </div>
           <div className="detail-columns"><SectionCard title="بيانات المستلم" icon="user"><div className="detail-row"><span>الاسم</span><strong>{order.recipientName}</strong></div><div className="detail-row"><span>رقم الجوال</span><a href={`tel:${order.recipientPhone}`} dir="ltr">{order.recipientPhone}</a></div><div className="detail-row"><span>المدينة</span><strong>{order.city}</strong></div><div className="detail-row"><span>عنوان التوصيل</span><strong>{order.address}</strong></div>{order.preferredDeliveryDate && <div className="detail-row"><span>تاريخ التوصيل المفضل</span><strong dir="ltr">{order.preferredDeliveryDate.split("-").reverse().join(" / ")}</strong></div>}</SectionCard><SectionCard title="تفاصيل الطرد" icon="receipt"><div className="detail-row"><span>نوع الطرد</span><strong>{order.type}</strong></div><div className="detail-row"><span>سعر الطرد (التحصيل)</span><strong>{money(order.amount)} ₪</strong></div><div className="detail-row"><span>رسوم التوصيل الأساسية</span><strong>- {money(baseDeliveryFee)} ₪</strong></div>{weightFee > 0 && <div className="detail-row"><span>رسوم الوزن الإضافية</span><strong>- {money(weightFee)} ₪</strong></div>}{oversizeFee > 0 && <div className="detail-row"><span>رسوم الحجم الإضافية</span><strong>- {money(oversizeFee)} ₪</strong></div>}<div className="detail-row"><span>إجمالي رسوم التوصيل</span><strong>- {money(order.deliveryFee)} ₪</strong></div><div className="detail-row"><span>قيمة المحتويات بعد الخصم</span><strong>{money(Math.max(order.amount - order.deliveryFee, 0))} ₪</strong></div><div className="detail-row"><span>الأبعاد</span><strong>{order.dimensions}</strong></div><div className="detail-row"><span>الوصف</span><strong>{order.content || "غير محدد"}</strong></div><div className="detail-row"><span>الوزن</span><strong>{order.weight}</strong></div></SectionCard></div>
           {user?.role === "admin" && order.privateNotes && <SectionCard title="الملاحظة الخاصة للمسؤول" subtitle="لا تظهر للمندوب أو المستخدم" icon="lock" className="admin-private-note"><p className="detail-note">{order.privateNotes}</p></SectionCard>}

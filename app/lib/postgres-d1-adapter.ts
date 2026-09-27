@@ -42,7 +42,13 @@ function replaceQuestionMarkPlaceholders(query: string): string {
 }
 
 export function toPostgresSql(query: string): string {
-  return replaceQuestionMarkPlaceholders(query);
+  // Follow-up inboxes filter against current authorized parcel IDs with one JSON
+  // array bind, avoiding D1's parameter limit and stale denormalized assignments.
+  const compatible = query.replaceAll(
+    "IN (SELECT value FROM json_each(?))",
+    "IN (SELECT value FROM jsonb_array_elements_text(CAST(? AS jsonb)) AS allowed_orders(value))",
+  );
+  return replaceQuestionMarkPlaceholders(compatible);
 }
 
 async function executeQuery(executor: QueryExecutor, query: string, values: unknown[]) {
