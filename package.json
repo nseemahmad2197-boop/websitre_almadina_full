@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "bash scripts/build-verified.sh",
     "start": "vinext start",
-    "test": "npm run build && node --experimental-strip-types --test tests/postgres-adapter.test.mjs tests/rendered-html.test.mjs tests/shared-database.test.mjs tests/web-push.test.mjs tests/browser-permissions.test.mjs tests/swipe-delete-events.test.mjs tests/security-resilience.test.mjs tests/pricing-contract.test.mjs tests/operational-security.test.mjs tests/followups.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/postgres-adapter.test.mjs tests/rendered-html.test.mjs tests/shared-database.test.mjs tests/web-push.test.mjs tests/browser-permissions.test.mjs tests/swipe-delete-events.test.mjs tests/security-resilience.test.mjs tests/pricing-contract.test.mjs tests/operational-security.test.mjs tests/followups.test.mjs tests/session-devices.test.mjs tests/secure-ingress.test.mjs tests/linked-devices-client.test.mjs",
     "typecheck": "tsc --noEmit --incremental false",
     "test:followups:browser": "node tests/followups.browser.mjs",
     "test:swipe": "node tests/swipe-delete.browser.mjs",
@@ -19,7 +19,8 @@
     "test:pricing": "node --experimental-strip-types --test tests/pricing-contract.test.mjs",
     "test:staff:browser": "node tests/staff-followups.browser.mjs",
     "test:qr:browser": "node tests/qr-camera.browser.mjs",
-    "test:drawer:browser": "node tests/drawer-scroll.browser.mjs"
+    "test:drawer:browser": "node tests/drawer-scroll.browser.mjs",
+    "test:audio-devices:browser": "node tests/audio-devices.browser.mjs"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
