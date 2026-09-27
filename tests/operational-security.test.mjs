@@ -86,6 +86,9 @@ test("CSP uses fresh server-created nonces and HTML cannot be publicly cached", 
   assert.match(scriptPolicy, /'nonce-/);
   assert.doesNotMatch(scriptPolicy, /unsafe-inline|attacker/);
   assert.match(response.headers.get("Cache-Control"), /no-store/);
+  assert.match(response.headers.get("Permissions-Policy"), /microphone=\(self\)/);
+  assert.match(response.headers.get("Permissions-Policy"), /camera=\(self\)/);
+  assert.doesNotMatch(response.headers.get("Permissions-Policy"), /microphone=\(\*\)/);
 });
 
 test("body bounds stop oversized and stalled streams even when cancel never resolves", async () => {

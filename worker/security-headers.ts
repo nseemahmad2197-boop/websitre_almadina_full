@@ -41,7 +41,7 @@ export function withSecurityHeaders(request: Request, response: Response): Respo
   }
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
-  headers.set("Permissions-Policy", "camera=(self), geolocation=(self), microphone=(), payment=(), publickey-credentials-get=(self), usb=()");
+  headers.set("Permissions-Policy", "camera=(self), geolocation=(self), microphone=(self), payment=(), publickey-credentials-get=(self), usb=()");
   headers.set("Referrer-Policy", headers.get("Referrer-Policy") || "no-referrer");
   headers.set("X-DNS-Prefetch-Control", "off");
   headers.set("X-Content-Type-Options", "nosniff");

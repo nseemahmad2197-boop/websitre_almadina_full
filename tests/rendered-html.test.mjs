@@ -343,7 +343,7 @@ test("keeps account switching and all merchant-facing records private to the sig
   assert.match(application, /لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر/);
   assert.match(server, /verifyPassword\(password, account\.password\)/);
   assert.match(server, /users:\s*\[publicAccount\(account\)\]/);
-  assert.match(dashboard, /item\.id === selectedOrderId && \(user\?\.role === "admin" \|\| item\.merchantId === user\?\.id\)/);
+  assert.match(dashboard, /item\.id === selectedOrderId && \(user\?\.role === "admin" \|\| item\.merchantId === user\?\.id \|\| \(user\?\.role === "courier" && item\.courierId === user\.id\)\)/);
   assert.match(dashboard, /notice\.userId === user\?\.id\)\.map/);
   assert.match(shell, /notice\.userId === user\?\.id && !notice\.read/);
   assert.match(management, /const notices = database\.notices\.filter\(\(notice\) => notice\.userId === user\?\.id\)/);
@@ -1507,7 +1507,7 @@ test("lets a signed-in account clear only its own selected notifications through
   assert.match(server, /removedCount: 0/);
   assert.match(server, /if \(!session\) return[\s\S]*url\.pathname === "\/api\/almadina\/notices\/clear" && request\.method === "POST"[\s\S]*return await clearNotices\(database, request, session\)/);
   assert.match(styles, /\.notification-page-actions\s*\{/);
-  assert.match(styles, /\.notification-clear-button\s*\{[^}]*color:\s*var\(--danger\)/);
+  assert.match(styles, /\.notification-clear-button\s*\{[^}]*color:\s*var\(--danger-ink\)/);
   assert.match(styles, /\.notification-card__delete\s*\{/);
 });
 

@@ -43,6 +43,13 @@ test("converts D1 placeholders without changing quoted question marks", () => {
   );
 });
 
+test("translates authorized follow-up inbox scope into a single PostgreSQL JSON array bind", () => {
+  assert.equal(
+    toPostgresSql("SELECT * FROM almadina_followups WHERE order_id IN (SELECT value FROM json_each(?)) AND created_at < ? ORDER BY created_at DESC LIMIT 51"),
+    "SELECT * FROM almadina_followups WHERE order_id IN (SELECT value FROM jsonb_array_elements_text(CAST($1 AS jsonb)) AS allowed_orders(value)) AND created_at < $2 ORDER BY created_at DESC LIMIT 51",
+  );
+});
+
 test("maps PostgreSQL rows and row counts to the D1 statement contract", async () => {
   const pool = new FakePostgresPool();
   const database = new PostgresD1Database(pool);

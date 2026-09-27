@@ -1,0 +1,17 @@
+✔ unauthenticated forwarding headers cannot select an IP rate-limit identity (4.796494ms)
+✔ origin protection rejects missing/wrong keys before any database work and trusts only verified edge identity (11.902751ms)
+✔ load shedding stops costly work, reserves logout, and releases slots after failures (1.501264ms)
+✔ authentication rate budget recovers with time and cannot be bypassed with spoofed client headers (0.827207ms)
+✔ monitor endpoint is closed by default and only exposes anonymous aggregate counters (3.167146ms)
+✔ health requests coalesce, cache briefly and time out without disclosing database errors (16.294474ms)
+✔ CSP uses fresh server-created nonces and HTML cannot be publicly cached (1.864963ms)
+✔ body bounds stop oversized and stalled streams even when cancel never resolves (21.452764ms)
+✔ document requests share the concurrency and minute budgets with API work (0.826947ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 198.632759

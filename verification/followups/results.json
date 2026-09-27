@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-27",
+  "websiteTests": {
+    "passed": 145,
+    "failed": 0
+  },
+  "typescript": "PASS",
+  "localBrowser": "PASS: Chromium131; transport fixture; synthetic microphone; five viewport sizes; create/media/retry429/staff response/account isolation",
+  "server": "PASS: real SQLite and API; PostgreSQL adapter tests",
+  "unrun": [
+    "actual PostgreSQL service",
+    "production deployment",
+    "physical-device media permissions"
+  ]
+}
