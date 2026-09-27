@@ -1,5 +1,5 @@
 import type { Database, Order, User } from "./data";
-import { FOLLOWUP_LIMITS, FOLLOWUP_MIME_TYPES, FOLLOWUP_STATUSES, FOLLOWUP_TYPES, type Followup, type FollowupAttachment, type FollowupStatus, type FollowupType } from "./followups";
+import { FOLLOWUP_LIMITS, FOLLOWUP_MIME_TYPES, FOLLOWUP_STATUSES, FOLLOWUP_TYPES, type Followup, type FollowupAttachment, type FollowupCustomer, type FollowupCustomerList, type FollowupStatus, type FollowupType } from "./followups";
 
 const UPLOAD_TTL_SECONDS = 24 * 60 * 60;
 const PENDING_BYTES = 50 * 1024 * 1024;
@@ -30,11 +30,16 @@ const requestId = (value: unknown) => {
   return value;
 };
 const attachment = (row: UploadRow): FollowupAttachment => ({ id: row.id, name: row.name, mimeType: row.mime_type, size: row.size, chunkCount: row.chunk_count });
-const canAccess = (account: User, order: Order) => account.role === "admin" || (account.role === "merchant" && order.merchantId === account.id) || (account.role === "courier" && order.courierId === account.id);
+const canAccess = (account: User, order: Order) => !order.deleted && (account.role === "admin" || account.role === "courier" || (account.role === "merchant" && order.merchantId === account.id));
 function authorizedOrder(context: FollowupContext, orderId: unknown): Order {
   const order = typeof orderId === "string" ? context.state.orders.find((item) => item.id === orderId) : undefined;
   if (!order || !canAccess(context.account, order)) return fail("الطرد غير موجود أو غير متاح لهذا الحساب.", 404);
   return order;
+}
+function wireFollowup(context: FollowupContext, row: TicketRow): Followup {
+  const order = authorizedOrder(context, row.order_id);
+  // Derive ownership from the current parcel, including for legacy ticket payloads.
+  return { ...JSON.parse(row.payload) as Followup, merchantId: order.merchantId };
 }
 function objectBody(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail("بيانات الطلب غير صالحة.");
@@ -217,10 +222,10 @@ async function createFollowup(context: FollowupContext, body: Record<string, unk
   }
   if (uploads.reduce((sum, upload) => sum + upload.size, 0) > FOLLOWUP_LIMITS.totalBytes) return fail("الحد الأقصى لمجموع المرفقات 20 ميغابايت.", 413);
   const timestamp = new Date().toISOString();
-  const followup: Followup = { id, orderId: order.id, creatorId: context.account.id, creatorName: context.account.name, type: type as FollowupType,
+  const followup: Followup = { id, orderId: order.id, merchantId: order.merchantId, creatorId: context.account.id, creatorName: context.account.name, type: type as FollowupType,
     title, description, status: "open", response: "", createdAt: timestamp, updatedAt: timestamp, attachments: uploads.map(attachment) };
   if (existing) {
-    const prior = JSON.parse(existing.payload) as Followup;
+    const prior = wireFollowup(context, existing);
     if (!sameCreation(prior, followup)) return fail("معرّف الطلب مستخدم لمتابعة مختلفة.", 409);
     return { followup: prior };
   }
@@ -245,7 +250,7 @@ async function createFollowup(context: FollowupContext, body: Record<string, unk
   await context.database.batch(statements);
   const saved = await context.database.prepare("SELECT * FROM almadina_followups WHERE id = ?").bind(id).first<TicketRow>();
   if (!saved) return fail("رفع المرفقات غير مكتمل أو لم تعد متاحة. أعد المحاولة.", 409);
-  const result = JSON.parse(saved.payload) as Followup;
+  const result = wireFollowup(context, saved);
   if (!sameCreation(result, followup)) return fail("معرّف الطلب مستخدم لمتابعة مختلفة.", 409);
   await sendNotice(context, result, false);
   return { followup: result };
@@ -260,24 +265,71 @@ function decodeCursor(cursor: string): [string, string] {
 }
 async function listFollowups(context: FollowupContext, url: URL): Promise<unknown> {
   const orderId = url.searchParams.get("orderId");
+  const merchantId = url.searchParams.get("merchantId");
+  if (merchantId !== null && !/^[a-zA-Z0-9_-]{1,160}$/.test(merchantId)) return fail("معرّف العميل غير صالح.");
   const values: unknown[] = [];
   const clauses: string[] = [];
-  if (orderId !== null) {
-    authorizedOrder(context, orderId);
-    clauses.push("order_id = ?"); values.push(orderId);
-  } else {
-    // Pass one JSON array instead of thousands of SQL parameters. This predicate
-    // uses the current snapshot, so reassigned couriers immediately lose access.
-    // The PostgreSQL adapter translates this narrow SQLite json_each expression.
-    const accessibleOrderIds = context.state.orders.filter((order) => canAccess(context.account, order)).map((order) => order.id);
-    if (!accessibleOrderIds.length) return { followups: [], nextCursor: null };
-    clauses.push("order_id IN (SELECT value FROM json_each(?))"); values.push(JSON.stringify(accessibleOrderIds));
-  }
   const cursor = url.searchParams.get("cursor");
   if (cursor) { const [date, id] = decodeCursor(cursor); clauses.push("(created_at < ? OR (created_at = ? AND id < ?))"); values.push(date, date, id); }
+  if (orderId !== null) authorizedOrder(context, orderId);
+  // Apply every filter to the current authorized parcel set. A merchantId query
+  // can narrow a merchant's scope, but can never authorize another merchant.
+  // A single JSON bind also avoids D1's parameter limit for staff-wide inboxes.
+  const accessibleOrderIds = context.state.orders.filter((order) => canAccess(context.account, order)
+    && (orderId === null || order.id === orderId) && (merchantId === null || order.merchantId === merchantId)).map((order) => order.id);
+  if (!accessibleOrderIds.length) return { followups: [], nextCursor: null };
+  clauses.push("order_id IN (SELECT value FROM json_each(?))"); values.push(JSON.stringify(accessibleOrderIds));
   const rows = (await context.database.prepare(`SELECT * FROM almadina_followups ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY created_at DESC, id DESC LIMIT 51`).bind(...values).all<TicketRow>()).results ?? [];
   const page = rows.slice(0, PAGE_SIZE);
-  return { followups: page.map((row) => JSON.parse(row.payload) as Followup), nextCursor: rows.length > PAGE_SIZE ? encodeCursor(page[page.length - 1]) : null };
+  return { followups: page.map((row) => wireFollowup(context, row)), nextCursor: rows.length > PAGE_SIZE ? encodeCursor(page[page.length - 1]) : null };
+}
+function compareCustomer(left: { name: string; id: string }, right: { name: string; id: string }): number {
+  // Avoid environment-dependent collation so cursor ordering remains stable.
+  return left.name < right.name ? -1 : left.name > right.name ? 1 : left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+}
+function encodeCustomerCursor(customer: FollowupCustomer): string {
+  return btoa(encodeURIComponent(JSON.stringify([customer.name, customer.id])));
+}
+function decodeCustomerCursor(cursor: string): { name: string; id: string } {
+  try {
+    if (cursor.length > 4096) return fail("مؤشر الصفحة غير صالح.");
+    const parsed = JSON.parse(decodeURIComponent(atob(cursor)));
+    if (!Array.isArray(parsed) || parsed.length !== 2 || typeof parsed[0] !== "string" || typeof parsed[1] !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/.test(parsed[1])) return fail("مؤشر الصفحة غير صالح.");
+    return { name: parsed[0], id: parsed[1] };
+  } catch { return fail("مؤشر الصفحة غير صالح."); }
+}
+async function listCustomers(context: FollowupContext, url: URL): Promise<FollowupCustomerList> {
+  if (context.account.role !== "admin" && context.account.role !== "courier") return fail("دليل العملاء متاح للإدارة والموظفين فقط.", 403);
+  const query = url.searchParams.get("q")?.trim() ?? "";
+  if (query.length > 200 || /[\u0000-\u001f\u007f]/u.test(query)) return fail("نص البحث غير صالح.");
+  const search = query.normalize("NFKC").toLowerCase();
+  const rawCursor = url.searchParams.get("cursor");
+  const cursor = rawCursor ? decodeCustomerCursor(rawCursor) : null;
+  const matches = context.state.users.filter((account) => account.role === "merchant"
+    && (!search || [account.id, account.name, account.store].some((value) => value.normalize("NFKC").toLowerCase().includes(search)))
+    && (!cursor || compareCustomer(account, cursor) > 0)).sort(compareCustomer);
+  const customers: FollowupCustomer[] = matches.slice(0, PAGE_SIZE).map((account) => ({
+    id: account.id, name: account.name, store: account.store, orderCount: 0, followupCount: 0, openCount: 0,
+  }));
+  const byMerchant = new Map(customers.map((customer) => [customer.id, customer]));
+  const byOrder = new Map<string, FollowupCustomer>();
+  for (const order of context.state.orders) {
+    const customer = byMerchant.get(order.merchantId);
+    if (!order.deleted && customer) { customer.orderCount += 1; byOrder.set(order.id, customer); }
+  }
+  if (byOrder.size) {
+    // Aggregate only the current page's active parcels and never return ticket
+    // descriptions or customer account records to the directory consumer.
+    const counts = (await context.database.prepare(`SELECT order_id, COUNT(*) AS followup_count,
+      SUM(CASE WHEN json_extract(payload, '$.status') IN ('open', 'in_progress') THEN 1 ELSE 0 END) AS open_count
+      FROM almadina_followups WHERE order_id IN (SELECT value FROM json_each(?)) GROUP BY order_id`)
+      .bind(JSON.stringify([...byOrder.keys()])).all<{ order_id: string; followup_count: number | string; open_count: number | string }>()).results ?? [];
+    for (const count of counts) {
+      const customer = byOrder.get(count.order_id);
+      if (customer) { customer.followupCount += Number(count.followup_count); customer.openCount += Number(count.open_count); }
+    }
+  }
+  return { customers, nextCursor: matches.length > PAGE_SIZE ? encodeCustomerCursor(customers[customers.length - 1]) : null };
 }
 async function downloadChunk(context: FollowupContext, id: string, url: URL): Promise<unknown> {
   const upload = await context.database.prepare("SELECT * FROM almadina_followup_uploads WHERE id = ? AND followup_id IS NOT NULL").bind(id).first<UploadRow>();
@@ -294,10 +346,10 @@ async function downloadChunk(context: FollowupContext, id: string, url: URL): Pr
 }
 async function updateStatus(context: FollowupContext, id: string, body: Record<string, unknown>): Promise<unknown> {
   const row = await ticketRow(context, id);
-  if (context.account.role !== "admin" && context.account.role !== "courier") return fail("تحديث المتابعة متاح للإدارة والمندوب المعيّن فقط.", 403);
+  if (context.account.role !== "admin" && context.account.role !== "courier") return fail("تحديث المتابعة متاح للإدارة والموظفين فقط.", 403);
   if (!FOLLOWUP_STATUSES.some((entry) => entry.value === body.status)) return fail("حالة المتابعة غير صالحة.");
   const response = body.response === undefined || body.response === "" ? "" : cleanString(body.response, FOLLOWUP_LIMITS.response, "الرد");
-  const previous = JSON.parse(row.payload) as Followup;
+  const previous = wireFollowup(context, row);
   if (previous.status === body.status && previous.response === response) return { followup: previous };
   await context.rateLimit("followup-status", 60, 3600);
   const followup: Followup = { ...previous, status: body.status as FollowupStatus, response, updatedAt: new Date().toISOString() };
@@ -310,6 +362,7 @@ async function updateStatus(context: FollowupContext, id: string, body: Record<s
 export async function handleFollowupRequest(request: Request, context: FollowupContext): Promise<unknown> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api\/almadina\/followups\/?/, "");
+  if (path === "customers" && request.method === "GET") { await context.rateLimit("followup-read", 180, 60); return listCustomers(context, url); }
   if (!path && request.method === "GET") { await context.rateLimit("followup-read", 180, 60); return listFollowups(context, url); }
   if (!path && request.method === "POST") return createFollowup(context, objectBody(await request.json()));
   if (path === "uploads" && request.method === "POST") return beginUpload(context, objectBody(await request.json()));
@@ -321,7 +374,7 @@ export async function handleFollowupRequest(request: Request, context: FollowupC
   if (status && request.method === "POST") return updateStatus(context, status[1], objectBody(await request.json()));
   if (/^[a-zA-Z0-9_-]{1,100}$/.test(path) && request.method === "GET") {
     await context.rateLimit("followup-read", 180, 60);
-    return { followup: JSON.parse((await ticketRow(context, path)).payload) as Followup };
+    return { followup: wireFollowup(context, await ticketRow(context, path)) };
   }
   return fail("المسار المطلوب غير موجود.", 404);
 }

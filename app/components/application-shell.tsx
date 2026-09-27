@@ -5,6 +5,7 @@ import { useApp, type View } from "../lib/app-context";
 import { DeletionRequestsAdminPage } from "./deletion-admin";
 import { AdminDashboard } from "./admin";
 import { Dashboard, OrderDetail, Shipments } from "./dashboard";
+import { CustomerFollowupsPage } from "./staff-followups";
 import { FollowupsPage } from "./followups";
 import { EmployeeDashboard } from "./employee";
 import { CollectionsPage, ImportPage, NotificationsPage, ProfilePage, RecipientsPage, ReturnsPage, TrashPage } from "./management-pages";
@@ -25,11 +26,14 @@ function NavigationDrawer({ onClose }: { onClose: () => void }) {
     { icon: "qrCode", label: "أكواد الطرود للطباعة", view: "parcel-codes" },
     { icon: "bell", label: "الإشعارات", view: "notifications" },
     { icon: "trash", label: "الطرود المحذوفة", view: "trash" },
+    { icon: "users", label: "متابعات المستخدمين", view: "customer-followups" },
     { icon: "message", label: "المتابعات", view: "followups" },
     { icon: "settings", label: "الإعدادات", view: "settings" },
   ] : employee ? [
     { icon: "scan", label: "مسح كود الطرد", view: "home" },
+    { icon: "layers", label: "طرود المستخدمين", view: "shipments" },
     { icon: "bell", label: "الإشعارات", view: "notifications" },
+    { icon: "users", label: "متابعات المستخدمين", view: "customer-followups" },
     { icon: "message", label: "المتابعات", view: "followups" },
     { icon: "settings", label: "إعدادات الموظف", view: "settings" },
   ] : [
@@ -78,6 +82,7 @@ function CurrentPage() {
     case "new-order": return <NewOrder />;
     case "order-detail": return <OrderDetail />;
     case "followups": return <FollowupsPage />;
+    case "customer-followups": return <CustomerFollowupsPage />;
     case "recipients": return <RecipientsPage />;
     case "settings": return <SettingsPage />;
     case "security": return <SecurityPage />;

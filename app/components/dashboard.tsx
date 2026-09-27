@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { canViewParcel } from "../lib/parcel-visibility";
 import { ParcelFollowups } from "./followups";
 import { useApp } from "../lib/app-context";
 import { appendOrderTrackingEvent, appendOrderTrackingNote, formatDate, getStatus, money, normalizeMembership, normalizeParcelCode, relativeDate, statusDefinitions, type Order, type OrderStatus } from "../lib/data";
@@ -55,6 +56,7 @@ export function Shipments() {
   const { database, user, setView } = useApp();
   const [query, setQuery] = useState("");
   const [bulkPrintOpen, setBulkPrintOpen] = useState(false);
+  const staff = user?.role === "admin" || user?.role === "courier";
   const [status, setStatus] = useState(() => {
     if (typeof window === "undefined") return "all";
     const stored = sessionStorage.getItem("almadina-status-filter");
@@ -63,26 +65,26 @@ export function Shipments() {
   });
 
   const printableOrders = useMemo(() => database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && !!order.trackingNumber.trim()), [database.orders, user?.id]);
-  const orders = useMemo(() => database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && (status === "all" || order.status === status) && (!query || `${order.trackingNumber} ${order.recipientName} ${order.city} ${order.recipientPhone}`.toLowerCase().includes(query.toLowerCase()))), [database.orders, user?.id, status, query]);
+  const orders = useMemo(() => database.orders.filter((order) => canViewParcel(user, order) && !order.deleted && (status === "all" || order.status === status) && (!query || `${order.trackingNumber} ${order.recipientName} ${order.city} ${order.recipientPhone} ${order.merchantName} ${order.merchantStore}`.toLowerCase().includes(query.toLowerCase()))), [database.orders, user, status, query]);
 
   return (
     <div className="page-content animate-page">
       <PageHeader
         title="الطرود"
-        subtitle="طرودك النشطة ومراحل تقدّمها لحظة بلحظة"
+        subtitle={staff ? "طرود المستخدمين ومراحل التوصيل" : "طرودك النشطة ومراحل تقدّمها لحظة بلحظة"}
         action={
-          <div className="inline-actions shipments-page__actions">
+          user?.role === "merchant" ? <div className="inline-actions shipments-page__actions">
             <Button className="shipments-page__bulk-print" variant="secondary" icon="printer" disabled={!printableOrders.length} onClick={() => setBulkPrintOpen(true)}>
               طباعة الكل
               {!!printableOrders.length && <span className="button__count">{printableOrders.length.toLocaleString("ar-EG")}</span>}
             </Button>
             <Button icon="plus" onClick={() => setView("new-order")}>طرد جديد</Button>
-          </div>
+          </div> : <Button icon="users" onClick={() => setView("customer-followups")}>متابعات المستخدمين</Button>
         }
       />
-      <Field icon="search" placeholder="ابحث برقم التتبع أو اسم المستلم..." value={query} onChange={(event) => setQuery(event.target.value)} wrapperClassName="search-field" />
+      <Field icon="search" placeholder={staff ? "ابحث باسم المستخدم أو المستلم أو رقم التتبع..." : "ابحث برقم التتبع أو اسم المستلم..."} value={query} onChange={(event) => setQuery(event.target.value)} wrapperClassName="search-field" />
       <div className="filter-scroll"><button className={status === "all" ? "filter-chip is-active" : "filter-chip"} onClick={() => setStatus("all")}>الكل</button>{statusDefinitions.map((entry) => <button key={entry.id} className={status === entry.id ? "filter-chip is-active" : "filter-chip"} onClick={() => setStatus(entry.id)}>{entry.label}</button>)}</div>
-      {orders.length ? <div className="order-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <EmptyState icon="layers" title={query ? "لا توجد نتائج مطابقة" : "لا توجد طرود نشطة"} description={query ? "جرّب البحث باسم آخر أو غيّر حالة الطرد." : "جميع طرودك مكتملة — أنشئ طردًا جديدًا لمتابعته هنا."} action={query ? "مسح البحث" : "إنشاء طرد"} onAction={query ? () => setQuery("") : () => setView("new-order")} />}
+      {orders.length ? <div className="order-list">{orders.map((order) => <OrderCard key={order.id} order={order} showMerchant={staff} />)}</div> : <EmptyState icon="layers" title={query ? "لا توجد نتائج مطابقة" : "لا توجد طرود نشطة"} description={query ? "جرّب البحث باسم آخر أو غيّر حالة الطرد." : staff ? "لا توجد طرود ضمن الحالة المختارة. جرّب عرض الكل أو حدّث البيانات." : "جميع طرودك مكتملة — أنشئ طردًا جديدًا لمتابعته هنا."} action={query ? "مسح البحث" : staff ? "عرض كل الحالات" : "إنشاء طرد"} onAction={query ? () => setQuery("") : staff ? () => setStatus("all") : () => setView("new-order")} />}
       {bulkPrintOpen && <BulkShippingLabelsModal orders={printableOrders} onClose={() => setBulkPrintOpen(false)} />}
     </div>
   );
@@ -240,7 +242,7 @@ export function OrderDetail() {
   const [trackingNote, setTrackingNote] = useState("");
   const [statusUpdate, setStatusUpdate] = useState<{ status: OrderStatus; note: string } | null>(null);
   const noteComposerTarget = useRef<HTMLDivElement>(null);
-  const order = database.orders.find((item) => item.id === selectedOrderId && (user?.role === "admin" || item.merchantId === user?.id || (user?.role === "courier" && item.courierId === user.id)));
+  const order = database.orders.find((item) => item.id === selectedOrderId && canViewParcel(user, item));
 
   useEffect(() => {
     if (!selectedOrderId) return;

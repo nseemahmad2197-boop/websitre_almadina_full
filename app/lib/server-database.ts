@@ -1934,7 +1934,7 @@ function scopeDatabase(database: Database, account: User): Database {
     return {
       users: [publicAccount(account)],
       orders: database.orders
-        .filter((order) => !order.deleted && order.courierId === account.id)
+        .filter((order) => !order.deleted)
         .map(orderForCourier),
       recipients: [],
       collections: database.collections

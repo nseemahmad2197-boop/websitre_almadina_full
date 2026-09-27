@@ -28,10 +28,18 @@ export const FOLLOWUP_MIME_TYPES = [
 export type FollowupAttachment = { id: string; name: string; mimeType: string; size: number; chunkCount: number };
 export type Followup = {
   id: string; orderId: string; creatorId: string; creatorName: string;
+  /** Present on current API responses; optional for older persisted/client records. */
+  merchantId?: string;
   type: FollowupType; title: string; description: string; status: FollowupStatus;
   response: string; createdAt: string; updatedAt: string; attachments: FollowupAttachment[];
 };
 export type FollowupList = { followups: Followup[]; nextCursor: string | null };
+/** Staff directory deliberately excludes account contact and credential fields. */
+export type FollowupCustomer = {
+  id: string; name: string; store: string;
+  orderCount: number; followupCount: number; openCount: number;
+};
+export type FollowupCustomerList = { customers: FollowupCustomer[]; nextCursor: string | null };
 export type FollowupAttachmentChunk = {
   attachment: FollowupAttachment; index: number; chunkCount: number; dataBase64: string;
 };

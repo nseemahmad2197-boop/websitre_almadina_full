@@ -13,6 +13,7 @@ export type View =
   | "new-order"
   | "order-detail"
   | "followups"
+  | "customer-followups"
   | "recipients"
   | "settings"
   | "security"

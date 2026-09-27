@@ -47,6 +47,9 @@ export function toPostgresSql(query: string): string {
   const compatible = query.replaceAll(
     "IN (SELECT value FROM json_each(?))",
     "IN (SELECT value FROM jsonb_array_elements_text(CAST(? AS jsonb)) AS allowed_orders(value))",
+  ).replaceAll(
+    "json_extract(payload, '$.status')",
+    "(CAST(payload AS jsonb) ->> 'status')",
   );
   return replaceQuestionMarkPlaceholders(compatible);
 }

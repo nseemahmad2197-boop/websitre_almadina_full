@@ -11,18 +11,18 @@ export function EmployeeDashboard() {
   const [collectionVerification, setCollectionVerification] = useState<{ invoiceId: string; invoiceNumber: string; code: string } | null>(null);
   const [verifyingCollection, setVerifyingCollection] = useState(false);
   const [preparingCollectionId, setPreparingCollectionId] = useState<string | null>(null);
-  const assignedOrders = useMemo(
-    () => database.orders.filter((order) => !order.deleted && order.courierId === user?.id),
-    [database.orders, user?.id],
-  );
+  const customerOrders = useMemo(() => database.orders.filter((order) => !order.deleted), [database.orders]);
+  const assignedOrders = customerOrders.filter((order) => order.courierId === user?.id);
+  const [parcelScope, setParcelScope] = useState<"all" | "assigned">("all");
+  const displayedOrders = parcelScope === "assigned" ? assignedOrders : customerOrders;
   const collectionInvoices = useMemo(
     () => database.collections,
     [database.collections],
   );
   const pendingCollections = collectionInvoices.filter((invoice) => invoice.status === "pending");
   const readyCollections = collectionInvoices.filter((invoice) => invoice.status === "ready");
-  const activeOrders = assignedOrders.filter((order) => order.status !== "delivered" && order.status !== "returned");
-  const completedOrders = assignedOrders.filter((order) => order.status === "delivered").length;
+  const activeOrders = customerOrders.filter((order) => order.status !== "delivered" && order.status !== "returned");
+  const completedOrders = customerOrders.filter((order) => order.status === "delivered").length;
 
   async function submitCollectionVerification(event: FormEvent) {
     event.preventDefault();
@@ -59,6 +59,8 @@ export function EmployeeDashboard() {
         <div className="employee-scan-card__rule"><Icon name="shield" size={16} /><span>لا يستطيع حساب المستخدم العادي تنفيذ هذا التحديث.</span></div>
       </section>
 
+      <div className="staff-quick-actions"><Button icon="layers" onClick={() => setView("shipments")}>طرود المستخدمين</Button><Button icon="users" variant="secondary" onClick={() => setView("customer-followups")}>متابعات المستخدمين</Button></div>
+
       <section className="employee-collections" aria-label="تجهيز فواتير التحصيل والتحقق منها">
         <header><div><h2>تحصيل الفواتير</h2><p>جهّز الفاتورة أولًا، ثم أدخل كود المستخدم المكوّن من 4 أرقام لتصبح «تم التسليم» وتسجّل باسمك.</p></div><span>{(pendingCollections.length + readyCollections.length).toLocaleString("ar-EG")}</span></header>
         {collectionInvoices.length ? <div className="employee-collection-list">{collectionInvoices.map((invoice) => <article className="employee-collection-card" key={invoice.id}>
@@ -88,21 +90,23 @@ export function EmployeeDashboard() {
       </section>
 
       <section className="employee-orders">
-        <header><div><h2>الطرود المسندة إليك</h2><p>تظهر هنا فقط الطرود التي استلمتها بمسح الكود.</p></div><span>{assignedOrders.length.toLocaleString("ar-EG")}</span></header>
-        {assignedOrders.length ? (
+        <header><div><h2>طرود المستخدمين</h2><p>اطّلع على جميع الطرود أو اعرض الطرود المسندة إليك فقط.</p></div><span>{displayedOrders.length.toLocaleString("ar-EG")}</span></header>
+        <div className="filter-scroll"><button className={`filter-chip ${parcelScope === "all" ? "is-active" : ""}`} onClick={() => setParcelScope("all")}>جميع طرود المستخدمين</button><button className={`filter-chip ${parcelScope === "assigned" ? "is-active" : ""}`} onClick={() => setParcelScope("assigned")}>المسندة إليّ</button></div>
+        {displayedOrders.length ? (
           <div className="employee-order-list">
-            {assignedOrders.map((order) => {
+            {displayedOrders.slice(0, 20).map((order) => {
               const status = getStatus(order.status);
               return <article className="employee-order-card" key={order.id}>
                 <span className="employee-order-card__icon" style={{ color: status.color, background: status.surface }}><Icon name={status.icon} size={21} /></span>
-                <div><strong dir="ltr">{order.trackingNumber}</strong><span>{order.recipientName} · {order.city}</span><div className="employee-order-card__contacts"><a href={`tel:${order.recipientPhone}`} dir="ltr">{order.recipientPhone}</a><a href={`sms:${order.recipientPhone}`}><Icon name="message" size={14} />إشعار العميل</a></div></div>
+                <div><strong dir="ltr">{order.trackingNumber}</strong><span>{order.merchantName} · {order.merchantStore}</span><span>{order.recipientName} · {order.city}</span><div className="employee-order-card__contacts"><a href={`tel:${order.recipientPhone}`} dir="ltr">{order.recipientPhone}</a><a href={`sms:${order.recipientPhone}`}><Icon name="message" size={14} />إشعار العميل</a></div></div>
                 <StatusPill status={order.status} />
                 <Button variant="outline" onClick={() => { setSelectedOrderId(order.id); setView("order-detail"); }}>تفاصيل الطرد والمتابعات</Button>
                 {order.notes && <div className="employee-order-card__instructions"><span><Icon name="message" size={16} /></span><div><strong>تعليمات المندوب</strong><p>{order.notes}</p></div></div>}
               </article>;
             })}
           </div>
-        ) : <EmptyState icon="scan" title="لا توجد طرود مسندة بعد" description="امسح كود طرد جاهز للإرسال أو راجع ليظهر هنا تلقائيًا." action="مسح كود الطرد" onAction={() => openScanner()} />}
+        ) : <EmptyState icon="package" title={parcelScope === "assigned" ? "لا توجد طرود مسندة إليك" : "لا توجد طرود مستخدمين بعد"} description="تُعرض الطرود الحالية من الخادم دون الحاجة إلى مسح كودها أولًا." />}
+        {displayedOrders.length > 20 && <Button variant="outline" onClick={() => setView("shipments")}>عرض جميع الطرود</Button>}
       </section>
 
       {collectionVerification && <Modal title="قراءة كود التحقق" onClose={() => !verifyingCollection && setCollectionVerification(null)} className="employee-verification-modal" sheet><form className="modal-form employee-verification-form" onSubmit={submitCollectionVerification}><div className="employee-verification-form__intro"><span><Icon name="key" size={24} /></span><div><strong dir="ltr">{collectionVerification.invoiceNumber}</strong><p>أدخل الكود المكوّن من 4 أرقام الذي يعرضه المستخدم. عند صحته تصبح حالة الفاتورة «تم التسليم» مباشرة.</p></div></div><Field icon="key" label="كود التحقق" aria-label="كود تحقق فاتورة التحصيل للموظف" placeholder="0000" value={collectionVerification.code} onChange={(event) => setCollectionVerification({ ...collectionVerification, code: event.target.value.replace(/[^\d]/g, "").slice(0, 4) })} inputMode="numeric" autoComplete="one-time-code" maxLength={4} dir="ltr" autoFocus /><p className="employee-verification-form__note"><Icon name="shield" size={16} />لن تتغير الفاتورة إذا كان الكود غير صحيح، والمحاولات المتكررة محدودة للحماية.</p><Button type="submit" icon="check" full loading={verifyingCollection} disabled={collectionVerification.code.length !== 4}>تحقق وتسليم التحصيل</Button></form></Modal>}

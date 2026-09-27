@@ -149,6 +149,7 @@ export function ScannerOverlay({ employeeMode = false, purpose = "lookup", onClo
   const videoRef = useRef<HTMLVideoElement>(null);
   const onDetectedRef = useRef(onDetected);
   const handledRef = useRef(false);
+  const stopCameraRef = useRef<() => void>(() => {});
   const [manual, setManual] = useState("");
   const [cameraFailed, setCameraFailed] = useState(false);
   const [cameraAttempt, setCameraAttempt] = useState(0);
@@ -161,8 +162,30 @@ export function ScannerOverlay({ employeeMode = false, purpose = "lookup", onClo
   useEffect(() => {
     const video = videoRef.current;
     let controls: IScannerControls | null = null;
+    let stream: MediaStream | null = null;
     let active = true;
+    let failed = false;
     handledRef.current = false;
+
+    function stopCamera() {
+      active = false;
+      controls?.stop();
+      stream?.getTracks().forEach((track) => {
+        track.removeEventListener("ended", cameraEnded);
+        track.stop();
+      });
+      if (video) { video.pause(); video.srcObject = null; }
+    }
+
+    function cameraEnded() {
+      if (!active || handledRef.current) return;
+      failed = true;
+      stopCamera();
+      setCameraFailed(true);
+      setMessage("توقفت الكاميرا. أعد تشغيلها لمتابعة قراءة كود QR.");
+    }
+
+    stopCameraRef.current = stopCamera;
 
     async function start() {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -179,37 +202,56 @@ export function ScannerOverlay({ employeeMode = false, purpose = "lookup", onClo
           setMessage("إذن الكاميرا مرفوض. اسمح به من إعدادات الموقع في المتصفح ثم عد إلى الماسح.");
           return;
         }
-        const { BrowserQRCodeReader } = await import("@zxing/browser");
+        const { CameraQrReader, isQrFrameMiss } = await import("./lib/qr-camera-reader");
         if (!active) return;
 
-        const reader = new BrowserQRCodeReader(undefined, {
+        const reader = new CameraQrReader(undefined, {
           delayBetweenScanAttempts: 180,
           delayBetweenScanSuccess: 500,
           tryPlayVideoTimeout: 5_000,
         });
-        const nextControls = await reader.decodeFromConstraints({
+        // Keep ownership while the permission prompt is pending. The reader's
+        // decodeFromConstraints otherwise attaches a late stream after close.
+        stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
             facingMode: { ideal: "environment" },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
-        }, video, (result, _error, scannerControls) => {
-          if (!active || handledRef.current || !result) return;
+        });
+        if (!active) { stream.getTracks().forEach((track) => track.stop()); return; }
+        stream.getVideoTracks().forEach((track) => track.addEventListener("ended", cameraEnded));
+        const nextControls = await reader.decodeFromStream(stream, video, (result, error, scannerControls) => {
+          if (!active || handledRef.current) return;
+          if (error) {
+            // These three results mean the current frame has no readable QR.
+            // Other errors terminate ZXing's loop and need an explicit retry.
+            if (isQrFrameMiss(error)) return;
+            failed = true;
+            scannerControls.stop();
+            stopCamera();
+            setCameraFailed(true);
+            setMessage("تعذّرت قراءة صورة الكاميرا. أعد تشغيلها وحاول مجددًا.");
+            return;
+          }
+          if (!result) return;
           const value = result.getText().trim();
           if (!value) return;
           handledRef.current = true;
           scannerControls.stop();
+          stopCamera();
           onDetectedRef.current(value);
         });
 
-        if (!active) { nextControls.stop(); return; }
+        if (!active || failed || handledRef.current) { nextControls.stop(); return; }
         controls = nextControls;
         setMessage(cameraOnly ? "امسح كود QR المطبوع لإضافته إلى الطرد" : employeeMode ? "ضع كود QR للطرد داخل الإطار" : "ضع رمز QR داخل الإطار");
       } catch (error) {
         if (!active) return;
+        stopCamera();
         setCameraFailed(true);
-        const errorName = error instanceof DOMException ? error.name : "";
+        const errorName = error instanceof Error ? error.name : "";
         if (errorName === "NotAllowedError" || errorName === "SecurityError") {
           setMessage("تم رفض إذن الكاميرا — اسمح للموقع باستخدامها ثم حاول مجددًا.");
         } else if (errorName === "NotFoundError" || errorName === "OverconstrainedError") {
@@ -223,13 +265,7 @@ export function ScannerOverlay({ employeeMode = false, purpose = "lookup", onClo
     }
 
     void start();
-    return () => {
-      active = false;
-      controls?.stop();
-      const stream = video?.srcObject;
-      if (stream instanceof MediaStream) stream.getTracks().forEach((track) => track.stop());
-      if (video) video.srcObject = null;
-    };
+    return stopCamera;
   }, [employeeMode, cameraOnly, cameraAttempt]);
 
   useEffect(() => {
@@ -254,7 +290,14 @@ export function ScannerOverlay({ employeeMode = false, purpose = "lookup", onClo
     };
   }, [cameraFailed]);
 
-  return <div className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video ref={videoRef} playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={onClose} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2 aria-live="polite">{message}</h2><p>{cameraOnly ? "وجّه الكاميرا إلى ملصق الأكواد الذي استلمته من الشركة. سيُحفظ الكود لهذا الطرد بعد التحقق منه." : employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام الطرود الجاهزة للإرسال والطرود الراجعة." : "ضع رمز QR داخل الإطار ليُقرأ تلقائيًا."}</p>{cameraFailed && <Button icon="camera" onClick={() => { setCameraFailed(false); setMessage("جارٍ تشغيل الكاميرا..."); setCameraAttempt((attempt) => attempt + 1); }}>إعادة تشغيل الكاميرا</Button>}{!cameraOnly && <div className="scanner-manual"><Field placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={() => onDetectedRef.current(manual.trim())}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div>}</div></div>;
+  function finishManualEntry() {
+    if (handledRef.current || !manual.trim()) return;
+    handledRef.current = true;
+    stopCameraRef.current();
+    onDetectedRef.current(manual.trim());
+  }
+
+  return <div role="dialog" aria-modal="true" aria-label="مسح كود QR" className={`scanner-overlay ${employeeMode ? "scanner-overlay--employee" : ""}`}><video key={`${cameraOnly}-${employeeMode}-${cameraAttempt}`} ref={videoRef} autoPlay playsInline muted className="scanner-overlay__video" /><IconButton name="close" label="إغلاق الماسح" className="scanner-overlay__close" onClick={() => { stopCameraRef.current(); onClose(); }} /><div className="scanner-frame"><i /><i /><i /><i /><span /></div><div className="scanner-overlay__footer"><h2 aria-live="polite">{message}</h2><p>{cameraOnly ? "وجّه الكاميرا إلى ملصق الأكواد الذي استلمته من الشركة. سيُحفظ الكود لهذا الطرد بعد التحقق منه." : employeeMode ? "ضع كود QR الموجود على ملصق الشحن داخل الإطار. يقبل النظام الطرود الجاهزة للإرسال والطرود الراجعة." : "ضع رمز QR داخل الإطار ليُقرأ تلقائيًا."}</p>{cameraFailed && <Button icon="camera" onClick={() => { setCameraFailed(false); setMessage("جارٍ تشغيل الكاميرا..."); setCameraAttempt((attempt) => attempt + 1); }}>إعادة تشغيل الكاميرا</Button>}{!cameraOnly && <div className="scanner-manual"><Field aria-label="رقم التتبع" placeholder="ALX-20200001" value={manual} onChange={(event) => setManual(event.target.value.toUpperCase())} dir="ltr" /><Button disabled={!manual.trim()} onClick={finishManualEntry}>{employeeMode ? "تأكيد الشحن" : "بحث"}</Button></div>}</div></div>;
 }
 
 function ConfirmModal({ options, onClose }: { options: ConfirmOptions; onClose: () => void }) {

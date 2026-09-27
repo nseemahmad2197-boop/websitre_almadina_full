@@ -32,7 +32,7 @@ export function FollowupsPage() {
   return user ? <div className="page-content followups-page"><PageHeader title="المتابعات" subtitle="طلبات مرتبطة بالطرود وردود فريق المتابعة" onBack={() => setView(user.role === "admin" ? "admin" : "home")} /><FollowupCollection key={user.id} accountId={user.id} /></div> : null;
 }
 
-function FollowupCollection({ accountId, order }: { accountId: string; order?: Order }) {
+export function FollowupCollection({ accountId, order, merchantId }: { accountId: string; order?: Order; merchantId?: string }) {
   const { user, database, setSelectedOrderId, setView, showToast } = useApp();
   const signal = useRequests(accountId);
   const [entries, setEntries] = useState<Followup[]>([]);
@@ -47,11 +47,12 @@ function FollowupCollection({ accountId, order }: { accountId: string; order?: O
     setLoading(true); setError("");
     const params = new URLSearchParams();
     if (order) params.set("orderId", order.id);
+    if (merchantId) params.set("merchantId", merchantId);
     if (cursor) params.set("cursor", cursor);
     try {
       const result = await followupApi<FollowupList>(`followups?${params}`, signal);
       if (signal.aborted || number !== loadNumber.current) return;
-      if (!Array.isArray(result.followups) || !result.followups.every(validFollowup)
+      if (!Array.isArray(result.followups) || !result.followups.every((item) => validFollowup(item) && (!merchantId || (item.merchantId ?? database.orders.find((parcel) => parcel.id === item.orderId)?.merchantId) === merchantId))
         || (result.nextCursor !== null && typeof result.nextCursor !== "string")) throw new Error("تعذّر قراءة المتابعات.");
       setEntries((previous) => cursor ? [...previous, ...result.followups.filter((item) => !previous.some((existing) => existing.id === item.id))] : result.followups);
       setNext(result.nextCursor);
