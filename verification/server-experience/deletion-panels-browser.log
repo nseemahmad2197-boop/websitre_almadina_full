@@ -1,0 +1,1 @@
+PASS: deletion first-load skeleton, failed initial read suppresses false empty/form, public 401 permits sign-in form, retry is GET only, status and admin queue retained on refresh error, account-switch stale response ignored.

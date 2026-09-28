@@ -1,0 +1,25 @@
+[
+  {
+    "command": [
+      "npm",
+      "run",
+      "typecheck"
+    ],
+    "exitCode": 0,
+    "seconds": 6.52,
+    "log": "typecheck.txt"
+  },
+  {
+    "command": [
+      "timeout",
+      "180s",
+      "node_modules/.bin/vinext",
+      "build"
+    ],
+    "exitCode": 0,
+    "seconds": 9.99,
+    "log": "production-build.txt",
+    "cleanBuild": true,
+    "priorAttempt": "stale generated dist caused existing Sites copy hook EEXIST; clean generated output, no source change"
+  }
+]

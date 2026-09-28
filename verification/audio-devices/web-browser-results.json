@@ -1,6 +1,6 @@
 {
   "result": "pass",
-  "browser": "131.0.6778.204",
+  "browser": "153.0.8010.0",
   "fixtures": true,
   "checks": [
     "iOS/Android/model/version labels",

@@ -1,0 +1,17 @@
+{
+  "typecheck": "passed",
+  "productionBuild": "passed after removing stale generated output",
+  "targetedTests": 37,
+  "chromiumSuites": 6,
+  "transportMode": "simulated network; actual Chromium153 rendering/interactions",
+  "reviewedWidths": [
+    320,
+    390,
+    1280
+  ],
+  "darkAndReducedMotion": "passed",
+  "stableProductionInputs": true,
+  "nativeDeviceTests": "not performed",
+  "deployed": false,
+  "databaseAndBackend": "unchanged from previous release"
+}

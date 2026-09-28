@@ -1,0 +1,45 @@
+✔ successful payload and request security settings remain intact (9.208777ms)
+✔ HTTP status categories preserve non-OK response and conflict snapshot (5.857446ms)
+✔ 4xx plain Arabic validation stays useful; 5xx diagnostics stay private (2.07468ms)
+✔ successful HTTP responses sanitize error text without changing receipts or adding absent errors (1.371518ms)
+✔ HTML and non-object HTTP errors retain actual status without raw bodies (4.643361ms)
+✔ malformed successful replies throw typed safe errors (1.661559ms)
+✔ network and offline failures are distinct and do not expose fetch errors (0.844656ms)
+✔ stalled fetch ignoring AbortSignal is bounded and mutation is never replayed (14.936701ms)
+✔ stalled body ignoring AbortSignal shares the bounded request deadline (16.499868ms)
+✔ external cancellation before a request prevents fetch (1.097627ms)
+✔ external abort settles a non-cooperative pending fetch without timeout error (0.810431ms)
+✔ external abort during JSON body remains intentional cancellation (0.409854ms)
+✔ completed request removes external abort listener and clears deadline (26.546828ms)
+✔ unknown exceptions have safe Arabic copy and status errors stay classified (0.54151ms)
+✔ app lock bootstrap keeps endpoint and successful status payload (7.101947ms)
+✔ app lock status can cancel an in-flight fetch that ignores abort (1.070827ms)
+✔ app lock keeps HTTP status class and sanitized Arabic messages (2.119083ms)
+✔ PIN and passkey mutations retain endpoint, body, and one-request semantics (1.279256ms)
+✔ permission is requested on activation once and reused on later visits (12.302127ms)
+✔ an existing system grant is reused without prompting or auto-enabling an unknown preference (3.089273ms)
+✔ denial and revocation override a saved preference without repeated prompts (3.995092ms)
+✔ a missing subscription recovers only with an existing grant and opt-in; disabling persists (3.102998ms)
+✔ camera and location use fresh browser state and unsupported permission queries fall back (0.742284ms)
+✔ overlapping permission refreshes cannot undo an explicit subscription disable (2.345735ms)
+✔ linked devices client accepts legacy records and keeps missing area unknown (5.634821ms)
+✔ device rename pins account and validates exact trimmed receipt; empty clears (2.864413ms)
+✔ old server or contradictory rename receipts cannot report success (4.337401ms)
+✔ malformed devices and duplicate or multiple-current identities are rejected (2.960943ms)
+✔ invalid aliases never send requests and use UTF-16 server limit (0.837442ms)
+✔ revoke requires the target to disappear and propagates authentication errors (1.320693ms)
+✔ operational events exclude credentials, submitted content and identifying URLs (5.096387ms)
+✔ failed logging cannot change an acknowledged API result (0.520771ms)
+✔ snapshots require usable records and reject stale or foreign account revisions (0.441293ms)
+✔ API reads use same-origin credentials, no cache and refuse redirects (3.09879ms)
+✔ a stalled mutation times out once and is never automatically replayed (15.409975ms)
+✔ an expired session is recognized even when a proxy returns HTML (0.957005ms)
+✔ malformed successful replies cannot be accepted as saved data (1.315333ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 264.983019
