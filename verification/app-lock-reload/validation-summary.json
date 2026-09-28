@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-28",
+  "scope": "Website app-lock continuity on same-tab reload",
+  "deployed": false,
+  "baseline": {
+    "sourceArchive": "Almadina-Website-Loading-States-2026-09-28.zip",
+    "sha256": "0e9b23800b6f5a391e11428ad81aec2a2573f9cc225844352031ef367649bc1e",
+    "bugReproducedInChromium": true
+  },
+  "validation": {
+    "unitAndTransport": {
+      "passed": 12,
+      "failed": 0
+    },
+    "focusedBrowserScenarios": {
+      "passed": 14,
+      "failed": 0
+    },
+    "existingFullAppBrowserRegression": "passed",
+    "typecheck": "passed",
+    "renderProductionBuild": "passed",
+    "productionInputsMatchFinalBuild": true,
+    "independentSourceReview": "no remaining blocker"
+  },
+  "testEnvironment": "Real Chromium, production application in React StrictMode, mocked API responses and background/elapsed-time events",
+  "limitations": [
+    "No live production deployment or account access",
+    "No physical iPhone or Safari device test",
+    "No physical biometric authenticator test"
+  ],
+  "behavior": [
+    "Same-tab genuine reload preserves a verified unlocked account",
+    "Initial server session and lock status are still checked",
+    "Background lock remains 15000 ms",
+    "Locked reload, new tab, ordinary navigation, logout, changed account and invalid status do not inherit unlock",
+    "Delayed initial lock status and late responses preserve newer lock/authentication decisions"
+  ],
+  "storage": "One-use non-secret sessionStorage handoff and localStorage authentication generation; no PIN or biometric secret is stored",
+  "backendSchemaDependenciesChanged": false,
+  "commands": [
+    "node --experimental-strip-types --test tests/app-lock-reload.test.mjs tests/app-lock-transport.test.mjs",
+    "node tests/app-lock-reload.browser.mjs",
+    "node tests/server-experience.browser.mjs",
+    "npm run typecheck",
+    "DEPLOY_TARGET=render node_modules/.bin/vinext build"
+  ]
+}

@@ -1,0 +1,20 @@
+✔ navigation evidence requires real reload; legacy Safari only when modern timing is absent (2.04306ms)
+✔ short same-tab handoff is valid at entry; exact 15s/future/malformed/foreign generation are rejected (2.032862ms)
+✔ handoff consumed once; active slow bootstrap remains valid but account or hidden expiry does not (1.840162ms)
+✔ pagehide uses the earliest hidden time and cannot adopt a newer tab authentication generation (0.917771ms)
+✔ failed authentication generation rotation removes old generation and invalidates old candidates (1.999369ms)
+✔ unavailable storage or failed single-use removal fails closed without crashing (1.31336ms)
+✔ background threshold is exact and no hidden timestamp means no inactivity lock (0.366393ms)
+✔ app lock bootstrap keeps endpoint and successful status payload (9.399141ms)
+✔ app lock status can cancel an in-flight fetch that ignores abort (1.740707ms)
+✔ malformed successful lock status cannot be treated as disabled (3.178849ms)
+✔ app lock keeps HTTP status class and sanitized Arabic messages (4.109986ms)
+✔ PIN and passkey mutations retain endpoint, body, and one-request semantics (1.856733ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 221.763762

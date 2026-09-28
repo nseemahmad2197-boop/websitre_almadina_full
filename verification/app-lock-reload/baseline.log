@@ -1,0 +1,1 @@
+Before fix: verified PIN unlock is lost on an actual ordinary browser reload (regression reproduced).
