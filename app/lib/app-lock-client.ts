@@ -61,8 +61,12 @@ export async function detectBiometricAvailability(): Promise<boolean> {
   }
 }
 
-export function getAppLockStatus(signal?: AbortSignal): Promise<ServerAppLockStatus> {
-  return appLockRequest<ServerAppLockStatus>("status", { signal });
+export async function getAppLockStatus(signal?: AbortSignal): Promise<ServerAppLockStatus> {
+  const status = await appLockRequest<ServerAppLockStatus>("status", { signal });
+  if (!status || typeof status.enabled !== "boolean" || typeof status.biometricEnabled !== "boolean" || typeof status.biometricLoginReady !== "boolean") {
+    throw new AppLockApiError("تعذّر التحقق من حالة قفل التطبيق. استجابة الخادم غير مكتملة.", 502);
+  }
+  return status;
 }
 
 export function createAppLock(pin: string): Promise<ServerAppLockStatus> {

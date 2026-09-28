@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { requestApiJSON, validSnapshotEnvelope, canAcceptPolledSnapshot, safeApiErrorMessage } from "./lib/api-transport";
+import { APP_LOCK_AUTH_GENERATION_KEY, appLockAuthGeneration, backgroundLockDue, canRestoreReloadHandoff, clearReloadHandoff, consumeReloadHandoff, ensureAppLockAuthGeneration, invalidateReloadAuthentication, saveReloadHandoff, type ReloadHandoff } from "./lib/app-lock-reload";
 import type { IScannerControls } from "@zxing/browser";
 import { readBrowserPermission } from "./lib/browser-permissions";
 import { LinkedDevicesError, requestLinkedDevices } from "./lib/linked-devices";
@@ -32,7 +33,6 @@ type ThemePreference = Preferences["theme"];
 type WebkitAudioWindow = Window & { webkitAudioContext?: typeof AudioContext };
 
 const THEME_STORAGE_KEY = "almadina-express-theme";
-const BACKGROUND_LOCK_DELAY = 15_000;
 const EMPTY_APP_LOCK: AppLockState = {
   ready: false,
   enabled: false,
@@ -352,6 +352,12 @@ export default function AlmadinaApplication() {
   const savingUpdates = useRef(false);
   const logoutInFlight = useRef(false);
   const sessionEpoch = useRef(0);
+  const reloadCandidate = useRef<ReloadHandoff | null | undefined>(undefined);
+  const reloadAllowed = useRef(false);
+  const reloadAuthGeneration = useRef<string | null>(null);
+  const lockLifecycleVersion = useRef(0);
+  const lockSnapshot = useRef({ userId, ...appLock });
+  lockSnapshot.current = { userId, ...appLock };
   const storedThemePreference = useRef<ThemePreference | null>(null);
   const knownNoticeIds = useRef<Set<string>>(new Set());
   const noticeBaselineUserId = useRef<string | null>(null);
@@ -416,6 +422,9 @@ export default function AlmadinaApplication() {
     let active = true;
     const request = new AbortController();
     const operationEpoch = sessionEpoch.current;
+    // A ref survives StrictMode's effect cleanup/replay. Consume once, before
+    // network work, so a valid foreground reload may take longer than 15 s.
+    if (reloadCandidate.current === undefined) reloadCandidate.current = consumeReloadHandoff();
     let hydratedTheme: ThemePreference | null = null;
     try {
       const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
@@ -442,11 +451,16 @@ export default function AlmadinaApplication() {
         rememberSnapshotAccount(snapshot);
 
         const biometricAvailable = await detectBiometricAvailability();
+        if (!active || request.signal.aborted || operationEpoch !== sessionEpoch.current) return;
         let restoredLock: AppLockState;
         try {
           const status = await getAppLockStatus(request.signal);
-          restoredLock = { ...status, ready: true, locked: status.enabled, biometricAvailable };
+          if (!active || request.signal.aborted || operationEpoch !== sessionEpoch.current) return;
+          const continued = canRestoreReloadHandoff(reloadCandidate.current ?? null, account.id, backgroundedAt.current);
+          restoredLock = { ...status, ready: true, locked: status.enabled && !continued, biometricAvailable };
         } catch {
+          if (!active || request.signal.aborted || operationEpoch !== sessionEpoch.current) return;
+          reloadCandidate.current = null; reloadAllowed.current = false; clearReloadHandoff();
           restoredLock = {
             ready: true,
             enabled: true,
@@ -459,6 +473,9 @@ export default function AlmadinaApplication() {
         }
 
         if (!active || operationEpoch !== sessionEpoch.current) return;
+        reloadAllowed.current = !restoredLock.locked;
+        reloadAuthGeneration.current = restoredLock.locked ? null : ensureAppLockAuthGeneration();
+        reloadCandidate.current = null;
 
         const accountTheme = snapshot.database.preferences[account.id]?.theme;
         if (!storedThemePreference.current && isThemePreference(accountTheme)) {
@@ -481,6 +498,7 @@ export default function AlmadinaApplication() {
         setSessionError(""); setSessionReady(true);
       } catch (error) {
         if (!active || operationEpoch !== sessionEpoch.current || request.signal.aborted) return;
+        reloadCandidate.current = null; reloadAllowed.current = false; clearReloadHandoff();
         // Only an explicit authentication response means the visitor is signed
         // out. An unavailable server must not look like a lost account/session.
         if (error instanceof SharedApiError && error.status === 401) { setSessionError(""); setSessionReady(true); }
@@ -560,25 +578,41 @@ export default function AlmadinaApplication() {
   }, [preferences.theme]);
 
   useEffect(() => {
-    if (!userId || !appLock.enabled) {
-      backgroundedAt.current = null;
-      return;
-    }
-
+    if (document.visibilityState === "hidden" && backgroundedAt.current === null) backgroundedAt.current = Date.now();
+    const invalidate = (lock: boolean) => {
+      reloadCandidate.current = null; reloadAllowed.current = false;
+      reloadAuthGeneration.current = null;
+      ++lockLifecycleVersion.current; clearReloadHandoff();
+      if (lock) setAppLock((current) => current.enabled || !current.ready ? { ...current, locked: true } : current);
+    };
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
-        backgroundedAt.current = Date.now();
+        backgroundedAt.current ??= Date.now();
         return;
       }
-      if (backgroundedAt.current && Date.now() - backgroundedAt.current >= BACKGROUND_LOCK_DELAY) {
-        setAppLock((current) => current.enabled ? { ...current, locked: true } : current);
-      }
+      if (backgroundLockDue(backgroundedAt.current)) invalidate(true);
       backgroundedAt.current = null;
     };
-
+    const onPageHide = () => {
+      backgroundedAt.current ??= Date.now();
+      ++lockLifecycleVersion.current;
+      const current = lockSnapshot.current;
+      if (current.userId && current.ready && current.enabled && !current.locked && reloadAllowed.current && !backgroundLockDue(backgroundedAt.current)) {
+        saveReloadHandoff(current.userId, reloadAuthGeneration.current, backgroundedAt.current);
+      } else clearReloadHandoff();
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) { invalidate(true); backgroundedAt.current = document.visibilityState === "hidden" ? Date.now() : null; }
+    };
+    const onAuthenticationChange = (event: StorageEvent) => {
+      if (event.key === APP_LOCK_AUTH_GENERATION_KEY || event.key === null) invalidate(true);
+    };
     document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, [userId, appLock.enabled]);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("storage", onAuthenticationChange);
+    return () => { document.removeEventListener("visibilitychange", onVisibilityChange); window.removeEventListener("pagehide", onPageHide); window.removeEventListener("pageshow", onPageShow); window.removeEventListener("storage", onAuthenticationChange); };
+  }, []);
 
   useEffect(() => {
     if (!userId || !currentUserRole) {
@@ -718,10 +752,7 @@ export default function AlmadinaApplication() {
           }
 
           if (error instanceof SharedApiError && error.status === 401) {
-            pendingUpdates.current = [];
-            authoritativeDatabase.current = null;
-            setUserId(null);
-            setViewState("home");
+            clearLocalSession();
             showToast("انتهت الجلسة. سجّل الدخول مرة أخرى.", "error");
             return;
           }
@@ -1013,14 +1044,40 @@ export default function AlmadinaApplication() {
 
   function setView(next: View) { setViewState(next); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
+  function lockOperationIdentity() {
+    return { session: sessionEpoch.current, lifecycle: lockLifecycleVersion.current, generation: appLockAuthGeneration() };
+  }
+  function isCurrentLockSession(operation: ReturnType<typeof lockOperationIdentity>): boolean {
+    return operation.session === sessionEpoch.current && operation.generation === appLockAuthGeneration();
+  }
+  function isCurrentLockOperation(operation: ReturnType<typeof lockOperationIdentity>): boolean {
+    return isCurrentLockSession(operation) && operation.lifecycle === lockLifecycleVersion.current;
+  }
+  function rememberUnlockedReload(): void {
+    ++lockLifecycleVersion.current;
+    reloadCandidate.current = null; clearReloadHandoff();
+    reloadAllowed.current = true; reloadAuthGeneration.current = ensureAppLockAuthGeneration();
+  }
+  function invalidateLockReload(): void {
+    reloadCandidate.current = null; reloadAllowed.current = false; reloadAuthGeneration.current = null;
+    ++lockLifecycleVersion.current; invalidateReloadAuthentication();
+  }
+
   async function refreshAppLock(): Promise<void> {
-    const operationEpoch = sessionEpoch.current;
+    const operation = lockOperationIdentity();
     try {
       const [status, biometricAvailable] = await Promise.all([getAppLockStatus(), detectBiometricAvailability()]);
-      if (operationEpoch !== sessionEpoch.current) return;
-      setAppLock((current) => ({ ...status, ready: true, locked: status.enabled && current.locked, biometricAvailable }));
+      if (!isCurrentLockSession(operation)) return;
+      // A pending status read must still resolve after a background lock. A
+      // newer verified unlock, however, takes precedence over its old state.
+      const newerUnlock = operation.lifecycle !== lockLifecycleVersion.current && reloadAllowed.current;
+      const locked = status.enabled && ((!newerUnlock && lockSnapshot.current.locked) || backgroundLockDue(backgroundedAt.current) || !reloadAllowed.current);
+      if (!locked) rememberUnlockedReload();
+      else { reloadAllowed.current = false; clearReloadHandoff(); }
+      setAppLock({ ...status, ready: true, locked, biometricAvailable });
     } catch (error) {
-      if (operationEpoch !== sessionEpoch.current) return;
+      if (!isCurrentLockSession(operation) || (operation.lifecycle !== lockLifecycleVersion.current && reloadAllowed.current)) return;
+      reloadCandidate.current = null; reloadAllowed.current = false; clearReloadHandoff();
       const message = readableAppLockError(error, "تعذّر التحقق من حالة قفل التطبيق.");
       setAppLock((current) => ({ ...current, ready: true, locked: true, error: message }));
       showToast(message, "error");
@@ -1028,31 +1085,43 @@ export default function AlmadinaApplication() {
   }
 
   async function enableAppLock(pin: string): Promise<boolean> {
+    const operation = lockOperationIdentity();
     try {
       const [status, biometricAvailable] = await Promise.all([createAppLock(pin), detectBiometricAvailability()]);
-      setAppLock({ ...status, ready: true, locked: false, biometricAvailable });
+      if (!isCurrentLockOperation(operation)) return false;
+      invalidateLockReload();
+      const locked = status.enabled && backgroundLockDue(backgroundedAt.current);
+      if (!locked) rememberUnlockedReload();
+      setAppLock({ ...status, ready: true, locked, biometricAvailable });
       showToast("تم تفعيل قفل التطبيق وحفظ الرمز بصورة مشفّرة.");
       return true;
     } catch (error) {
+      if (!isCurrentLockOperation(operation)) return false;
       showToast(readableAppLockError(error, "تعذّر تفعيل قفل التطبيق."), "error");
       return false;
     }
   }
 
   async function disableAppLock(pin: string): Promise<boolean> {
+    const operation = lockOperationIdentity();
     try {
       const status = await removeAppLock(pin);
+      if (!isCurrentLockOperation(operation)) return false;
+      invalidateLockReload();
       setAppLock((current) => ({ ...status, ready: true, locked: false, biometricAvailable: current.biometricAvailable }));
       showToast("تم إيقاف قفل التطبيق وإزالة حماية الجهاز المرتبطة به.");
       return true;
     } catch (error) {
+      if (!isCurrentLockOperation(operation)) return false;
       showToast(readableAppLockError(error, "تعذّر إيقاف قفل التطبيق."), "error");
       return false;
     }
   }
 
   async function enableBiometricUnlock(pin: string): Promise<boolean> {
+    const operation = lockOperationIdentity();
     const biometricAvailable = await detectBiometricAvailability();
+    if (!isCurrentLockOperation(operation)) return false;
     setAppLock((current) => ({ ...current, biometricAvailable }));
     if (!appLock.enabled) {
       showToast("فعّل قفل التطبيق وحدد رمزًا أولًا.", "info");
@@ -1065,44 +1134,63 @@ export default function AlmadinaApplication() {
 
     try {
       const status = await registerBiometricUnlock(pin);
-      setAppLock((current) => ({ ...status, ready: true, locked: false, biometricAvailable: current.biometricAvailable }));
+      if (!isCurrentLockOperation(operation)) return false;
+      invalidateLockReload();
+      const locked = status.enabled && backgroundLockDue(backgroundedAt.current);
+      if (!locked) rememberUnlockedReload();
+      setAppLock((current) => ({ ...status, ready: true, locked, biometricAvailable: current.biometricAvailable }));
       showToast("تم ربط قفل التطبيق بحماية هذا الجهاز.");
       return true;
     } catch (error) {
+      if (!isCurrentLockOperation(operation)) return false;
       showToast(readableAppLockError(error, "تعذّر تفعيل حماية الجهاز."), "error");
       return false;
     }
   }
 
   async function disableBiometricUnlock(pin: string): Promise<boolean> {
+    const operation = lockOperationIdentity();
     try {
       const status = await removeBiometricUnlock(pin);
-      setAppLock((current) => ({ ...status, ready: true, locked: false, biometricAvailable: current.biometricAvailable }));
+      if (!isCurrentLockOperation(operation)) return false;
+      invalidateLockReload();
+      const locked = status.enabled && backgroundLockDue(backgroundedAt.current);
+      if (!locked) rememberUnlockedReload();
+      setAppLock((current) => ({ ...status, ready: true, locked, biometricAvailable: current.biometricAvailable }));
       showToast("تم إيقاف الدخول بحماية الجهاز.");
       return true;
     } catch (error) {
+      if (!isCurrentLockOperation(operation)) return false;
       showToast(readableAppLockError(error, "تعذّر إيقاف حماية الجهاز."), "error");
       return false;
     }
   }
 
   async function verifyAppPin(pin: string): Promise<boolean> {
+    const operation = lockOperationIdentity();
     try {
       await verifyAppLockPin(pin);
+      if (!isCurrentLockOperation(operation) || backgroundLockDue(backgroundedAt.current)) return false;
+      rememberUnlockedReload();
       setAppLock((current) => ({ ...current, locked: false, error: undefined }));
       return true;
     } catch (error) {
+      if (!isCurrentLockOperation(operation)) return false;
       showToast(readableAppLockError(error, "رمز القفل غير صحيح."), "error");
       return false;
     }
   }
 
   async function unlockWithBiometric(): Promise<boolean> {
+    const operation = lockOperationIdentity();
     try {
       await authenticateWithBiometric();
+      if (!isCurrentLockOperation(operation) || backgroundLockDue(backgroundedAt.current)) return false;
+      rememberUnlockedReload();
       setAppLock((current) => ({ ...current, locked: false, error: undefined }));
       return true;
     } catch (error) {
+      if (!isCurrentLockOperation(operation)) return false;
       showToast(readableAppLockError(error, "تعذّر فتح التطبيق بحماية الجهاز."), "error");
       return false;
     }
@@ -1122,6 +1210,8 @@ export default function AlmadinaApplication() {
     }
 
     sessionEpoch.current += 1;
+    invalidateLockReload();
+    if (!backgroundLockDue(backgroundedAt.current)) rememberUnlockedReload();
     setConfirmOptions(null);
     setScanner(null);
     authoritativeDatabase.current = snapshot.database;
@@ -1134,7 +1224,7 @@ export default function AlmadinaApplication() {
     setUserId(account.id);
     setSessionReady(true);
     setSessionError(""); setSyncError(""); setSyncBusy(false);
-    setAppLock({ ...EMPTY_APP_LOCK, ready: true, locked: false });
+    setAppLock({ ...EMPTY_APP_LOCK, locked: backgroundLockDue(backgroundedAt.current) });
     setSelectedOrderId(null);
     setViewState(account.role === "admin" ? "admin" : "home");
     setAccountSwitcher(false);
@@ -1168,6 +1258,7 @@ export default function AlmadinaApplication() {
   }
 
   function clearLocalSession() {
+    invalidateLockReload();
     setScanner(null);
     setConfirmOptions(null);
     sessionEpoch.current += 1;
