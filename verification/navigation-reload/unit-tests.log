@@ -1,0 +1,15 @@
+✔ navigation survives storage roundtrip only for the authenticated account; clear resets it (3.359246ms)
+✔ restored views use the current role, including role downgrade and unknown routes (0.264083ms)
+✔ parcel detail requires current live access; a stale target falls back to the parcel list (0.389877ms)
+✔ nested followup hints are limited to the current parcel or customer scope (0.255978ms)
+✔ invoice restore excludes another merchant and hidden invoices; enum values are bounded (0.428629ms)
+✔ notification targets override saved locations and still require parcel access (0.38638ms)
+✔ malformed/old storage and storage failures fall back safely without persisting sensitive extra fields (0.90047ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 212.206162

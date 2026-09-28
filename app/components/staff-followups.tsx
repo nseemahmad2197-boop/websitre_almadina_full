@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useApp } from "../lib/app-context";
-import { bindFollowupAccount, followupApi } from "../lib/followup-client";
+import { bindFollowupAccount, followupApi, FollowupApiError } from "../lib/followup-client";
 import type { FollowupCustomer, FollowupCustomerList } from "../lib/followups";
 import { FollowupCollection } from "./followups";
 import { OrderCard } from "./dashboard";
@@ -24,22 +24,73 @@ function validCustomer(value: unknown): value is FollowupCustomer {
 }
 
 function CustomerWorkspace({ accountId }: { accountId: string }) {
-  const { database } = useApp();
-  const [selected, setSelected] = useState<FollowupCustomer | null>(null);
-  const [tab, setTab] = useState<"followups" | "parcels">("followups");
+  const { database, navigationDetails, updateNavigationDetails } = useApp();
+  const [selected, setSelected] = useState<Pick<FollowupCustomer, "id" | "name" | "store"> | null>(null);
+  const [localTab, setLocalTab] = useState<"followups" | "parcels">("followups");
+  const tab = navigationDetails?.customerTab ?? localTab;
+  const restoreId = navigationDetails?.customerId ?? null;
+  const [restoreError, setRestoreError] = useState("");
+  const [restoreRetry, setRestoreRetry] = useState(0);
+  const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
+  function setTab(value: "followups" | "parcels") {
+    setLocalTab(value); updateNavigationDetails?.({ customerTab: value, followupId: null, followupOrderId: null });
+  }
+  function select(customer: FollowupCustomer | null) {
+    setSelected(customer); setLocalTab("followups"); setRestoreError("");
+    updateNavigationDetails?.({ customerId: customer?.id ?? null, customerTab: "followups", followupId: null, followupOrderId: null });
+  }
+  useEffect(() => {
+    if (!restoreId || selected?.id === restoreId) return;
+    const request = new AbortController(); bindFollowupAccount(request.signal, accountId);
+    const snapshotUser = database.users.find((entry) => entry.id === restoreId && entry.role === "merchant");
+    const snapshotOrder = database.orders.find((entry) => !entry.deleted && entry.merchantId === restoreId);
+    // Only reconstruct display data from this account's authenticated snapshot.
+    if (snapshotUser || snapshotOrder) {
+      setSelected({ id: restoreId, name: snapshotUser?.name ?? snapshotOrder!.merchantName, store: snapshotUser?.store ?? snapshotOrder!.merchantStore });
+      return;
+    }
+    function unavailable() { setNotice("لم يعد هذا المستخدم متاحًا في القائمة."); select(null); }
+    setRestoreError("");
+    void (async () => {
+      let cursor: string | null = null;
+      const seen = new Set<string>();
+      do {
+        const params = new URLSearchParams({ q: restoreId });
+        if (cursor) params.set("cursor", cursor);
+        const result: FollowupCustomerList = await followupApi<FollowupCustomerList>(`followups/customers?${params}`, request.signal);
+        if (request.signal.aborted) return;
+        if (!Array.isArray(result.customers) || !result.customers.every(validCustomer) || (result.nextCursor !== null && typeof result.nextCursor !== "string")) throw new Error("تعذّر قراءة قائمة المستخدمين.");
+        const customer = result.customers.find((entry) => entry.id === restoreId);
+        if (customer) { setSelected(customer); return; }
+        cursor = result.nextCursor;
+        if (cursor && seen.has(cursor)) throw new Error("تعذّر استعادة المستخدم. حاول مجددًا.");
+        if (cursor) seen.add(cursor);
+      } while (cursor);
+      unavailable();
+    })().catch((error: unknown) => {
+      if (request.signal.aborted) return;
+      if (error instanceof FollowupApiError && [403, 404, 410].includes(error.status)) unavailable();
+      else setRestoreError(error instanceof Error ? error.message : "تعذّر الاتصال. حاول مجددًا.");
+    });
+    return () => request.abort();
+  }, [accountId, restoreId, selected?.id, restoreRetry]);
   function submit(event: FormEvent) { event.preventDefault(); setQuery(search.trim()); }
+  if (restoreId && !selected) return <div className="customer-workspace">
+    <Button variant="ghost" onClick={() => select(null)}>العودة إلى أسماء المستخدمين</Button>
+    {restoreError ? <RequestFailure message={restoreError} onRetry={() => setRestoreRetry((value) => value + 1)} /> : <LoadingSkeleton kind="customers" label="جارٍ استعادة صفحة المستخدم…" />}
+  </div>;
   if (selected) {
     const orders = database.orders.filter((order) => !order.deleted && order.merchantId === selected.id);
     return <div className="customer-workspace">
-      <Button variant="ghost" onClick={() => setSelected(null)}>العودة إلى أسماء المستخدمين</Button>
+      <Button variant="ghost" onClick={() => select(null)}>العودة إلى أسماء المستخدمين</Button>
       <header className="customer-workspace__heading"><h2>{selected.name}</h2><p>{selected.store || "مستخدم"}</p></header>
       <div className="filter-scroll" aria-label="عرض بيانات المستخدم"><button type="button" className={`filter-chip ${tab === "followups" ? "is-active" : ""}`} aria-pressed={tab === "followups"} onClick={() => setTab("followups")}>المتابعات</button><button type="button" className={`filter-chip ${tab === "parcels" ? "is-active" : ""}`} aria-pressed={tab === "parcels"} onClick={() => setTab("parcels")}>الطرود ({orders.length.toLocaleString("ar-EG")})</button></div>
       {tab === "followups" ? <FollowupCollection key={`${accountId}:${selected.id}`} accountId={accountId} merchantId={selected.id} /> : <div className="customer-parcels">{orders.length ? orders.map((order) => <OrderCard key={order.id} order={order} showMerchant />) : <EmptyState icon="package" title="لا توجد طرود" description="لا توجد طرود متاحة لهذا المستخدم حاليًا." />}</div>}
     </div>;
   }
-  return <><form className="customer-search" onSubmit={submit}><Field label="البحث باسم المستخدم أو المتجر" icon="search" value={search} maxLength={120} onChange={(event) => setSearch(event.target.value)} placeholder="اكتب الاسم ثم اضغط بحث" /><Button type="submit" icon="search">بحث</Button></form><CustomerDirectory key={`${accountId}:${query}`} accountId={accountId} query={query} onSelect={(customer) => { setSelected(customer); setTab("followups"); }} /></>;
+  return <>{notice && <p role="status">{notice}</p>}<form className="customer-search" onSubmit={submit}><Field label="البحث باسم المستخدم أو المتجر" icon="search" value={search} maxLength={120} onChange={(event) => setSearch(event.target.value)} placeholder="اكتب الاسم ثم اضغط بحث" /><Button type="submit" icon="search">بحث</Button></form><CustomerDirectory key={`${accountId}:${query}`} accountId={accountId} query={query} onSelect={select} /></>;
 }
 
 function CustomerDirectory({ accountId, query, onSelect }: { accountId: string; query: string; onSelect: (customer: FollowupCustomer) => void }) {

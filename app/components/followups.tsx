@@ -34,7 +34,7 @@ export function FollowupsPage() {
 }
 
 export function FollowupCollection({ accountId, order, merchantId }: { accountId: string; order?: Order; merchantId?: string }) {
-  const { user, database, setSelectedOrderId, setView } = useApp();
+  const { user, database, setSelectedOrderId, setView, navigationDetails, updateNavigationDetails } = useApp();
   const canCreate = user?.id === accountId && user.role === "merchant" && !!order && !order.deleted && order.merchantId === user.id;
   const signal = useRequests(accountId);
   const [entries, setEntries] = useState<Followup[]>([]);
@@ -46,8 +46,45 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
   const [selected, setSelected] = useState<Followup | null>(null);
   const [created, setCreated] = useState<Followup | null>(null);
   const [notice, setNotice] = useState("");
+  const [restoreError, setRestoreError] = useState("");
+  const [restoreRetry, setRestoreRetry] = useState(0);
+  const restoreId = navigationDetails?.followupId ?? null;
+  const restoreOrderId = navigationDetails?.followupOrderId ?? null;
+  const visibleSelected = navigationDetails && selected?.id !== restoreId ? null : selected;
   const deletedIds = useRef(new Set<string>());
   const loadNumber = useRef(0);
+  function select(item: Followup | null) {
+    setSelected(item); setRestoreError("");
+    updateNavigationDetails?.({ followupId: item?.id ?? null, followupOrderId: item?.orderId ?? null });
+  }
+  useEffect(() => {
+    if (navigationDetails && selected && selected.id !== restoreId) setSelected(null);
+    if (!restoreId || selected?.id === restoreId || signal.aborted) return;
+    const request = new AbortController();
+    bindFollowupAccount(request.signal, accountId);
+    function unavailable() {
+      setNotice("لم تعد هذه المتابعة متاحة. يمكنك اختيار متابعة أخرى من القائمة.");
+      select(null);
+    }
+    if (!restoreOrderId || (order && order.id !== restoreOrderId) || deletedIds.current.has(restoreId)) {
+      unavailable(); return;
+    }
+    setRestoreError("");
+    void followupApi<{ followup: unknown }>(`followups/${encodeURIComponent(restoreId)}`, request.signal).then((result) => {
+      if (request.signal.aborted || signal.aborted) return;
+      if (!validFollowup(result.followup)) throw new Error("تعذّر قراءة تفاصيل المتابعة. حاول مجددًا.");
+      const item = result.followup;
+      const owner = item.merchantId ?? database.orders.find((parcel) => parcel.id === item.orderId)?.merchantId;
+      if (item.id !== restoreId || item.orderId !== restoreOrderId || (merchantId && owner !== merchantId)
+        || (user?.role === "merchant" && owner !== accountId)) { unavailable(); return; }
+      setSelected(item);
+    }).catch((error: unknown) => {
+      if (request.signal.aborted || signal.aborted) return;
+      if (error instanceof FollowupApiError && [403, 404, 410].includes(error.status)) unavailable();
+      else setRestoreError(errorText(error));
+    });
+    return () => request.abort();
+  }, [restoreId, restoreOrderId, selected?.id, restoreRetry, signal, accountId, order?.id, merchantId]);
   async function load(cursor?: string) {
     const number = ++loadNumber.current;
     setLoading(true); setError("");
@@ -75,7 +112,7 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
     ++loadNumber.current; // Do not let an older list response restore this row.
     setLoading(false); setError(""); setNotice("تم حذف المتابعة.");
     setEntries((current) => current.filter((row) => row.id !== item.id));
-    setSelected(null); setCreated((current) => current?.id === item.id ? null : current);
+    select(null); setCreated((current) => current?.id === item.id ? null : current);
   }
   return <SectionCard title={order ? "متابعات الطرد" : "طلبات المتابعة"} icon="message" className="followup-section" action={canCreate ? <Button icon="plus" onClick={() => setCreating(true)}>إنشاء متابعة</Button> : undefined}>
     {!order && <p className="followup-hint">{user?.role === "merchant" ? "لإنشاء متابعة، افتح تفاصيل الطرد واضغط «إنشاء متابعة»." : "اختر متابعة للاطلاع على تفاصيلها ومرفقاتها والرد عليها."}</p>}
@@ -84,7 +121,7 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
     {error && <RequestFailure message={error} onRetry={() => void load()} busy={loading} compact={loaded} />}
     {notice && <p role="status">{notice}</p>}
     {loaded && !loading && !error && !entries.length && <p className="followup-empty">لا توجد متابعات{order ? " لهذا الطرد" : " حتى الآن"}.</p>}
-    <div className="followup-list">{entries.map((item) => <button type="button" key={item.id} className="followup-row" onClick={() => setSelected(item)}>
+    <div className="followup-list">{entries.map((item) => <button type="button" key={item.id} className="followup-row" onClick={() => select(item)}>
       <span className={`followup-status followup-status--${item.status}`}>{followupStatusLabel(item.status)}</span>
       <strong>{item.title}</strong><span>{followupTypeLabel(item.type)}</span>
       {!order && <span>{item.trackingNumber || database.orders.find((parcel) => parcel.id === item.orderId)?.trackingNumber || "متابعة طرد"}</span>}
@@ -95,8 +132,12 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
       if (signal.aborted) return;
       setCreating(false); setEntries((current) => [item, ...current.filter((existing) => existing.id !== item.id)]); setLoaded(true); setCreated(item);
     }} />}
-    {created && <FollowupSuccess item={created} onClose={() => setCreated(null)} onDetails={() => { setSelected(created); setCreated(null); }} onCollection={() => { setCreated(null); setView("followups"); }} />}
-    {selected && <FollowupDetails key={`${accountId}:${selected.id}`} item={selected} accountId={accountId} canRespond={user?.role === "admin" || user?.role === "courier"} onClose={() => setSelected(null)} onUpdated={updated} onDeleted={deleted} onParcel={!order ? () => { setSelectedOrderId(selected.orderId); setView("order-detail"); } : undefined} />}
+    {created && <FollowupSuccess item={created} onClose={() => setCreated(null)} onDetails={() => { select(created); setCreated(null); }} onCollection={() => { setCreated(null); setView("followups"); }} />}
+    {restoreId && !visibleSelected && <Modal title="تفاصيل المتابعة" onClose={() => select(null)} className="followup-modal" sheet>
+      {restoreError ? <RequestFailure message={restoreError} onRetry={() => setRestoreRetry((value) => value + 1)} /> : <LoadingSkeleton kind="detail" label="جارٍ تحميل تفاصيل المتابعة…" />}
+      <Button variant="ghost" onClick={() => select(null)}>رجوع إلى المتابعات</Button>
+    </Modal>}
+    {visibleSelected && <FollowupDetails key={`${accountId}:${visibleSelected.id}`} item={visibleSelected} accountId={accountId} canRespond={user?.role === "admin" || user?.role === "courier"} onClose={() => select(null)} onUpdated={updated} onDeleted={deleted} onParcel={!order ? () => { setSelectedOrderId(visibleSelected.orderId); setView("order-detail"); } : undefined} />}
   </SectionCard>;
 }
 

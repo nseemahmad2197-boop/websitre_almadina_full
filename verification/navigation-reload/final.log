@@ -1,0 +1,8 @@
+PASS: Settings and Security each survive actual browser reloads.
+PASS: Shipments and the selected parcel details survive actual browser reloads.
+PASS: A locked bootstrap reveals the same parcel details after successful PIN verification.
+PASS: Malformed state, a forbidden role view, and missing or foreign parcel references fall back safely.
+PASS: Notification parcel links override saved location, remove only their query parameter, and persist after reload.
+PASS: A temporary session failure preserves saved location and retry restores Settings.
+PASS: Successful logout clears saved location and fresh login starts at Home.
+PASS: A different account rejects the previous account’s location; separate tabs keep their navigation isolated.

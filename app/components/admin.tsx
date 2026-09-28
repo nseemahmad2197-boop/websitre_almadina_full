@@ -17,8 +17,10 @@ function membershipLabel(membership: Membership): string {
 }
 
 export function AdminDashboard() {
-  const { database, user, updateDatabase, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, confirm, showToast, notify, setView, setSelectedOrderId } = useApp();
-  const [tab, setTab] = useState<AdminTab>("orders");
+  const { database, user, updateDatabase, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, confirm, showToast, notify, setView, setSelectedOrderId, navigationDetails, updateNavigationDetails } = useApp();
+  const [localTab, setLocalTab] = useState<AdminTab>("orders");
+  const tab = navigationDetails?.adminTab ?? localTab;
+  function setTab(value: AdminTab) { setLocalTab(value); updateNavigationDetails?.({ adminTab: value }); }
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [collectionMerchantId, setCollectionMerchantId] = useState("all");

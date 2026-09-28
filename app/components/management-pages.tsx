@@ -40,8 +40,10 @@ function createVerificationCode() {
 }
 
 export function CollectionsPage() {
-  const { database, user, updateDatabase, showToast, notify } = useApp();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { database, user, updateDatabase, showToast, notify, navigationDetails, updateNavigationDetails } = useApp();
+  const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
+  const selectedId = navigationDetails ? navigationDetails.invoiceId : localSelectedId;
+  function setSelectedId(id: string | null) { setLocalSelectedId(id); updateNavigationDetails?.({ invoiceId: id }); }
   const [codeInvoiceId, setCodeInvoiceId] = useState<string | null>(null);
   const [authorizedRecipient, setAuthorizedRecipient] = useState("");
   const invoices = database.collections.filter((invoice) => invoice.merchantId === user?.id);
@@ -49,12 +51,16 @@ export function CollectionsPage() {
   const visibleInvoices = invoices.filter((invoice) => !hiddenIds.has(invoice.id));
   const eligibleOrders = database.orders.filter((order) => order.merchantId === user?.id && !order.deleted && (order.status === "delivered" || order.status === "returned") && !isOrderInvoicedForCurrentShipment(order, invoices));
   const returnFeeForOrder = (order: Order) => getReturnFee(resolveDeliveryRegion(order.governorate ?? "", order.city), user?.membership);
-  const selectedInvoice = invoices.find((invoice) => invoice.id === selectedId) ?? null;
+  const selectedInvoice = visibleInvoices.find((invoice) => invoice.id === selectedId) ?? null;
   const codeInvoice = invoices.find((invoice) => invoice.id === codeInvoiceId) ?? null;
   const availableAmount = eligibleOrders.reduce((sum, order) => sum + (order.status === "delivered" ? order.amount - order.deliveryFee : -returnFeeForOrder(order)), 0);
   const pendingAmount = invoices.filter((invoice) => invoice.status === "pending").reduce((sum, invoice) => sum + invoice.netAmount, 0);
   const readyAmount = invoices.filter((invoice) => invoice.status === "ready").reduce((sum, invoice) => sum + invoice.netAmount, 0);
   const deliveredAmount = invoices.filter((invoice) => invoice.status === "paid").reduce((sum, invoice) => sum + invoice.netAmount, 0);
+  useEffect(() => {
+    // A saved ID is a location hint, never authority to reveal another account's invoice.
+    if (selectedId && !selectedInvoice) setSelectedId(null);
+  }, [selectedId, selectedInvoice]);
 
   function createInvoice() {
     if (!user || !eligibleOrders.length) return showToast("لا توجد طرود واصلة أو رواجع جديدة لإنشاء فاتورة.", "error");

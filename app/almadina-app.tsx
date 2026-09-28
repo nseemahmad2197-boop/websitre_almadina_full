@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { requestApiJSON, validSnapshotEnvelope, canAcceptPolledSnapshot, safeApiErrorMessage } from "./lib/api-transport";
 import { APP_LOCK_AUTH_GENERATION_KEY, appLockAuthGeneration, backgroundLockDue, canRestoreReloadHandoff, clearReloadHandoff, consumeReloadHandoff, ensureAppLockAuthGeneration, invalidateReloadAuthentication, saveReloadHandoff, type ReloadHandoff } from "./lib/app-lock-reload";
+import { clearNavigation, defaultNavigation, EMPTY_NAVIGATION_DETAILS, notificationNavigation, readNavigation, saveNavigation, validateNavigation, type NavigationDetails } from "./lib/navigation-state";
 import type { IScannerControls } from "@zxing/browser";
 import { readBrowserPermission } from "./lib/browser-permissions";
 import { LinkedDevicesError, requestLinkedDevices } from "./lib/linked-devices";
@@ -338,6 +339,7 @@ export default function AlmadinaApplication() {
   const notificationPermissionAction = useRef(false);
   const [activeTheme, setActiveTheme] = useState<ThemePreference>(defaultPreferences.theme);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [navigationDetails, setNavigationDetails] = useState<NavigationDetails>({ ...EMPTY_NAVIGATION_DETAILS });
   const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
   const [accountSwitcher, setAccountSwitcher] = useState(false);
   const [accountSwitcherLogoutBusy, setAccountSwitcherLogoutBusy] = useState(false);
@@ -494,14 +496,17 @@ export default function AlmadinaApplication() {
         setDatabase(snapshot.database);
         setUserId(account.id);
         setAppLock(restoredLock);
-        setViewState(account.role === "admin" ? "admin" : "home");
+        const navigation = resolveSessionNavigation(account, snapshot.database, true);
+        setViewState(navigation.view);
+        setSelectedOrderId(navigation.selectedOrderId);
+        setNavigationDetails(navigation.details);
         setSessionError(""); setSessionReady(true);
       } catch (error) {
         if (!active || operationEpoch !== sessionEpoch.current || request.signal.aborted) return;
         reloadCandidate.current = null; reloadAllowed.current = false; clearReloadHandoff();
         // Only an explicit authentication response means the visitor is signed
         // out. An unavailable server must not look like a lost account/session.
-        if (error instanceof SharedApiError && error.status === 401) { setSessionError(""); setSessionReady(true); }
+        if (error instanceof SharedApiError && error.status === 401) { clearNavigation(); setSessionError(""); setSessionReady(true); }
         else setSessionError(safeApiErrorMessage(error));
       }
     }
@@ -549,22 +554,14 @@ export default function AlmadinaApplication() {
   }, [userId]);
 
   useEffect(() => {
-    if (!userId) return;
-    const navigationTimer = window.setTimeout(() => {
-      const params = new URLSearchParams(window.location.search);
-      const notificationOrderId = params.get("notificationOrder")?.trim();
-      if (notificationOrderId) {
-        setSelectedOrderId(notificationOrderId);
-        setViewState("order-detail");
-      } else if (params.get("openNotifications") === "1") {
-        setViewState("notifications");
-      } else {
-        return;
-      }
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
-    }, 0);
-    return () => window.clearTimeout(navigationTimer);
-  }, [userId]);
+    // Never write the initial home placeholder before authenticated restoration.
+    if (!sessionReady || !user) return;
+    const navigation = validateNavigation({ view, selectedOrderId, details: navigationDetails }, user, database);
+    saveNavigation(user.id, navigation);
+    if (navigation.view !== view) setViewState(navigation.view);
+    if (navigation.selectedOrderId !== selectedOrderId) setSelectedOrderId(navigation.selectedOrderId);
+    if (JSON.stringify(navigation.details) !== JSON.stringify(navigationDetails)) setNavigationDetails(navigation.details);
+  }, [sessionReady, user, database, view, selectedOrderId, navigationDetails]);
 
   useEffect(() => {
     notificationSoundEnabled.current = Boolean(userId && preferences.notifications && preferences.sounds);
@@ -1042,7 +1039,25 @@ export default function AlmadinaApplication() {
     const id = uid("toast"); setToasts((current) => [...current, { id, message, kind }]); window.setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 3_200);
   }
 
-  function setView(next: View) { setViewState(next); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function resolveSessionNavigation(account: Database["users"][number], currentDatabase: Database, restore: boolean) {
+    const notification = notificationNavigation(window.location.search, account, currentDatabase);
+    if (notification) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("notificationOrder"); url.searchParams.delete("openNotifications");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+    return notification ?? (restore ? readNavigation(account, currentDatabase) : defaultNavigation(account.role));
+  }
+  function setView(next: View) {
+    if (next !== view) setNavigationDetails({ ...EMPTY_NAVIGATION_DETAILS });
+    setViewState(next); window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function updateNavigationDetails(patch: Partial<NavigationDetails>): void {
+    setNavigationDetails((current) => {
+      const next = { ...current, ...patch };
+      return (Object.keys(current) as (keyof NavigationDetails)[]).every((key) => current[key] === next[key]) ? current : next;
+    });
+  }
 
   function lockOperationIdentity() {
     return { session: sessionEpoch.current, lifecycle: lockLifecycleVersion.current, generation: appLockAuthGeneration() };
@@ -1211,6 +1226,7 @@ export default function AlmadinaApplication() {
 
     sessionEpoch.current += 1;
     invalidateLockReload();
+    clearNavigation();
     if (!backgroundLockDue(backgroundedAt.current)) rememberUnlockedReload();
     setConfirmOptions(null);
     setScanner(null);
@@ -1225,8 +1241,10 @@ export default function AlmadinaApplication() {
     setSessionReady(true);
     setSessionError(""); setSyncError(""); setSyncBusy(false);
     setAppLock({ ...EMPTY_APP_LOCK, locked: backgroundLockDue(backgroundedAt.current) });
-    setSelectedOrderId(null);
-    setViewState(account.role === "admin" ? "admin" : "home");
+    const navigation = resolveSessionNavigation(account, snapshot.database, false);
+    setSelectedOrderId(navigation.selectedOrderId);
+    setViewState(navigation.view);
+    setNavigationDetails(navigation.details);
     setAccountSwitcher(false);
     void refreshAppLock();
     showToast(greeting);
@@ -1259,6 +1277,8 @@ export default function AlmadinaApplication() {
 
   function clearLocalSession() {
     invalidateLockReload();
+    clearNavigation();
+    setNavigationDetails({ ...EMPTY_NAVIGATION_DETAILS });
     setScanner(null);
     setConfirmOptions(null);
     sessionEpoch.current += 1;
@@ -1626,10 +1646,10 @@ export default function AlmadinaApplication() {
   const content = !sessionReady
     ? <BootstrapScreen error={sessionError} onRetry={() => { setSessionError(""); setSessionAttempt((value) => value + 1); }} />
     : user
-      ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
+      ? appLock.locked ? <AppLockScreen /> : <ApplicationShell key={`${user.id}:${sessionEpoch.current}`} />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, purgeTrash, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, renameCurrentDevice, deleteAccount, submitDeletionOperation, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, serverSync: { busy: syncBusy, error: syncError, offline, retry: () => retrySync.current() }, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, navigationDetails, updateNavigationDetails, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, purgeTrash, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, renameCurrentDevice, deleteAccount, submitDeletionOperation, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, serverSync: { busy: syncBusy, error: syncError, offline, retry: () => retrySync.current() }, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

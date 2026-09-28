@@ -1,0 +1,1 @@
+PASS: web delete RTL 320/390/1280; scoped confirmation/cancel; one request while busy; strict receipts + immutable retry after committed response loss; permission/legacy gates; 403 preserved; 409 explicit reload/reconfirm; selected row only; stale list suppression; private media URL cleanup; admin and account-switch isolation.

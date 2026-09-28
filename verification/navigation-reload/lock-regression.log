@@ -1,0 +1,14 @@
+PASS: Verified PIN survives two successive actual reloads; each reload validates session and lock status.
+PASS: Real background lock boundary remains enforced; reloading a locked app remains locked.
+PASS: A new tab and ordinary navigation both require unlock.
+PASS: Logout and same-account login in another tab invalidate the previous tab’s reload continuity.
+PASS: Reload after at least 15 seconds hidden requires unlock.
+PASS: A visible bootstrap taking over 15 seconds preserves reload continuity.
+PASS: At least 15 seconds hidden during bootstrap invalidates reload continuity.
+PASS: A reload that starts hidden records the hidden interval before session bootstrap.
+PASS: Reload continuity cannot unlock a different authenticated account.
+PASS: Unavailable lock status fails closed despite the reload marker.
+PASS: Successful logout followed by reload stays signed out without app lock.
+PASS: Fresh login status arriving after 16 seconds hidden resolves to a locked app.
+PASS: Fresh login status failure after background shows actionable lock recovery; retry stays locked and PIN unlock succeeds.
+PASS: A pending status failure cannot re-lock the app after a newer successful PIN verification.

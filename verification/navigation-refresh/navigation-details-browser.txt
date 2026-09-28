@@ -1,0 +1,4 @@
+PASS: followup/invoice/customer/admin detail reload; fresh scoped restore; transient retry; missing/foreign/hidden fallbacks; account-bound late response cancellation; ephemeral code/editor excluded.
+Command: ALMADINA_BROWSER_EXECUTABLE=/workspace/scratch/f0907a8accb8/server-experience/tooling/browser-runtime/chromium node tests/navigation-details.browser.mjs
+Exit code: 0
+Additional assertion: central followup selection invalidation immediately removes previously loaded detail.

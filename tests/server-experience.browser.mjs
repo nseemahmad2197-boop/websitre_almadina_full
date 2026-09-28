@@ -40,7 +40,15 @@ await page.route('**/api/almadina/**', async route => {
   return ok({});
 });
 const url = 'http://127.0.0.1:' + server.address().port;
-async function navigate(mode = 'held') { if (page.url().startsWith(url)) await page.evaluate(short => localStorage.setItem('fixture-short-timeout', short ? 'yes' : 'no'), mode === 'timeout'); sessionMode = mode; calls = []; held = []; await page.goto(url); }
+async function navigate(mode = 'held') {
+  if (page.url().startsWith(url)) await page.evaluate(short => {
+    localStorage.setItem('fixture-short-timeout', short ? 'yes' : 'no');
+    // These are independent server scenarios; real navigation restoration is
+    // exercised by navigation-reload.browser.mjs without resetting this key.
+    sessionStorage.removeItem('almadina-navigation-v1');
+  }, mode === 'timeout');
+  sessionMode = mode; calls = []; held = []; await page.goto(url);
+}
 async function loaded() { await page.getByRole('heading', { name: account.store, exact: true }).waitFor(); assert.equal(await page.locator('.server-bootstrap').count(), 0); }
 async function assertNoEmpty() { assert.equal(await page.getByText('لا توجد طرود بعد', { exact: true }).count(), 0); assert.equal(await page.locator('.auth-page').count(), 0); }
 try {

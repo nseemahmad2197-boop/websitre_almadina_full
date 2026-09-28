@@ -1,0 +1,37 @@
+{
+  "date": "2026-09-28",
+  "scope": "Website page and selected detail restoration on reload",
+  "deployed": false,
+  "baseline": {
+    "archive": "Almadina-Website-Lock-Refresh-Fix-2026-09-28.zip",
+    "sha256": "6c61e51cf4dcc07bf1a6d33aee1db6e88dbe412e07b3ac335d5be1742a107890",
+    "settingsReloadBugReproduced": true
+  },
+  "passed": {
+    "navigationUnitTests": 7,
+    "fullAppNavigationBrowserGroups": 8,
+    "priorAppLockBrowserCases": 14,
+    "nestedDetailsBrowserSuite": true,
+    "existingServerExperienceBrowserSuite": true,
+    "existingFollowupDeleteBrowserSuite": true,
+    "existingStaffFollowupsBrowserSuite": true,
+    "typecheck": true,
+    "renderProductionBuild": true
+  },
+  "sourceReview": "No remaining blocker",
+  "storage": "Per-tab sessionStorage, account-bound view enums and IDs only, validated against current authenticated snapshot; fresh read for followup details",
+  "notPersisted": [
+    "Form drafts",
+    "Passwords or PINs",
+    "Selected media files",
+    "Verification-code dialogs",
+    "Destructive confirmations"
+  ],
+  "limitations": [
+    "Mocked server responses in real Chromium",
+    "No production account or live deployment",
+    "No physical iPhone/Safari test"
+  ],
+  "sourceInputsMatchFinalBuild": true,
+  "schemaDependenciesHostingConfigChanged": false
+}
