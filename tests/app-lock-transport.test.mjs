@@ -33,6 +33,15 @@ test("app lock status can cancel an in-flight fetch that ignores abort", { timeo
   await assert.rejects(request, (error) => error.name === "AbortError" && error.category === "aborted");
 });
 
+test("malformed successful lock status cannot be treated as disabled", async (t) => {
+  let payload = {};
+  mockFetch(t, async () => Response.json(payload));
+  for (const value of [{}, { enabled: false }, { enabled: "false", biometricEnabled: false, biometricLoginReady: false }, { enabled: true, biometricEnabled: false, biometricLoginReady: null }]) {
+    payload = value;
+    await assert.rejects(getAppLockStatus(), error => error instanceof AppLockApiError && error.status === 502);
+  }
+});
+
 test("app lock keeps HTTP status class and sanitized Arabic messages", async (t) => {
   let status = 401;
   mockFetch(t, async () => new Response("<html>private upstream problem</html>", { status }));
