@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
-import { transform } from "esbuild";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
 async function loadClient(name) {
-  const source = await readFile(new URL(`../app/lib/${name}.ts`, import.meta.url), "utf8");
-  const { code } = await transform(source, { loader: "ts", format: "esm", target: "es2022" });
+  const result = await build({ entryPoints: [fileURLToPath(new URL(`../app/lib/${name}.ts`, import.meta.url))], bundle: true, write: false, format: "esm", target: "es2022", logLevel: "silent" });
+  const code = result.outputFiles[0].text;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 const client = await loadClient("phone-notifications");

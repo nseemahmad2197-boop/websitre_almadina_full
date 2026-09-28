@@ -45,7 +45,7 @@ await page.route("**/api/almadina/**", async (route) => {
     if (!["staff-admin", "staff-courier"].includes(account)) return fulfill({ error: "ممنوع" }, 403);
     if (failDirectory) return fulfill({ error: "تعذّر تحميل أسماء المستخدمين. حاول مجددًا." }, 503);
     if (delayed.has(query)) {
-      const delay = delayed.get(query); delayed.delete(query); delay.accept(); await delay.released;
+      const delay = delayed.get(query); delay.accept(); await delay.released; if (delayed.get(query) === delay) delayed.delete(query);
       return fulfill({ customers: [{ ...customers[0], id: "late-customer", name: "بيانات قديمة يجب ألا تظهر" }], nextCursor: null });
     }
     if (query) return fulfill({ customers: customers.filter((customer) => `${customer.name} ${customer.store}`.includes(query)), nextCursor: null });
@@ -54,7 +54,7 @@ await page.route("**/api/almadina/**", async (route) => {
   if (path === "followups" && request.method() === "GET") {
     if (failFollowups) return fulfill({ error: "تعذّر تحميل المتابعات. حاول مجددًا." }, 503);
     const key = `followups:${account}:${merchantId}`;
-    if (delayed.has(key)) { const delay = delayed.get(key); delayed.delete(key); delay.accept(); await delay.released; }
+    if (delayed.has(key)) { const delay = delayed.get(key); delay.accept(); await delay.released; if (delayed.get(key) === delay) delayed.delete(key); }
     return fulfill({ followups: (wrongScope && merchantId === "customer-a" ? [tickets[2]] : tickets.filter((item) => (!merchantId || item.merchantId === merchantId) && (!orderId || item.orderId === orderId))).map((item) => ({ ...item, canDelete: account === "staff-admin" || item.creatorId === account })), nextCursor: null });
   }
   if (path.endsWith("/delete") && request.method() === "POST") {
@@ -156,6 +156,8 @@ try {
   // Release an older search only after the replacement result is visible.
   const slowSearch = hold("بحث متأخر");
   await search("بحث متأخر"); await slowSearch.arrived;
+  await page.locator(".loading-skeleton--customers").waitFor();
+  assert.equal(await page.getByRole("heading", { name: "لا توجد نتائج", exact: true }).count(), 0);
   await search("سارة"); await card(customers[1].name).waitFor();
   slowSearch.release(); await settledFrame();
   assert.equal(await page.getByText("بيانات قديمة يجب ألا تظهر", { exact: true }).count(), 0);
@@ -165,6 +167,8 @@ try {
   await search(""); await card(customers[0].name).waitFor();
   const slowTickets = hold("followups:staff-courier:customer-a");
   await card(customers[0].name).click(); await slowTickets.arrived;
+  await page.locator(".loading-skeleton--list").waitFor();
+  assert.equal(await page.locator(".followup-empty").count(), 0);
   const callsBeforeSwitch = calls.length;
   await page.getByTestId("account-merchant").click();
   await page.getByRole("heading", { name: "هذه الصفحة لفريق المتابعة", exact: true }).waitFor();
@@ -192,19 +196,25 @@ try {
   // misleading empty result. Retry and navigation each fetch current data.
   failDirectory = true;
   await page.getByRole("button", { name: "العودة إلى أسماء المستخدمين", exact: true }).click();
-  await page.getByRole("alert").filter({ hasText: "تعذّر تحميل أسماء المستخدمين" }).waitFor();
+  await page.getByRole("alert").filter({ hasText: "الخادم غير متاح مؤقتًا" }).waitFor();
   assert.equal(await page.getByRole("heading", { name: "لا توجد نتائج", exact: true }).count(), 0);
   failDirectory = false;
   await page.getByRole("button", { name: "تحديث المستخدمين", exact: true }).click();
   await card(customers[0].name).waitFor();
   failFollowups = true;
   await card(customers[0].name).click();
-  await page.getByRole("alert").filter({ hasText: "تعذّر تحميل المتابعات" }).waitFor();
+  await page.getByRole("alert").filter({ hasText: "الخادم غير متاح مؤقتًا" }).waitFor();
   assert.equal(await page.locator(".followup-empty").count(), 0);
   failFollowups = false;
   await page.getByRole("button", { name: "تحديث المتابعات", exact: true }).click();
   await page.getByRole("button", { name: /تأخر تسليم طلب الياسمين/ }).waitFor();
   assert.equal(await page.locator(".followup-row").count(), 2);
+  failFollowups = true;
+  await page.getByRole("button", { name: "تحديث المتابعات", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "الخادم غير متاح مؤقتًا" }).waitFor();
+  assert.equal(await page.locator(".followup-row").count(), 2, "A failed refresh preserves loaded followups");
+  assert.equal(await page.locator(".followup-empty").count(), 0);
+  failFollowups = false;
   await page.getByTestId("account-merchant").click();
   await page.getByTestId("open-parcel").click();
   await page.getByRole("button", { name: "إنشاء متابعة", exact: true }).waitFor();

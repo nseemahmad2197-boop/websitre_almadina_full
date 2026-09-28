@@ -34,6 +34,7 @@ const legacy = device("legacy", "جهاز مسجل سابقًا", false, { type:
 const otherDevices = [device("other-browser", "جهاز الحساب الآخر", true, { browser: "Firefox", type: "desktop" })];
 let mode = "normal", holdGet = null, holdRename = null;
 function deferred() { let release, arrived; return { gate: new Promise((resolve) => { release = resolve; }), reached: new Promise((resolve) => { arrived = resolve; }), release, arrived }; }
+let initialDevices = deferred();
 const wav = Buffer.alloc(44 + 16000);
 wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(16000, 40);
 const audio = { id: "audio-1", name: "ملاحظة صوتية.wav", mimeType: "audio/wav", size: wav.length, chunkCount: 1 };
@@ -44,6 +45,7 @@ await page.route("**/api/almadina/**", async (route) => {
   calls.push({ path, method: request.method(), account, body });
   const reply = async (json, status = 200) => { try { await route.fulfill({ status, json }); } catch (error) { if (!/closed|handled|Interception/i.test(String(error))) throw error; } };
   if (path === "security/devices") {
+    if (initialDevices) { const wait = initialDevices; wait.arrived(); await wait.gate; }
     if (account === "other") return reply({ devices: otherDevices, count: 1 });
     const snapshot = mode === "legacy" ? [legacy, devices.find((item) => item.current)] : structuredClone(devices);
     if (holdGet) { const wait = holdGet; holdGet = null; wait.arrived(); await wait.gate; }
@@ -85,6 +87,13 @@ async function playAudio(locator) {
 try {
   await mkdir(evidence, { recursive: true });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await initialDevices.reached;
+  await page.locator(".loading-skeleton--devices").waitFor();
+  assert.equal(await page.locator(".linked-device-card").count(), 0);
+  assert.equal(await page.getByRole("heading", { name: "لا توجد أجهزة مرتبطة", exact: true }).count(), 0);
+  assert.doesNotMatch(await page.locator(".linked-devices-summary").innerText(), /٠|لا توجد/);
+  await page.getByTestId("feature-surface").screenshot({ path: `${evidence}/web-devices-loading-mobile.png`, animations: "disabled" });
+  initialDevices.release(); initialDevices = null;
   await card("آيفون نسيم").waitFor();
   assert.match(await card("آيفون نسيم").innerText(), /آيفون · iOS[\s\S]*نابلس، فلسطين/);
   assert.match(await card("هاتف العمل").innerText(), /أندرويد · Android[\s\S]*Samsung SM-S928B[\s\S]*غير متاحة/);
@@ -111,18 +120,22 @@ try {
   // Reject malformed metadata before rendering; preserve legacy records safely.
   mode = "legacy"; await refresh(); await card("جهاز مسجل سابقًا").waitFor();
   assert.match(await card("جهاز مسجل سابقًا").innerText(), /غير متاحة/);
-  mode = "load-error"; await refresh(); await page.getByRole("heading", { name: "تعذّر تحميل الأجهزة" }).waitFor();
+  mode = "load-error"; await refresh(); await page.getByRole("alert").filter({ hasText: "تعذّر تحميل الأجهزة" }).waitFor();
+  assert.equal(await card("جهاز مسجل سابقًا").count(), 1, "Keep the last loaded device visible when refresh fails");
   mode = "normal"; await page.getByRole("button", { name: "إعادة المحاولة", exact: true }).click(); await card("آيفون نسيم").waitFor();
 
   mode = "revoke-error";
   await card("هاتف العمل").getByRole("button", { name: "تسجيل الخروج", exact: true }).click();
   await page.getByRole("button", { name: "تسجيل خروج الجهاز", exact: true }).click();
-  await page.getByTestId("transport-error").filter({ hasText: "تعذّر تسجيل الخروج" }).waitFor();
+  await page.getByTestId("transport-error").filter({ hasText: "الخادم غير متاح مؤقتًا" }).waitFor();
   assert.equal(await card("هاتف العمل").count(), 1);
   mode = "normal"; await page.getByRole("button", { name: "تسجيل خروج الجهاز", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" }); assert.equal(await card("هاتف العمل").count(), 0);
 
   const slow = deferred(); holdGet = slow; await refresh(); await slow.reached;
+  await page.locator(".server-refresh").waitFor();
+  assert.equal(await card("آيفون نسيم").count(), 1, "Refreshing retains loaded devices");
+  assert.equal(await page.locator(".loading-skeleton--devices").count(), 0, "Refresh uses status rather than initial skeleton");
   await page.getByTestId("account-other").click(); await card("جهاز الحساب الآخر").waitFor();
   slow.release(); await page.waitForTimeout(100);
   assert.equal(await card("آيفون نسيم").count(), 0, "old account GET cannot replace next account devices");

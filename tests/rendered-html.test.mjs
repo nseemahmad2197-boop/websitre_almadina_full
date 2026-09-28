@@ -190,7 +190,7 @@ test("uses a five-step reference-style registration with map, legal disclosures,
   assert.match(registration, /LocationPickerButton label="المنطقة"/);
   assert.match(registration, /label="الشارع \/ وصف العنوان"/);
   assert.match(registration, /<RegistrationLocationMap/);
-  assert.match(registration, /fetch\("\/api\/almadina\/geocode\/reverse"/);
+  assert.match(registration, /requestApiJSON\("geocode\/reverse"/);
   assert.match(registration, /method: "POST"/);
   assert.match(registration, /matchRegistrationMapAddress\(payload\.address\)/);
   assert.match(registration, /يمكنك تعديلها يدويًا/);
