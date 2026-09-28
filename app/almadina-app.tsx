@@ -557,7 +557,7 @@ export default function AlmadinaApplication() {
     // Never write the initial home placeholder before authenticated restoration.
     if (!sessionReady || !user) return;
     const navigation = validateNavigation({ view, selectedOrderId, details: navigationDetails }, user, database);
-    saveNavigation(user.id, navigation);
+    saveNavigation(user.id, navigation, user.role);
     if (navigation.view !== view) setViewState(navigation.view);
     if (navigation.selectedOrderId !== selectedOrderId) setSelectedOrderId(navigation.selectedOrderId);
     if (JSON.stringify(navigation.details) !== JSON.stringify(navigationDetails)) setNavigationDetails(navigation.details);
@@ -672,10 +672,10 @@ export default function AlmadinaApplication() {
     let pendingController: AbortController | null = null;
     const operationEpoch = sessionEpoch.current;
 
-    async function synchronize() {
+    async function synchronize(manual = false) {
       if (!active || inFlight || document.visibilityState === "hidden" || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) return;
       inFlight = true;
-      setSyncBusy(true);
+      if (manual) setSyncBusy(true);
       pendingController = new AbortController();
       try {
         const snapshot = await sharedRequest("database", { signal: pendingController.signal });
@@ -697,7 +697,11 @@ export default function AlmadinaApplication() {
         pendingController = null;
       }
     }
-    retrySync.current = () => { void synchronize(); };
+    retrySync.current = () => {
+      // Explicit retry can share a pending poll without a duplicate request.
+      if (inFlight) { setSyncBusy(true); return; }
+      void synchronize(true);
+    };
 
     const timer = window.setInterval(() => { void synchronize(); }, 6_000);
     const onVisible = () => { if (document.visibilityState === "visible") void synchronize(); };

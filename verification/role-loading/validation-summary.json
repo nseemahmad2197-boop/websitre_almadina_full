@@ -1,0 +1,29 @@
+{
+  "date": "2026-09-28",
+  "checks": {
+    "typescript": "passed",
+    "production_build": "passed",
+    "role_loading_browser": "passed",
+    "page_loading_browser_regression": "passed"
+  },
+  "tested_viewports": [
+    320,
+    390,
+    1280
+  ],
+  "roles": [
+    "admin",
+    "courier",
+    "merchant"
+  ],
+  "limitations": [
+    "Browser API responses use local deterministic test fixtures, not production accounts.",
+    "No live deployment was performed."
+  ],
+  "source_sha256": {
+    "app/components/loading-skeleton.tsx": "122d5273265990f635551790672481bc59dc18d640f0986aedccc3f2234138c8",
+    "app/components/server-state.tsx": "78eef4737c1475aa8bdf9b99f30174d23ac1a4f2bcb5acfd3d2554a7204d4018",
+    "app/components/followups.tsx": "efb61ddba225cbd8a05c82c6994cabedc67a8b3ce317e7c7469c62649b360928",
+    "app/globals.css": "5877f4316d7bf8516f483f6a6024caef5f0a0826dddf24920c0029af4efc1552"
+  }
+}

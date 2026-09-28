@@ -117,7 +117,7 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
   return <SectionCard title={order ? "متابعات الطرد" : "طلبات المتابعة"} icon="message" className="followup-section" action={canCreate ? <Button icon="plus" onClick={() => setCreating(true)}>إنشاء متابعة</Button> : undefined}>
     {!order && <p className="followup-hint">{user?.role === "merchant" ? "لإنشاء متابعة، افتح تفاصيل الطرد واضغط «إنشاء متابعة»." : "اختر متابعة للاطلاع على تفاصيلها ومرفقاتها والرد عليها."}</p>}
     <div className="followup-toolbar"><Button variant="ghost" onClick={() => void load()} disabled={loading}>تحديث المتابعات</Button>{loaded && <span aria-live="polite">{entries.length.toLocaleString("ar-EG")} متابعة</span>}</div>
-    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث المتابعات…" /> : <LoadingSkeleton kind="list" label="جارٍ تحميل المتابعات…" />)}
+    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث المتابعات…" /> : <LoadingSkeleton kind="followups" label="جارٍ تحميل المتابعات…" />)}
     {error && <RequestFailure message={error} onRetry={() => void load()} busy={loading} compact={loaded} />}
     {notice && <p role="status">{notice}</p>}
     {loaded && !loading && !error && !entries.length && <p className="followup-empty">لا توجد متابعات{order ? " لهذا الطرد" : " حتى الآن"}.</p>}
@@ -134,7 +134,7 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
     }} />}
     {created && <FollowupSuccess item={created} onClose={() => setCreated(null)} onDetails={() => { select(created); setCreated(null); }} onCollection={() => { setCreated(null); setView("followups"); }} />}
     {restoreId && !visibleSelected && <Modal title="تفاصيل المتابعة" onClose={() => select(null)} className="followup-modal" sheet>
-      {restoreError ? <RequestFailure message={restoreError} onRetry={() => setRestoreRetry((value) => value + 1)} /> : <LoadingSkeleton kind="detail" label="جارٍ تحميل تفاصيل المتابعة…" />}
+      {restoreError ? <RequestFailure message={restoreError} onRetry={() => setRestoreRetry((value) => value + 1)} /> : <LoadingSkeleton kind={user?.role === "admin" || user?.role === "courier" ? "staff-followup-detail" : "followup-detail"} label="جارٍ تحميل تفاصيل المتابعة…" />}
       <Button variant="ghost" onClick={() => select(null)}>رجوع إلى المتابعات</Button>
     </Modal>}
     {visibleSelected && <FollowupDetails key={`${accountId}:${visibleSelected.id}`} item={visibleSelected} accountId={accountId} canRespond={user?.role === "admin" || user?.role === "courier"} onClose={() => select(null)} onUpdated={updated} onDeleted={deleted} onParcel={!order ? () => { setSelectedOrderId(visibleSelected.orderId); setView("order-detail"); } : undefined} />}
@@ -511,7 +511,7 @@ function AttachmentPreview({ item, accountId, onClose }: { item: FollowupAttachm
     return () => { alive = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [item, signal, retry]);
   return <section className="followup-preview" aria-label={`معاينة ${item.name}`}><div className="followup-toolbar"><strong><bdi>{item.name}</bdi></strong>{onClose && <Button type="button" variant="ghost" onClick={onClose}>إغلاق المعاينة</Button>}</div>
-    {!url && !error && <LoadingSkeleton kind="detail" rows={2} label="جارٍ تحميل المرفق…" />}
+    {!url && !error && <LoadingSkeleton kind="attachment" rows={2} label="جارٍ تحميل المرفق…" />}
     {error && <><p role="alert" className="followup-error">{error}</p><Button type="button" onClick={() => setRetry((value) => value + 1)}>إعادة المحاولة</Button></>}
     {url && <>{item.mimeType.startsWith("image/") ? <img src={url} alt={item.name} onError={() => setError("لا يدعم المتصفح معاينة هذه الصورة. يمكنك تنزيلها.")} /> : item.mimeType.startsWith("audio/") ? <audio aria-label={`تشغيل ${item.name}`} controls src={url} preload="metadata" onError={() => setError("تعذّر تشغيل هذا الصوت داخل المتصفح. أعد المحاولة أو نزّل المرفق.")} /> : <video controls playsInline src={url} preload="metadata" />}<a className="button button--outline" href={url} download={item.name}>تنزيل المرفق</a></>}
   </section>;

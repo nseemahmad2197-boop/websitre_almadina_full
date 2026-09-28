@@ -109,7 +109,7 @@ export function DeletionRequestPanel({ publicPage = false, submitRequest, onStat
   return <SectionCard className="deletion-request-panel">
     <h2>طلب حذف الحساب والبيانات</h2>
     <p>{deletionPolicy.reviewTimeline}</p>
-    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث حالة الطلب…" /> : <LoadingSkeleton kind="detail" label="جارٍ تحميل حالة الطلب…" />)}
+    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث حالة الطلب…" /> : <LoadingSkeleton kind="delete-account" label="جارٍ تحميل حالة الطلب…" />)}
     {error && <RequestFailure message={error} onRetry={() => void reload()} busy={loading || busy} compact={loaded} />}
     {status?.account && <p>الحساب: {status.account.name} · <bdi>{status.account.email}</bdi></p>}
     {(receipt ?? status?.request) && <DeletionRequestStatus request={(receipt ?? status!.request)!} />}

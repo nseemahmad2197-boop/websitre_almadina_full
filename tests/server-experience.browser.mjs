@@ -122,7 +122,7 @@ try {
   await page.getByPlaceholder('ALX-20200001').fill(parcel.trackingNumber);
   await page.getByRole('button', { name: 'تتبّع الطرد', exact: true }).click();
   const tracking = page.getByRole('dialog', { name: 'تتبّع الطرد', exact: true });
-  await tracking.locator('.loading-skeleton--detail').waitFor();
+  await tracking.locator('.loading-skeleton--tracking').waitFor();
   await tracking.getByRole('button', { name: 'إغلاق', exact: true }).click();
   await release('track', { order: parcel }); assert.equal(await page.getByRole('dialog').count(), 0, 'Closed tracking cannot reopen from late response');
 

@@ -79,7 +79,7 @@ function CustomerWorkspace({ accountId }: { accountId: string }) {
   function submit(event: FormEvent) { event.preventDefault(); setQuery(search.trim()); }
   if (restoreId && !selected) return <div className="customer-workspace">
     <Button variant="ghost" onClick={() => select(null)}>العودة إلى أسماء المستخدمين</Button>
-    {restoreError ? <RequestFailure message={restoreError} onRetry={() => setRestoreRetry((value) => value + 1)} /> : <LoadingSkeleton kind="customers" label="جارٍ استعادة صفحة المستخدم…" />}
+    {restoreError ? <RequestFailure message={restoreError} onRetry={() => setRestoreRetry((value) => value + 1)} /> : <LoadingSkeleton kind="customer-detail" label="جارٍ استعادة صفحة المستخدم…" />}
   </div>;
   if (selected) {
     const orders = database.orders.filter((order) => !order.deleted && order.merchantId === selected.id);

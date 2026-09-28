@@ -1,0 +1,6 @@
+Real focus and recurring background reads retain recipient content, never mount the updating message, and cause no content shift.
+A failed read keeps the current content; explicit retry has visible pending feedback that clears after success.
+Recipient reload uses recipient-shaped placeholders, restores the recipient page, fits 320/390/1280px, and respects reduced motion and dark mode.
+Eighteen destination view skeletons match their saved page family, fit phone/desktop widths, and key families have genuinely different rendered shapes.
+Employee home, admin users and admin collections have distinct loading geometry; role hints never override the authenticated server role.
+Malformed, unknown and unsupported-version navigation hints fall back to the dashboard without exposing saved content.

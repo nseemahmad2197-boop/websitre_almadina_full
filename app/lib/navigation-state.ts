@@ -65,8 +65,8 @@ export function readNavigation(user: User, database: Database): NavigationState 
     return record.version === 1 && record.userId === user.id ? validateNavigation(record, user, database) : defaultNavigation(user.role);
   } catch { return defaultNavigation(user.role); }
 }
-export function saveNavigation(userId: string, state: NavigationState): void {
-  try { window.sessionStorage.setItem(NAVIGATION_STORAGE_KEY, JSON.stringify({ version: 1, userId, ...state })); } catch { /* Navigation still works when browser storage is unavailable. */ }
+export function saveNavigation(userId: string, state: NavigationState, role?: Role): void {
+  try { window.sessionStorage.setItem(NAVIGATION_STORAGE_KEY, JSON.stringify({ version: 1, userId, role, ...state })); } catch { /* Navigation still works when browser storage is unavailable. */ }
 }
 export function clearNavigation(): void {
   try { window.sessionStorage.removeItem(NAVIGATION_STORAGE_KEY); } catch { /* Storage is optional. */ }

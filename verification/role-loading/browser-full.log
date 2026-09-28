@@ -1,0 +1,4 @@
+PASS: Authenticated admin tab clicks persist through real reloads: parcels, merchants, collections and couriers each use their own loading rows and controls.
+PASS: Authenticated courier home and staff parcel list survive reloads with scanner/operations and merchant-attributed parcel placeholders.
+PASS: Both authenticated staff roles restore followup details and their response editor after staff-specific loading.
+PASS: Merchant balance, own parcels and read-only staff reply layouts remain distinct from authenticated staff layouts; loading fits320/390/1280.

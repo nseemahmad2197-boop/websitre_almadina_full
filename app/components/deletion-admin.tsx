@@ -67,7 +67,7 @@ function DeletionRequestsAdminContent() {
   return <div className="page-content deletion-admin-page"><PageHeader title="طلبات حذف الحسابات" subtitle="راجع الطلبات خلال 7 أيام وأبلغ صاحب الطلب بخطوات التسوية وموعد المتابعة." onBack={() => setView("admin")} />
     <Button variant="outline" onClick={reload} disabled={busy || loading}>تحديث الطلبات</Button>
     {error && !selected && <RequestFailure message={error} onRetry={() => void reload()} busy={busy || loading} compact={loaded} />}
-    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث طلبات الحذف…" /> : <LoadingSkeleton kind="list" label="جارٍ تحميل طلبات الحذف…" />)}
+    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث طلبات الحذف…" /> : <LoadingSkeleton kind="deletion-requests" label="جارٍ تحميل طلبات الحذف…" />)}
     {loaded && !loading && !error && !entries.length && <p>لا توجد طلبات حذف حساب.</p>}
     {entries.map((entry) => <SectionCard key={entry.request.id}>
       {entry.account && <h2>{entry.account.name} · <bdi>{entry.account.email}</bdi></h2>}
