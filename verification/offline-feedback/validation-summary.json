@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-28",
+  "scope": "Followup staff save feedback and device offline state",
+  "draft_policy": "Keep text while detail screen stays open; no automatic mutation retry",
+  "live_deployment": false,
+  "typecheck": "passed",
+  "production_build": "passed",
+  "browser_feedback_scenarios": "passed",
+  "previous_followup_and_server_browser_regressions": "passed",
+  "transport_tests": 14
+}

@@ -6,7 +6,7 @@ import type { Order } from "../lib/data";
 import { FOLLOWUP_LIMITS, FOLLOWUP_STATUSES, FOLLOWUP_TYPES, followupStatusLabel, followupTypeLabel, type Followup, type FollowupAttachment, type FollowupComment, type FollowupCommentList, type FollowupList, type FollowupStatus, type FollowupType } from "../lib/followups";
 import { bindFollowupAccount, canonicalFollowupPrice, createFollowup, deleteFollowup, downloadFollowupFile, editFollowup, followupApi, FollowupApiError, postFollowupComment, uploadFollowupFile, validFollowup, validFollowupComment, validateFollowupFiles, type FollowupCommentDraft, type FollowupDraft, type FollowupEditDraft, type PendingFollowupFile } from "../lib/followup-client";
 import { Button, Field, Modal, PageHeader, SectionCard, SelectField } from "./ui";
-import { LoadingSkeleton, RefreshStatus, RequestFailure } from "./server-state";
+import { LoadingSkeleton, RefreshStatus, RequestFailure, OfflineState, useOffline } from "./server-state";
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : "تعذّر الاتصال. حاول مجددًا.";
 const sizeLabel = (size: number) => `${(size / (1024 * 1024)).toFixed(1)} ميغابايت`;
@@ -334,7 +334,10 @@ function DraftPreview({ item }: { item: PendingFollowupFile }) {
 }
 
 function FollowupDetails({ item, accountId, canRespond, onClose, onUpdated, onDeleted, onParcel }: { item: Followup; accountId: string; canRespond: boolean; onClose: () => void; onUpdated: (item: Followup) => void; onDeleted: (item: Followup) => void; onParcel?: () => void }) {
-  const { database, user } = useApp();
+  const { database, user, serverSync } = useApp();
+  const offline = useOffline();
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const signal = useRequests(accountId);
   const [status, setStatus] = useState<FollowupStatus>(item.status);
   const [response, setResponse] = useState(item.response);
@@ -360,13 +363,15 @@ function FollowupDetails({ item, accountId, canRespond, onClose, onUpdated, onDe
     finally { busyRef.current = false; if (!signal.aborted) { setBusy(false); setBusyOperation(null); } }
   }
   async function submit(event: FormEvent) {
-    event.preventDefault(); if (busyRef.current) return;
+    event.preventDefault(); if (busyRef.current || signal.aborted) return;
+    setSaveSuccess(false); setSaveError("");
+    if (navigator.onLine === false) { setSaveError("لا يوجد اتصال بالإنترنت. لم يُرسل الرد؛ النص ما زال هنا."); return; }
     busyRef.current = true; setBusy(true); setBusyOperation("save"); setError("");
     try {
       const result = await followupApi<{ followup: Followup }>(`followups/${encodeURIComponent(item.id)}/status`, signal, { status, response: response.trim() });
-      if (!validFollowup(result.followup) || result.followup.id !== item.id) throw new Error("لم يصل تأكيد التحديث كاملًا. أعد المحاولة أو حدّث قائمة المتابعات.");
-      if (!signal.aborted) onUpdated(result.followup);
-    } catch (error) { if (!signal.aborted) setError(errorText(error)); }
+      if (!validFollowup(result.followup) || result.followup.id !== item.id || result.followup.orderId !== item.orderId) throw new Error("لم يصل تأكيد التحديث كاملًا. أعد المحاولة أو حدّث قائمة المتابعات.");
+      if (!signal.aborted) { onUpdated(result.followup); setSaveSuccess(true); }
+    } catch (error) { if (!signal.aborted) setSaveError(errorText(error)); }
     finally { busyRef.current = false; if (!signal.aborted) { setBusy(false); setBusyOperation(null); } }
   }
   async function confirmDelete() {
@@ -394,7 +399,7 @@ function FollowupDetails({ item, accountId, canRespond, onClose, onUpdated, onDe
       {onParcel && <Button variant="ghost" onClick={onParcel}>فتح تفاصيل الطرد</Button>}
       {error && <p role="alert" className="followup-error">{error}</p>}
       <FollowupConversation key={`${accountId}:${item.id}`} item={item} accountId={accountId} />
-      {canRespond && <form onSubmit={submit} className="followup-form followup-response-form"><h3>إدارة حالة المتابعة</h3><SelectField label="حالة المتابعة" aria-label="حالة المتابعة" value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as FollowupStatus)}>{FOLLOWUP_STATUSES.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}</SelectField><label className="field"><span className="field__label">الرد على صاحب المتابعة</span><textarea aria-label="الرد على صاحب المتابعة" value={response} onChange={(event) => setResponse(event.target.value)} maxLength={FOLLOWUP_LIMITS.response} rows={4} disabled={busy} required /></label><Button type="submit" loading={busyOperation === "save"} disabled={busy}>{busyOperation === "save" ? "جارٍ حفظ الرد والحالة…" : "حفظ الرد والحالة"}</Button></form>}
+      {canRespond && <form onSubmit={submit} className="followup-form followup-response-form"><h3>إدارة حالة المتابعة</h3><SelectField label="حالة المتابعة" aria-label="حالة المتابعة" value={status} disabled={busy} onChange={(event) => { setStatus(event.target.value as FollowupStatus); setSaveSuccess(false); }}>{FOLLOWUP_STATUSES.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}</SelectField><label className="field"><span className="field__label">الرد على صاحب المتابعة</span><textarea aria-label="الرد على صاحب المتابعة" value={response} onChange={(event) => { setResponse(event.target.value); setSaveSuccess(false); }} maxLength={FOLLOWUP_LIMITS.response} rows={4} disabled={busy} required /></label>{offline && <OfflineState onRetry={() => serverSync?.retry()} busy={serverSync?.busy} compact />}<div aria-live="polite" aria-atomic="true">{busyOperation === "save" && <RefreshStatus label="جارٍ حفظ الرد والحالة…" />}{saveSuccess && <p className="followup-save-success" role="status">تم حفظ الرد والحالة بنجاح.</p>}{saveError && <p className="followup-error" role="alert">{saveError} لم نمسح النص المكتوب. تحقق من آخر رد قبل إعادة الإرسال إذا انقطع الاتصال أثناء الحفظ.</p>}</div><Button type="submit" loading={busyOperation === "save"} disabled={busy || offline}>{busyOperation === "save" ? "جارٍ حفظ الرد والحالة…" : "حفظ الرد والحالة"}</Button></form>}
     </div>
     {editing && <FollowupForm order={{ id: item.orderId, trackingNumber: tracking }} accountId={accountId} initial={item} onClose={() => setEditing(false)} onCreated={(updated) => { setEditing(false); onUpdated(updated); }} />}
     {deleteTarget && <Modal title="حذف المتابعة؟" onClose={closeDelete} closeDisabled={busy} className="followup-modal">
@@ -412,6 +417,7 @@ function FollowupDetails({ item, accountId, canRespond, onClose, onUpdated, onDe
 function FollowupConversation({ item, accountId }: { item: Followup; accountId: string }) {
   const signal = useRequests(accountId);
   const [comments, setComments] = useState<FollowupComment[]>([]);
+  const offline = useOffline();
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
@@ -444,6 +450,7 @@ function FollowupConversation({ item, accountId }: { item: Followup; accountId: 
   useEffect(() => { void load(); }, [signal]);
   async function send(event: FormEvent) {
     event.preventDefault(); if (busyRef.current || mediaBusy || signal.aborted) return;
+    if (navigator.onLine === false) { setError("لا يوجد اتصال بالإنترنت. لم تُرسل الرسالة؛ النص والمرفقات ما زالت هنا."); return; }
     if (!submitted.current && !text.trim() && !filesRef.current.length) { setError("اكتب رسالة أو أرفق ملفًا قبل الإرسال."); return; }
     busyRef.current = true; setBusy(true); setError("");
     try {
@@ -478,7 +485,7 @@ function FollowupConversation({ item, accountId }: { item: Followup; accountId: 
     <form className="followup-form followup-composer" onSubmit={send}><label className="field"><span className="field__label">رسالتك</span><textarea aria-label="رسالتك" value={text} onChange={(event) => setText(event.target.value)} maxLength={4000} rows={3} disabled={locked} placeholder="تواصل معنا بشأن هذه المتابعة" /></label>
       <Button type="button" variant="outline" aria-expanded={mediaOpen} disabled={locked || mediaBusy} onClick={() => setMediaOpen((value) => !value)}>{mediaOpen ? "إخفاء أدوات المرفقات" : "إضافة صور أو صوت أو فيديو"}</Button>
       {mediaOpen && <MediaPicker prefix="الرسالة: " accountId={accountId} files={files} onChange={(next) => { if (busyRef.current || submitted.current) return; filesRef.current = next; setFiles(next); }} disabled={locked} onActivity={setMediaBusy} />}
-      {error && <p className="followup-error" role="alert">{error}</p>}{submitted.current && !busy && <p className="followup-hint">لم يصل تأكيد الإرسال. أعد تأكيد الرسالة نفسها دون تكرارها.</p>}{progress && <p role="status">{progress}</p>}<Button type="submit" loading={busy} disabled={mediaBusy}>{busy ? "جارٍ إرسال الرسالة…" : submitted.current ? "إعادة تأكيد الرسالة" : "إرسال الرسالة"}</Button>
+      {offline && <OfflineState onRetry={() => void load()} busy={loading} compact />}{error && <p className="followup-error" role="alert">{error}</p>}{submitted.current && !busy && <p className="followup-hint">لم يصل تأكيد الإرسال. أعد تأكيد الرسالة نفسها دون تكرارها.</p>}{progress && <p role="status">{progress}</p>}<Button type="submit" loading={busy} disabled={mediaBusy || offline}>{busy ? "جارٍ إرسال الرسالة…" : submitted.current ? "إعادة تأكيد الرسالة" : "إرسال الرسالة"}</Button>
     </form>
   </section>;
 }

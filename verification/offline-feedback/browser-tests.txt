@@ -1,0 +1,4 @@
+PASS courier pending and confirmed success
+PASS server, permission, malformed receipt and dropped response preserve text without false success
+PASS live offline/online, draft retention and manual-only retry
+PASS admin feedback and responsive offline layout

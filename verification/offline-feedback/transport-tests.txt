@@ -1,0 +1,22 @@
+✔ successful payload and request security settings remain intact (6.429608ms)
+✔ HTTP status categories preserve non-OK response and conflict snapshot (7.752949ms)
+✔ 4xx plain Arabic validation stays useful; 5xx diagnostics stay private (5.609927ms)
+✔ successful HTTP responses sanitize error text without changing receipts or adding absent errors (105.862773ms)
+✔ HTML and non-object HTTP errors retain actual status without raw bodies (92.732677ms)
+✔ malformed successful replies throw typed safe errors (34.156741ms)
+✔ network and offline failures are distinct and do not expose fetch errors (4.920154ms)
+✔ stalled fetch ignoring AbortSignal is bounded and mutation is never replayed (16.763607ms)
+✔ stalled body ignoring AbortSignal shares the bounded request deadline (17.142978ms)
+✔ external cancellation before a request prevents fetch (1.693616ms)
+✔ external abort settles a non-cooperative pending fetch without timeout error (0.654105ms)
+✔ external abort during JSON body remains intentional cancellation (0.543229ms)
+✔ completed request removes external abort listener and clears deadline (28.412114ms)
+✔ unknown exceptions have safe Arabic copy and status errors stay classified (1.424668ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 726.149545

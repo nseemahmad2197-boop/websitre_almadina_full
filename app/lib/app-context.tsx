@@ -4,6 +4,7 @@ import { createContext, useContext } from "react";
 import type { Database, LinkedDevice, Notice, NoticeAudience, Preferences, User, Order, Recipient } from "./data";
 import type { AppLockState } from "./app-lock-client";
 import type { PhoneNotificationState } from "./phone-notifications";
+import type { NavigationDetails } from "./navigation-state";
 
 export type View =
   | "home"
@@ -58,6 +59,8 @@ export type AppContextValue = {
   phoneNotifications: PhoneNotificationState;
   appLock: AppLockState;
   selectedOrderId: string | null;
+  navigationDetails?: NavigationDetails;
+  updateNavigationDetails?: (patch: Partial<NavigationDetails>) => void;
   setSelectedOrderId: (id: string | null) => void;
   setView: (view: View) => void;
   updateDatabase: (updater: (current: Database) => Database) => void;

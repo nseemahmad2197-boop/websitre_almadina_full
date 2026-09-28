@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Brand, Button, IconButton } from "./ui";
 import { Icon } from "./icon";
 import { statusDefinitions } from "../lib/data";
@@ -31,7 +32,26 @@ export function RefreshStatus({ label = "جارٍ تحديث البيانات…
   return <p className="server-refresh" role="status" aria-live="polite"><span className="server-refresh__dot" aria-hidden="true" />{label}</p>;
 }
 
+export function useOffline() {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    const update = () => setOffline(navigator.onLine === false);
+    update(); window.addEventListener("offline", update); window.addEventListener("online", update);
+    return () => { window.removeEventListener("offline", update); window.removeEventListener("online", update); };
+  }, []);
+  return offline;
+}
+
+export function OfflineState({ onRetry, busy = false, compact = false }: { onRetry?: () => void; busy?: boolean; compact?: boolean }) {
+  return <section className={`offline-state ${compact ? "offline-state--compact" : ""}`} role="status" aria-live="polite" dir="rtl">
+    <span className="offline-state__symbol" aria-hidden="true"><Icon name="refresh" size={32} /></span>
+    <div><h3>لا يوجد اتصال بالإنترنت</h3><p>تحقق من اتصالك ثم أعد المحاولة. ستبقى البيانات المعروضة والنص المكتوب أثناء بقاء الصفحة مفتوحة.</p></div>
+    {onRetry && <Button variant="outline" loading={busy} disabled={busy} onClick={onRetry}>إعادة المحاولة</Button>}
+  </section>;
+}
+
 export function RequestFailure({ message, onRetry, busy = false, compact = false }: { message: string; onRetry?: () => void; busy?: boolean; compact?: boolean }) {
+  if (message.startsWith("لا يوجد اتصال بالإنترنت")) return <OfflineState onRetry={onRetry} busy={busy} compact={compact} />;
   return <section className={`server-failure ${compact ? "server-failure--compact" : ""}`} role="alert"><Icon name="alert" size={compact ? 18 : 26} /><div><p>{message}</p></div>{onRetry && <Button variant="outline" icon="refresh" disabled={busy} onClick={onRetry}>{busy ? "جارٍ إعادة المحاولة…" : "إعادة المحاولة"}</Button>}</section>;
 }
 

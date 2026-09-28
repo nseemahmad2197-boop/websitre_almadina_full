@@ -1888,3 +1888,14 @@ html[data-theme="dark"] .drawer-profile > .avatar { color: #fff; }
 @keyframes server-pulse { 50% { opacity: .4; } }
 @media(max-width: 640px) { .loading-status-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .loading-hero { padding: 22px; } .loading-row { padding: 16px; gap: 10px; } .loading-badge { width: 42px; } .server-connection { padding-inline: 16px; } }
 @media(prefers-reduced-motion: reduce) { .loading-shape::after, .server-refresh__dot { animation: none; } .loading-shape::after { display: none; } }
+
+/* Connectivity stays inline so a lost connection never discards an open draft. */
+.offline-state { display:flex; flex-direction:column; align-items:center; gap:18px; padding:32px 20px; text-align:center; background:var(--surface, #f4f5f5); color:inherit; border-radius:22px; }
+.offline-state__symbol { display:grid; place-items:center; width:76px; height:76px; border-radius:50%; background:rgba(128,128,128,.14); flex-shrink:0; }
+.offline-state h3 { margin:0 0 8px; font-size:1.2rem; }
+.offline-state p { margin:0; opacity:.75; line-height:1.7; max-width:48ch; }
+.offline-state--compact { flex-direction:row; flex-wrap:wrap; padding:16px; gap:12px; text-align:start; }
+.offline-state--compact .offline-state__symbol { width:44px; height:44px; }
+.offline-state--compact > div { flex:1; min-width:160px; }
+.followup-save-success { padding:12px; border-radius:12px; background:rgba(22,163,74,.12); color:inherit; font-weight:600; }
+@media (prefers-color-scheme:dark) { .offline-state { background:var(--surface, #20262b); } }
