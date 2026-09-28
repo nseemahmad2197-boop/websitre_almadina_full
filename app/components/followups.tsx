@@ -6,6 +6,7 @@ import type { Order } from "../lib/data";
 import { FOLLOWUP_LIMITS, FOLLOWUP_STATUSES, FOLLOWUP_TYPES, followupStatusLabel, followupTypeLabel, type Followup, type FollowupAttachment, type FollowupComment, type FollowupCommentList, type FollowupList, type FollowupStatus, type FollowupType } from "../lib/followups";
 import { bindFollowupAccount, canonicalFollowupPrice, createFollowup, deleteFollowup, downloadFollowupFile, editFollowup, followupApi, FollowupApiError, postFollowupComment, uploadFollowupFile, validFollowup, validFollowupComment, validateFollowupFiles, type FollowupCommentDraft, type FollowupDraft, type FollowupEditDraft, type PendingFollowupFile } from "../lib/followup-client";
 import { Button, Field, Modal, PageHeader, SectionCard, SelectField } from "./ui";
+import { LoadingSkeleton, RefreshStatus, RequestFailure } from "./server-state";
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : "تعذّر الاتصال. حاول مجددًا.";
 const sizeLabel = (size: number) => `${(size / (1024 * 1024)).toFixed(1)} ميغابايت`;
@@ -39,6 +40,7 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
   const [entries, setEntries] = useState<Followup[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Followup | null>(null);
@@ -61,6 +63,7 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
       const live = result.followups.filter((item) => !deletedIds.current.has(item.id));
       setEntries((previous) => cursor ? [...previous, ...live.filter((item) => !previous.some((existing) => existing.id === item.id))] : live);
       setNext(result.nextCursor);
+      setLoaded(true);
     } catch (error) { if (!signal.aborted && number === loadNumber.current) setError(errorText(error)); }
     finally { if (!signal.aborted && number === loadNumber.current) setLoading(false); }
   }
@@ -76,10 +79,11 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
   }
   return <SectionCard title={order ? "متابعات الطرد" : "طلبات المتابعة"} icon="message" className="followup-section" action={canCreate ? <Button icon="plus" onClick={() => setCreating(true)}>إنشاء متابعة</Button> : undefined}>
     {!order && <p className="followup-hint">{user?.role === "merchant" ? "لإنشاء متابعة، افتح تفاصيل الطرد واضغط «إنشاء متابعة»." : "اختر متابعة للاطلاع على تفاصيلها ومرفقاتها والرد عليها."}</p>}
-    <div className="followup-toolbar"><Button variant="ghost" onClick={() => void load()} disabled={loading}>تحديث المتابعات</Button><span aria-live="polite">{loading ? "جارٍ التحميل…" : `${entries.length.toLocaleString("ar-EG")} متابعة`}</span></div>
-    {error && <p className="followup-error" role="alert">{error}</p>}
+    <div className="followup-toolbar"><Button variant="ghost" onClick={() => void load()} disabled={loading}>تحديث المتابعات</Button>{loaded && <span aria-live="polite">{entries.length.toLocaleString("ar-EG")} متابعة</span>}</div>
+    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث المتابعات…" /> : <LoadingSkeleton kind="list" label="جارٍ تحميل المتابعات…" />)}
+    {error && <RequestFailure message={error} onRetry={() => void load()} busy={loading} compact={loaded} />}
     {notice && <p role="status">{notice}</p>}
-    {!loading && !error && !entries.length && <p className="followup-empty">لا توجد متابعات{order ? " لهذا الطرد" : " حتى الآن"}.</p>}
+    {loaded && !loading && !error && !entries.length && <p className="followup-empty">لا توجد متابعات{order ? " لهذا الطرد" : " حتى الآن"}.</p>}
     <div className="followup-list">{entries.map((item) => <button type="button" key={item.id} className="followup-row" onClick={() => setSelected(item)}>
       <span className={`followup-status followup-status--${item.status}`}>{followupStatusLabel(item.status)}</span>
       <strong>{item.title}</strong><span>{followupTypeLabel(item.type)}</span>
@@ -89,7 +93,7 @@ export function FollowupCollection({ accountId, order, merchantId }: { accountId
     {next && <Button variant="outline" loading={loading} onClick={() => void load(next)}>عرض المزيد</Button>}
     {creating && canCreate && order && <FollowupForm key={`${accountId}:${order.id}`} order={order} accountId={accountId} onClose={() => { setCreating(false); void load(); }} onCreated={(item) => {
       if (signal.aborted) return;
-      setCreating(false); setEntries((current) => [item, ...current.filter((existing) => existing.id !== item.id)]); setCreated(item);
+      setCreating(false); setEntries((current) => [item, ...current.filter((existing) => existing.id !== item.id)]); setLoaded(true); setCreated(item);
     }} />}
     {created && <FollowupSuccess item={created} onClose={() => setCreated(null)} onDetails={() => { setSelected(created); setCreated(null); }} onCollection={() => { setCreated(null); setView("followups"); }} />}
     {selected && <FollowupDetails key={`${accountId}:${selected.id}`} item={selected} accountId={accountId} canRespond={user?.role === "admin" || user?.role === "courier"} onClose={() => setSelected(null)} onUpdated={updated} onDeleted={deleted} onParcel={!order ? () => { setSelectedOrderId(selected.orderId); setView("order-detail"); } : undefined} />}
@@ -195,7 +199,7 @@ function FollowupForm({ order, accountId, initial, onClose, onCreated }: { order
       {error && <p className="followup-error" role="alert">{error}</p>}
       {!busy && submittedDraft.current && !conflict && <p className="followup-hint">لم يصل تأكيد الحفظ. أعد المحاولة للتحقق من الطلب نفسه دون إنشاء نسخة مكررة.</p>}
       {progress && <p role="status" aria-live="polite">{progress}</p>}
-      <div className="followup-submit"><Button type="submit" full loading={busy} disabled={mediaBusy || conflict}>{submittedDraft.current && !busy ? "إعادة محاولة التأكيد" : initial ? "تعديل المتابعة" : "تأكيد"}</Button></div>
+      <div className="followup-submit"><Button type="submit" full loading={busy} disabled={mediaBusy || conflict}>{busy ? "جارٍ حفظ المتابعة…" : submittedDraft.current ? "إعادة محاولة التأكيد" : initial ? "تعديل المتابعة" : "تأكيد"}</Button></div>
     </form>
   </Modal>;
 }
@@ -294,6 +298,7 @@ function FollowupDetails({ item, accountId, canRespond, onClose, onUpdated, onDe
   const [status, setStatus] = useState<FollowupStatus>(item.status);
   const [response, setResponse] = useState(item.response);
   const [busy, setBusy] = useState(false);
+  const [busyOperation, setBusyOperation] = useState<"refresh" | "save" | "delete" | null>(null);
   const busyRef = useRef(false);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
@@ -305,27 +310,27 @@ function FollowupDetails({ item, accountId, canRespond, onClose, onUpdated, onDe
   useEffect(() => { setStatus(item.status); setResponse(item.response); }, [item.status, item.response]);
   async function refresh() {
     if (busyRef.current) return;
-    busyRef.current = true; setBusy(true); setError("");
+    busyRef.current = true; setBusy(true); setBusyOperation("refresh"); setError("");
     try {
       const result = await followupApi<{ followup: unknown }>(`followups/${encodeURIComponent(item.id)}`, signal);
       if (!validFollowup(result.followup) || result.followup.id !== item.id || result.followup.orderId !== item.orderId) throw new Error("تعذّر تحديث المتابعة. أغلق التفاصيل وحدّث القائمة.");
       if (!signal.aborted) { onUpdated(result.followup); setDeleteTarget(null); setDeleteConflict(false); setDeleteError(""); }
     } catch (error) { if (!signal.aborted) { if (deleteTarget) setDeleteError(errorText(error)); else setError(errorText(error)); } }
-    finally { busyRef.current = false; if (!signal.aborted) setBusy(false); }
+    finally { busyRef.current = false; if (!signal.aborted) { setBusy(false); setBusyOperation(null); } }
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); if (busyRef.current) return;
-    busyRef.current = true; setBusy(true); setError("");
+    busyRef.current = true; setBusy(true); setBusyOperation("save"); setError("");
     try {
       const result = await followupApi<{ followup: Followup }>(`followups/${encodeURIComponent(item.id)}/status`, signal, { status, response: response.trim() });
       if (!validFollowup(result.followup) || result.followup.id !== item.id) throw new Error("لم يصل تأكيد التحديث كاملًا. أعد المحاولة أو حدّث قائمة المتابعات.");
       if (!signal.aborted) onUpdated(result.followup);
     } catch (error) { if (!signal.aborted) setError(errorText(error)); }
-    finally { busyRef.current = false; if (!signal.aborted) setBusy(false); }
+    finally { busyRef.current = false; if (!signal.aborted) { setBusy(false); setBusyOperation(null); } }
   }
   async function confirmDelete() {
     if (!deleteTarget || !canDelete || deleteConflict || busyRef.current || signal.aborted) return;
-    busyRef.current = true; setBusy(true); setDeleteError("");
+    busyRef.current = true; setBusy(true); setBusyOperation("delete"); setDeleteError("");
     try {
       await deleteFollowup(deleteTarget.id, { orderId: deleteTarget.orderId, expectedUpdatedAt: deleteTarget.updatedAt }, signal);
       if (!signal.aborted) onDeleted(deleteTarget);
@@ -335,11 +340,12 @@ function FollowupDetails({ item, accountId, canRespond, onClose, onUpdated, onDe
           setDeleteConflict(true); setDeleteError("تم تحديث المتابعة من جهاز آخر. حدّث المتابعة وراجع تفاصيلها قبل تأكيد الحذف مجددًا.");
         } else setDeleteError(errorText(error));
       }
-    } finally { busyRef.current = false; if (!signal.aborted) setBusy(false); }
+    } finally { busyRef.current = false; if (!signal.aborted) { setBusy(false); setBusyOperation(null); } }
   }
   function closeDelete() { if (!busyRef.current) { setDeleteTarget(null); setDeleteError(""); } }
   return <Modal title="تفاصيل المتابعة" onClose={onClose} className="followup-modal" closeDisabled={busy} sheet>
-    <div className="followup-detail"><div className="followup-detail-actions"><Button variant="ghost" onClick={() => void refresh()} loading={busy}>تحديث المتابعة</Button>{item.canEdit === true && item.creatorId === accountId && item.status !== "resolved" && <Button variant="outline" disabled={busy} onClick={() => setEditing(true)}>تعديل المتابعة</Button>}{canDelete && <Button variant="danger" icon="trash" disabled={busy || editing || deleteConflict} onClick={() => { setDeleteTarget(item); setDeleteError(""); }}>حذف المتابعة</Button>}<Button variant="ghost" onClick={onClose} disabled={busy}>رجوع إلى المتابعات</Button></div>
+    <div className="followup-detail"><div className="followup-detail-actions"><Button variant="ghost" onClick={() => void refresh()} loading={busyOperation === "refresh"} disabled={busy}>تحديث المتابعة</Button>{item.canEdit === true && item.creatorId === accountId && item.status !== "resolved" && <Button variant="outline" disabled={busy} onClick={() => setEditing(true)}>تعديل المتابعة</Button>}{canDelete && <Button variant="danger" icon="trash" disabled={busy || editing || deleteConflict} onClick={() => { setDeleteTarget(item); setDeleteError(""); }}>حذف المتابعة</Button>}<Button variant="ghost" onClick={onClose} disabled={busy}>رجوع إلى المتابعات</Button></div>
+      {busyOperation === "refresh" && <RefreshStatus label="جارٍ تحديث المتابعة…" />}
       <section className="followup-summary"><div><span className={`followup-status followup-status--${item.status}`}>{followupStatusLabel(item.status)}</span><h2>{item.title}</h2><p>{followupTypeLabel(item.type)}</p><p className="followup-description">{item.description}</p></div><dl className="followup-info"><div><dt>رقم المتابعة</dt><dd><bdi>{item.ticketNumber || item.id}</bdi></dd></div><div><dt>المنشئ</dt><dd>{item.creatorName}</dd></div><div><dt>تاريخ الإنشاء</dt><dd>{dateLabel(item.createdAt)}</dd></div><div><dt>آخر تحديث</dt><dd>{dateLabel(item.updatedAt)}</dd></div></dl></section>
       <section className="followup-extra"><h3>معلومات إضافية</h3><dl className="followup-info"><div><dt>رقم الطرد</dt><dd><bdi>{tracking}</bdi></dd></div>{item.type === "price-change" && <div><dt>السعر المطلوب</dt><dd>{item.requestedPrice != null ? <><bdi>{item.requestedPrice}</bdi> ₪</> : "لم يُحدد في المتابعة السابقة"}</dd></div>}{item.type === "address-change" && <div><dt>عنوان المستلم المطلوب</dt><dd className="followup-description">{item.requestedAddress || "لم يُحدد في المتابعة السابقة"}</dd></div>}</dl></section>
       {item.attachments.length > 0 && <section><h3>المرفقات ({item.attachments.length})</h3><PrivateAttachments items={item.attachments} accountId={accountId} /></section>}
@@ -347,7 +353,7 @@ function FollowupDetails({ item, accountId, canRespond, onClose, onUpdated, onDe
       {onParcel && <Button variant="ghost" onClick={onParcel}>فتح تفاصيل الطرد</Button>}
       {error && <p role="alert" className="followup-error">{error}</p>}
       <FollowupConversation key={`${accountId}:${item.id}`} item={item} accountId={accountId} />
-      {canRespond && <form onSubmit={submit} className="followup-form followup-response-form"><h3>إدارة حالة المتابعة</h3><SelectField label="حالة المتابعة" aria-label="حالة المتابعة" value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as FollowupStatus)}>{FOLLOWUP_STATUSES.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}</SelectField><label className="field"><span className="field__label">الرد على صاحب المتابعة</span><textarea aria-label="الرد على صاحب المتابعة" value={response} onChange={(event) => setResponse(event.target.value)} maxLength={FOLLOWUP_LIMITS.response} rows={4} disabled={busy} required /></label><Button type="submit" loading={busy}>حفظ الرد والحالة</Button></form>}
+      {canRespond && <form onSubmit={submit} className="followup-form followup-response-form"><h3>إدارة حالة المتابعة</h3><SelectField label="حالة المتابعة" aria-label="حالة المتابعة" value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as FollowupStatus)}>{FOLLOWUP_STATUSES.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}</SelectField><label className="field"><span className="field__label">الرد على صاحب المتابعة</span><textarea aria-label="الرد على صاحب المتابعة" value={response} onChange={(event) => setResponse(event.target.value)} maxLength={FOLLOWUP_LIMITS.response} rows={4} disabled={busy} required /></label><Button type="submit" loading={busyOperation === "save"} disabled={busy}>{busyOperation === "save" ? "جارٍ حفظ الرد والحالة…" : "حفظ الرد والحالة"}</Button></form>}
     </div>
     {editing && <FollowupForm order={{ id: item.orderId, trackingNumber: tracking }} accountId={accountId} initial={item} onClose={() => setEditing(false)} onCreated={(updated) => { setEditing(false); onUpdated(updated); }} />}
     {deleteTarget && <Modal title="حذف المتابعة؟" onClose={closeDelete} closeDisabled={busy} className="followup-modal">
@@ -366,7 +372,8 @@ function FollowupConversation({ item, accountId }: { item: Followup; accountId: 
   const signal = useRequests(accountId);
   const [comments, setComments] = useState<FollowupComment[]>([]);
   const [next, setNext] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
   const [text, setText] = useState("");
@@ -389,6 +396,7 @@ function FollowupConversation({ item, accountId }: { item: Followup; accountId: 
       if (signal.aborted || current !== sequence.current) return;
       if (!Array.isArray(result.comments) || !result.comments.every((comment) => validFollowupComment(comment) && comment.followupId === item.id) || result.nextCursor !== null && typeof result.nextCursor !== "string") throw new Error("تعذّر قراءة المحادثة. أعد المحاولة.");
       setComments((previous) => [...new Map([...result.comments, ...(cursor ? previous : [])].map((comment) => [comment.id, comment])).values()]); setNext(result.nextCursor);
+      setLoaded(true);
     } catch (error) { if (!signal.aborted && current === sequence.current) setLoadError(errorText(error)); }
     finally { if (!signal.aborted && current === sequence.current) setLoading(false); }
   }
@@ -406,7 +414,7 @@ function FollowupConversation({ item, accountId }: { item: Followup; accountId: 
       setProgress("جارٍ إرسال الرسالة…");
       const comment = await postFollowupComment(item.id, submitted.current, signal);
       if (signal.aborted) return;
-      ++sequence.current; setLoading(false);
+      ++sequence.current; setLoading(false); setLoaded(true); setLoadError("");
       setComments((previous) => [...previous.filter((entry) => entry.id !== comment.id), comment].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)));
       submitted.current = null; uncertain.current = false; requestId.current = crypto.randomUUID(); setText(""); filesRef.current = []; setFiles([]); setMediaOpen(false);
     } catch (error) {
@@ -421,14 +429,15 @@ function FollowupConversation({ item, accountId }: { item: Followup; accountId: 
     } finally { busyRef.current = false; if (!signal.aborted) { setBusy(false); setProgress(""); } }
   }
   return <section className="followup-conversation" aria-label="تواصل معنا"><div className="followup-toolbar"><h3>تواصل معنا</h3><Button variant="ghost" disabled={loading || busy} onClick={() => void load()}>تحديث المحادثة</Button></div>
-    {loading && <p role="status">جارٍ تحميل المحادثة…</p>}{loadError && <div><p className="followup-error" role="alert">{loadError}</p><Button variant="outline" onClick={() => void load()}>إعادة تحميل المحادثة</Button></div>}
-    {!comments.length && !loading && !loadError && <p className="followup-hint">لا توجد رسائل بعد. أضف رسالة للتواصل حول هذه المتابعة.</p>}
+    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث المحادثة…" /> : <LoadingSkeleton kind="conversation" label="جارٍ تحميل المحادثة…" />)}
+    {loadError && <RequestFailure message={loadError} onRetry={() => void load()} busy={loading || busy} compact={loaded} />}
+    {loaded && !comments.length && !loading && !loadError && <p className="followup-hint">لا توجد رسائل بعد. أضف رسالة للتواصل حول هذه المتابعة.</p>}
     <ol className="followup-thread" aria-live="polite">{comments.map((comment) => <li key={comment.id} className={comment.authorId === accountId ? "followup-comment followup-comment--own" : "followup-comment"}><div className="followup-toolbar"><strong>{comment.authorName}</strong><span>{comment.authorRole === "admin" ? "فريق المتابعة" : comment.authorRole === "courier" ? "المندوب" : "التاجر"}</span></div>{comment.text && <p className="followup-description">{comment.text}</p>}<PrivateAttachments items={comment.attachments} accountId={accountId} /><time dateTime={comment.createdAt}>{dateLabel(comment.createdAt)}</time></li>)}</ol>
     {next && <Button variant="outline" disabled={loading || busy} onClick={() => void load(next)}>عرض الرسائل الأقدم</Button>}
     <form className="followup-form followup-composer" onSubmit={send}><label className="field"><span className="field__label">رسالتك</span><textarea aria-label="رسالتك" value={text} onChange={(event) => setText(event.target.value)} maxLength={4000} rows={3} disabled={locked} placeholder="تواصل معنا بشأن هذه المتابعة" /></label>
       <Button type="button" variant="outline" aria-expanded={mediaOpen} disabled={locked || mediaBusy} onClick={() => setMediaOpen((value) => !value)}>{mediaOpen ? "إخفاء أدوات المرفقات" : "إضافة صور أو صوت أو فيديو"}</Button>
       {mediaOpen && <MediaPicker prefix="الرسالة: " accountId={accountId} files={files} onChange={(next) => { if (busyRef.current || submitted.current) return; filesRef.current = next; setFiles(next); }} disabled={locked} onActivity={setMediaBusy} />}
-      {error && <p className="followup-error" role="alert">{error}</p>}{submitted.current && !busy && <p className="followup-hint">لم يصل تأكيد الإرسال. أعد تأكيد الرسالة نفسها دون تكرارها.</p>}{progress && <p role="status">{progress}</p>}<Button type="submit" loading={busy} disabled={mediaBusy}>{submitted.current && !busy ? "إعادة تأكيد الرسالة" : "إرسال الرسالة"}</Button>
+      {error && <p className="followup-error" role="alert">{error}</p>}{submitted.current && !busy && <p className="followup-hint">لم يصل تأكيد الإرسال. أعد تأكيد الرسالة نفسها دون تكرارها.</p>}{progress && <p role="status">{progress}</p>}<Button type="submit" loading={busy} disabled={mediaBusy}>{busy ? "جارٍ إرسال الرسالة…" : submitted.current ? "إعادة تأكيد الرسالة" : "إرسال الرسالة"}</Button>
     </form>
   </section>;
 }
@@ -454,7 +463,7 @@ function AttachmentPreview({ item, accountId, onClose }: { item: FollowupAttachm
     return () => { alive = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [item, signal, retry]);
   return <section className="followup-preview" aria-label={`معاينة ${item.name}`}><div className="followup-toolbar"><strong><bdi>{item.name}</bdi></strong>{onClose && <Button type="button" variant="ghost" onClick={onClose}>إغلاق المعاينة</Button>}</div>
-    {!url && !error && <p role="status">جارٍ تحميل المرفق…</p>}
+    {!url && !error && <LoadingSkeleton kind="detail" rows={2} label="جارٍ تحميل المرفق…" />}
     {error && <><p role="alert" className="followup-error">{error}</p><Button type="button" onClick={() => setRetry((value) => value + 1)}>إعادة المحاولة</Button></>}
     {url && <>{item.mimeType.startsWith("image/") ? <img src={url} alt={item.name} onError={() => setError("لا يدعم المتصفح معاينة هذه الصورة. يمكنك تنزيلها.")} /> : item.mimeType.startsWith("audio/") ? <audio aria-label={`تشغيل ${item.name}`} controls src={url} preload="metadata" onError={() => setError("تعذّر تشغيل هذا الصوت داخل المتصفح. أعد المحاولة أو نزّل المرفق.")} /> : <video controls playsInline src={url} preload="metadata" />}<a className="button button--outline" href={url} download={item.name}>تنزيل المرفق</a></>}
   </section>;

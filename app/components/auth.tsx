@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { requestApiJSON, safeApiErrorMessage } from "../lib/api-transport";
+import { LoadingSkeleton, RequestFailure } from "./server-state";
 import { useApp } from "../lib/app-context";
 import { detectBiometricAvailability } from "../lib/app-lock-client";
 import { AVAILABLE_ACCOUNTS_EVENT, AVAILABLE_ACCOUNTS_STORAGE_KEY, forgetAvailableAccount, readAvailableAccounts, type AvailableAccount } from "../lib/available-accounts";
@@ -26,6 +28,12 @@ export function Authentication() {
   const [busy, setBusy] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricBusy, setBiometricBusy] = useState(false);
+  const loginActive = useRef(false);
+  const [trackingBusy, setTrackingBusy] = useState(false);
+  const [trackingError, setTrackingError] = useState("");
+  const [trackingTarget, setTrackingTarget] = useState("");
+  const trackingRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => trackingRequest.current?.abort(), []);
 
   useEffect(() => {
     const hydrateAccounts = () => setAvailableAccounts(readAvailableAccounts());
@@ -53,26 +61,30 @@ export function Authentication() {
 
   async function onLogin(event: FormEvent) {
     event.preventDefault();
-    if (loginOperationBusy) return;
+    if (loginOperationBusy || loginActive.current) return;
     setError("");
     if (!email.trim() || !password) return setError("أدخل البريد الإلكتروني وكلمة المرور.");
+    loginActive.current = true;
     setBusy(true);
     try {
       if (!await login(email, password)) setError("البريد الإلكتروني أو كلمة المرور غير صحيحة.");
     } catch (error) {
       setError(error instanceof Error ? error.message : "تعذّر الاتصال بالخادم. حاول مرة أخرى.");
     } finally {
+      loginActive.current = false;
       setBusy(false);
     }
   }
 
   async function onBiometricLogin() {
-    if (loginOperationBusy) return;
+    if (loginOperationBusy || loginActive.current) return;
+    loginActive.current = true;
     setError("");
     setBiometricBusy(true);
     try {
       await loginWithBiometric();
     } finally {
+      loginActive.current = false;
       setBiometricBusy(false);
     }
   }
@@ -80,16 +92,23 @@ export function Authentication() {
   async function findShipment(value: string) {
     const normalized = value.trim().toUpperCase();
     if (!normalized) return showToast("أدخل رقم تتبع الطرد أولًا.", "error");
-
+    if (trackingRequest.current) return;
+    const request = new AbortController(); trackingRequest.current = request;
+    setTrackingBusy(true); setTrackingError(""); setTrackedOrder(null); setTrackingTarget(normalized);
     try {
-      const response = await fetch(`/api/almadina/track?tracking=${encodeURIComponent(normalized)}`, { cache: "no-store" });
-      const result = await response.json() as { order?: TrackableOrder; error?: string };
-      if (!response.ok || !result.order) return showToast(result.error ?? "لم نعثر على طرد بهذا الرقم. تحقق من رقم التتبع.", "error");
+      const { response, payload } = await requestApiJSON(`track?tracking=${encodeURIComponent(normalized)}`, { signal: request.signal });
+      const result = payload as { order?: TrackableOrder; error?: string };
+      if (request.signal.aborted) return;
+      if (!response.ok || !result.order) { setTrackingError(result.error ?? "لم نعثر على طرد بهذا الرقم. تحقق من رقم التتبع."); return; }
       setTrackedOrder(result.order);
-    } catch {
-      showToast("تعذّر الاتصال بالخادم للبحث عن الطرد.", "error");
+    } catch (error) {
+      if (!request.signal.aborted) setTrackingError(safeApiErrorMessage(error));
+    } finally {
+      if (trackingRequest.current === request) { trackingRequest.current = null; setTrackingBusy(false); }
     }
   }
+
+  function closeTracking() { trackingRequest.current?.abort(); trackingRequest.current = null; setTrackingBusy(false); setTrackedOrder(null); setTrackingError(""); }
 
   function chooseAvailableAccount(account: AvailableAccount) {
     if (loginOperationBusy) return;
@@ -162,11 +181,11 @@ export function Authentication() {
               {mode === "login" && <header className="auth-card__header"><h1>تسجيل الدخول</h1><p>أهلًا بعودتك — أدخل بيانات حسابك للمتابعة</p></header>}
               {mode === "login" ? (
                 <form className="auth-form" onSubmit={onLogin} noValidate>
-                  <Field icon="mail" type="email" placeholder="البريد الإلكتروني" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" dir="ltr" disabled={loginOperationBusy} />
-                  <Field icon="lock" type={showPassword ? "text" : "password"} placeholder="كلمة المرور" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" suffix={passwordToggle} disabled={loginOperationBusy} />
+                  <Field icon="mail" type="email" aria-label="البريد الإلكتروني" placeholder="البريد الإلكتروني" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" dir="ltr" disabled={loginOperationBusy} />
+                  <Field icon="lock" type={showPassword ? "text" : "password"} aria-label="كلمة المرور" placeholder="كلمة المرور" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" suffix={passwordToggle} disabled={loginOperationBusy} />
                   <button type="button" className="auth-forgot-link" disabled={loginOperationBusy} onClick={openPasswordRecovery}>نسيت كلمة المرور؟</button>
-                  {error && <p className="form-error"><Icon name="alert" size={15} />{error}</p>}
-                  <Button type="submit" full loading={busy} disabled={biometricBusy}>تسجيل الدخول</Button>
+                  {error && <p className="form-error" role="alert"><Icon name="alert" size={15} />{error}</p>}
+                  <Button type="submit" full loading={busy} disabled={biometricBusy}>{busy ? "جارٍ تسجيل الدخول…" : "تسجيل الدخول"}</Button>
                   {biometricAvailable && <Button type="button" variant="secondary" icon="fingerprint" full loading={biometricBusy} disabled={busy} onClick={() => { void onBiometricLogin(); }}>الدخول ببصمة الوجه أو حماية الجهاز</Button>}
                   <button
                     type="button"
@@ -191,7 +210,7 @@ export function Authentication() {
         <footer className="auth-footer">توصيل أسرع، متابعة أسهل — إلى كل فلسطين<PublicServiceLinks /></footer>
       </div>
 
-      {trackedOrder && <Modal onClose={() => setTrackedOrder(null)} title="تتبّع الطرد" className="tracking-modal"><div className="tracking-modal__number"><Icon name="package" size={32} /><div><strong dir="ltr">{trackedOrder.trackingNumber}</strong><span>بيانات المستلم محمية</span></div><StatusPill status={trackedOrder.status} /></div><TrackingHistory order={trackedOrder} compact /><Button full onClick={() => setTrackedOrder(null)}>حسنًا</Button></Modal>}
+      {(trackingBusy || trackedOrder || trackingError) && <Modal onClose={closeTracking} title="تتبّع الطرد" className="tracking-modal">{trackingBusy ? <LoadingSkeleton kind="detail" rows={2} label="جارٍ تحميل تتبّع الطرد…" /> : trackingError ? <RequestFailure message={trackingError} onRetry={() => void findShipment(trackingTarget)} /> : trackedOrder && <><div className="tracking-modal__number"><Icon name="package" size={32} /><div><strong dir="ltr">{trackedOrder.trackingNumber}</strong><span>بيانات المستلم محمية</span></div><StatusPill status={trackedOrder.status} /></div><TrackingHistory order={trackedOrder} compact /><Button full onClick={closeTracking}>حسنًا</Button></>}</Modal>}
       {accountsOpen && (
         <Modal title="الحسابات المتاحة" onClose={() => setAccountsOpen(false)} className="available-accounts-modal" sheet>
           <p className="modal-description">اختيار حساب من هذه القائمة يملأ البريد الإلكتروني لتسجيل الدخول بكلمة المرور فقط. عند الضغط على زر حماية الجهاز، يعرض الجهاز الحسابات المرتبطة بالبصمة ويختار المستخدم منها.</p>

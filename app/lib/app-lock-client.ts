@@ -1,5 +1,7 @@
 "use client";
 
+import { requestApiJSON } from "./api-transport";
+
 import {
   browserSupportsWebAuthn,
   platformAuthenticatorIsAvailable,
@@ -31,27 +33,15 @@ export class AppLockApiError extends Error {
 }
 
 async function appLockRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api/almadina/security/${path}`, {
-    ...options,
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json", ...options.headers },
-  });
-  const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new AppLockApiError(payload.error ?? "تعذّر التحقق من قفل التطبيق.", response.status);
-  return payload;
+  const { response, payload } = await requestApiJSON(`security/${path}`, options);
+  if (!response.ok) throw new AppLockApiError(typeof payload.error === "string" ? payload.error : "تعذّر التحقق من قفل التطبيق.", response.status);
+  return payload as T;
 }
 
 async function passkeyLoginRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api/almadina/passkey/login/${path}`, {
-    ...options,
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json", ...options.headers },
-  });
-  const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new AppLockApiError(payload.error ?? "تعذّر تسجيل الدخول بحماية الجهاز.", response.status);
-  return payload;
+  const { response, payload } = await requestApiJSON(`passkey/login/${path}`, options);
+  if (!response.ok) throw new AppLockApiError(typeof payload.error === "string" ? payload.error : "تعذّر تسجيل الدخول بحماية الجهاز.", response.status);
+  return payload as T;
 }
 
 export async function detectBiometricAvailability(): Promise<boolean> {
@@ -71,8 +61,8 @@ export async function detectBiometricAvailability(): Promise<boolean> {
   }
 }
 
-export function getAppLockStatus(): Promise<ServerAppLockStatus> {
-  return appLockRequest<ServerAppLockStatus>("status");
+export function getAppLockStatus(signal?: AbortSignal): Promise<ServerAppLockStatus> {
+  return appLockRequest<ServerAppLockStatus>("status", { signal });
 }
 
 export function createAppLock(pin: string): Promise<ServerAppLockStatus> {

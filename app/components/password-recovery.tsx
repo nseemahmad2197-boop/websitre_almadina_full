@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { requestApiJSON } from "../lib/api-transport";
 import { Icon } from "./icon";
 import { Button, Field } from "./ui";
 
@@ -45,7 +46,7 @@ function strongPassword(value: string): boolean {
 }
 
 async function recoveryRequest(path: "request" | "verify" | "complete", body: Record<string, unknown>): Promise<RecoveryResponse> {
-  const response = await fetch(`/api/almadina/password-reset/${path}`, {
+  const { response, payload: responsePayload } = await requestApiJSON(`password-reset/${path}`, {
     method: "POST",
     credentials: "same-origin",
     cache: "no-store",
@@ -53,7 +54,7 @@ async function recoveryRequest(path: "request" | "verify" | "complete", body: Re
     body: JSON.stringify(body),
   });
 
-  const payload = await response.json().catch(() => ({})) as RecoveryResponse;
+  const payload = responsePayload as RecoveryResponse;
   if (!response.ok || payload.success === false) {
     throw new Error(payload.error ?? "تعذّر إكمال طلب إعادة تعيين كلمة المرور. حاول مجددًا.");
   }

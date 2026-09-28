@@ -60,7 +60,7 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 
 export function Button({ icon, children, variant = "primary", full, loading, className = "", disabled, ...props }: ButtonProps) {
   return (
-    <button className={`button button--${variant} ${full ? "button--full" : ""} ${className}`} disabled={disabled || loading} {...props}>
+    <button className={`button button--${variant} ${full ? "button--full" : ""} ${className}`} disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
       {loading ? <span className="spinner" /> : icon ? <Icon name={icon} size={19} /> : null}
       {children}
     </button>

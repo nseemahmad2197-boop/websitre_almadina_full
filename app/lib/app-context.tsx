@@ -50,6 +50,7 @@ export type RegistrationFormValues = Pick<User, "name" | "phone" | "store" | "em
 export type RegistrationChallenge = { expiresIn: number; resendAfter: number; email: string };
 
 export type AppContextValue = {
+  serverSync?: { busy: boolean; error: string; offline: boolean; retry: () => void };
   database: Database;
   user: User | null;
   view: View;

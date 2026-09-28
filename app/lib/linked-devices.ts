@@ -1,4 +1,5 @@
 import type { LinkedDevice } from "./data";
+import { requestApiJSON } from "./api-transport.ts";
 
 export class LinkedDevicesError extends Error {
   status: number;
@@ -29,13 +30,11 @@ export async function requestLinkedDevices(operation: Operation, accountId?: str
   const rename = operation.action === "rename";
   const label = rename ? operation.label.trim() : "";
   if (rename && (label.length > 80 || /[\p{Cc}\p{Cf}]/u.test(label))) throw new LinkedDevicesError("اكتب اسمًا واضحًا للجهاز حتى 80 حرفًا.", 400);
-  const response = await fetch(`/api/almadina/security/devices${rename ? "/current" : operation.action === "revoke" ? "/revoke" : ""}`, {
+  const { response, payload } = await requestApiJSON(`security/devices${rename ? "/current" : operation.action === "revoke" ? "/revoke" : ""}`, {
     credentials: "same-origin", cache: "no-store", method: operation.action === "list" ? "GET" : "POST",
     headers: { ...(operation.action !== "list" ? { "Content-Type": "application/json" } : {}), ...(accountId ? { "X-Almadina-Account": accountId } : {}) },
     ...(operation.action === "list" ? {} : { body: JSON.stringify(rename ? { label } : { deviceId: operation.deviceId }) }),
   });
-  let payload: unknown;
-  try { payload = await response.json(); } catch { throw new LinkedDevicesError("تعذّر قراءة رد الخادم. حدّث الموقع على الاستضافة ثم أعد المحاولة.", response.status); }
   if (!response.ok) throw new LinkedDevicesError(record(payload) && typeof payload.error === "string" ? payload.error : "تعذّر تنفيذ طلب الأجهزة المرتبطة.", response.status);
   if (!record(payload) || !Array.isArray(payload.devices) || !payload.devices.every(validDevice)
     || new Set(payload.devices.map((device) => device.id)).size !== payload.devices.length

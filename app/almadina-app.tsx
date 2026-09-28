@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { requestApiJSON, validSnapshotEnvelope, canAcceptPolledSnapshot } from "./lib/api-transport";
+import { requestApiJSON, validSnapshotEnvelope, canAcceptPolledSnapshot, safeApiErrorMessage } from "./lib/api-transport";
 import type { IScannerControls } from "@zxing/browser";
 import { readBrowserPermission } from "./lib/browser-permissions";
 import { LinkedDevicesError, requestLinkedDevices } from "./lib/linked-devices";
 import { AppLockScreen } from "./components/app-lock-screen";
 import { ApplicationShell } from "./components/application-shell";
+import { BootstrapScreen } from "./components/server-state";
 import { Authentication } from "./components/auth";
 import { Icon } from "./components/icon";
 import { Avatar, Brand, Button, Field, IconButton, Modal } from "./components/ui";
@@ -323,6 +324,12 @@ export default function AlmadinaApplication() {
   const [database, setDatabase] = useState<Database>(() => createSeedDatabase());
   const [userId, setUserId] = useState<string | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
+  const [sessionError, setSessionError] = useState("");
+  const [sessionAttempt, setSessionAttempt] = useState(0);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [offline, setOffline] = useState(false);
+  const retrySync = useRef<() => void>(() => {});
   const [appLock, setAppLock] = useState<AppLockState>(EMPTY_APP_LOCK);
   const [view, setViewState] = useState<View>("home");
   const [anonymousPreferences, setAnonymousPreferences] = useState<Preferences>(defaultPreferences);
@@ -407,6 +414,8 @@ export default function AlmadinaApplication() {
 
   useEffect(() => {
     let active = true;
+    const request = new AbortController();
+    const operationEpoch = sessionEpoch.current;
     let hydratedTheme: ThemePreference | null = null;
     try {
       const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
@@ -426,8 +435,8 @@ export default function AlmadinaApplication() {
 
     async function restoreSession() {
       try {
-        const snapshot = await sharedRequest("session");
-        if (!active) return;
+        const snapshot = await sharedRequest("session", { signal: request.signal });
+        if (!active || operationEpoch !== sessionEpoch.current) return;
         const account = snapshot.database.users.find((entry) => entry.id === snapshot.userId);
         if (!account) return;
         rememberSnapshotAccount(snapshot);
@@ -435,7 +444,7 @@ export default function AlmadinaApplication() {
         const biometricAvailable = await detectBiometricAvailability();
         let restoredLock: AppLockState;
         try {
-          const status = await getAppLockStatus();
+          const status = await getAppLockStatus(request.signal);
           restoredLock = { ...status, ready: true, locked: status.enabled, biometricAvailable };
         } catch {
           restoredLock = {
@@ -448,6 +457,8 @@ export default function AlmadinaApplication() {
             error: "تعذّر التحقق من حالة قفل التطبيق. أعد المحاولة أو سجّل الخروج.",
           };
         }
+
+        if (!active || operationEpoch !== sessionEpoch.current) return;
 
         const accountTheme = snapshot.database.preferences[account.id]?.theme;
         if (!storedThemePreference.current && isThemePreference(accountTheme)) {
@@ -467,15 +478,24 @@ export default function AlmadinaApplication() {
         setUserId(account.id);
         setAppLock(restoredLock);
         setViewState(account.role === "admin" ? "admin" : "home");
-      } catch {
-        // An anonymous visitor simply remains on the sign-in screen.
-      } finally {
-        if (active) setSessionReady(true);
+        setSessionError(""); setSessionReady(true);
+      } catch (error) {
+        if (!active || operationEpoch !== sessionEpoch.current || request.signal.aborted) return;
+        // Only an explicit authentication response means the visitor is signed
+        // out. An unavailable server must not look like a lost account/session.
+        if (error instanceof SharedApiError && error.status === 401) { setSessionError(""); setSessionReady(true); }
+        else setSessionError(safeApiErrorMessage(error));
       }
     }
 
     void restoreSession();
-    return () => { active = false; window.clearTimeout(preferenceHydration); };
+    return () => { active = false; request.abort(); window.clearTimeout(preferenceHydration); };
+  }, [sessionAttempt]);
+
+  useEffect(() => {
+    const update = () => setOffline(navigator.onLine === false);
+    update(); window.addEventListener("online", update); window.addEventListener("offline", update);
+    return () => { window.removeEventListener("online", update); window.removeEventListener("offline", update); };
   }, []);
 
   const user = useMemo(() => database.users.find((entry) => entry.id === userId) ?? null, [database.users, userId]);
@@ -624,9 +644,11 @@ export default function AlmadinaApplication() {
     async function synchronize() {
       if (!active || inFlight || document.visibilityState === "hidden" || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length) return;
       inFlight = true;
+      setSyncBusy(true);
       pendingController = new AbortController();
       try {
         const snapshot = await sharedRequest("database", { signal: pendingController.signal });
+        if (active && operationEpoch === sessionEpoch.current) setSyncError("");
         if (!active || operationEpoch !== sessionEpoch.current || savingUpdates.current || remoteMutationInFlight.current || pendingUpdates.current.length || !canAcceptPolledSnapshot(userId!, serverRevision.current, snapshot)) return;
         rememberSnapshotAccount(snapshot);
         authoritativeDatabase.current = snapshot.database;
@@ -635,18 +657,16 @@ export default function AlmadinaApplication() {
         setDatabase(snapshot.database);
       } catch (error) {
         if (active && operationEpoch === sessionEpoch.current && error instanceof SharedApiError && error.status === 401) {
-          sessionEpoch.current += 1;
-          authoritativeDatabase.current = null;
-          pendingUpdates.current = [];
-          setUserId(null);
-          setViewState("home");
-          setSelectedOrderId(null);
-        }
+          clearLocalSession();
+          showToast("انتهت جلسة الدخول. سجّل الدخول مجددًا.", "info");
+        } else if (active && operationEpoch === sessionEpoch.current && !pendingController?.signal.aborted) setSyncError(safeApiErrorMessage(error));
       } finally {
+        if (active && operationEpoch === sessionEpoch.current) setSyncBusy(false);
         inFlight = false;
         pendingController = null;
       }
     }
+    retrySync.current = () => { void synchronize(); };
 
     const timer = window.setInterval(() => { void synchronize(); }, 6_000);
     const onVisible = () => { if (document.visibilityState === "visible") void synchronize(); };
@@ -656,6 +676,7 @@ export default function AlmadinaApplication() {
 
     return () => {
       active = false;
+      retrySync.current = () => {};
       pendingController?.abort();
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
@@ -993,10 +1014,13 @@ export default function AlmadinaApplication() {
   function setView(next: View) { setViewState(next); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
   async function refreshAppLock(): Promise<void> {
+    const operationEpoch = sessionEpoch.current;
     try {
       const [status, biometricAvailable] = await Promise.all([getAppLockStatus(), detectBiometricAvailability()]);
+      if (operationEpoch !== sessionEpoch.current) return;
       setAppLock((current) => ({ ...status, ready: true, locked: status.enabled && current.locked, biometricAvailable }));
     } catch (error) {
+      if (operationEpoch !== sessionEpoch.current) return;
       const message = readableAppLockError(error, "تعذّر التحقق من حالة قفل التطبيق.");
       setAppLock((current) => ({ ...current, ready: true, locked: true, error: message }));
       showToast(message, "error");
@@ -1098,6 +1122,8 @@ export default function AlmadinaApplication() {
     }
 
     sessionEpoch.current += 1;
+    setConfirmOptions(null);
+    setScanner(null);
     authoritativeDatabase.current = snapshot.database;
     visibleDatabase.current = snapshot.database;
     serverRevision.current = snapshot.revision;
@@ -1107,6 +1133,7 @@ export default function AlmadinaApplication() {
     setDatabase(snapshot.database);
     setUserId(account.id);
     setSessionReady(true);
+    setSessionError(""); setSyncError(""); setSyncBusy(false);
     setAppLock({ ...EMPTY_APP_LOCK, ready: true, locked: false });
     setSelectedOrderId(null);
     setViewState(account.role === "admin" ? "admin" : "home");
@@ -1142,6 +1169,7 @@ export default function AlmadinaApplication() {
 
   function clearLocalSession() {
     setScanner(null);
+    setConfirmOptions(null);
     sessionEpoch.current += 1;
     authoritativeDatabase.current = null;
     pendingUpdates.current = [];
@@ -1153,6 +1181,7 @@ export default function AlmadinaApplication() {
     setDatabase(anonymous);
     setUserId(null);
     setSessionReady(true);
+    setSessionError(""); setSyncError(""); setSyncBusy(false);
     setAppLock({ ...EMPTY_APP_LOCK, ready: true });
     setViewState("home");
     setSelectedOrderId(null);
@@ -1163,7 +1192,7 @@ export default function AlmadinaApplication() {
     if (logoutInFlight.current) return false;
     logoutInFlight.current = true;
     try {
-      const response = await fetch("/api/almadina/logout", {
+      const { response } = await requestApiJSON("logout", {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
@@ -1202,14 +1231,14 @@ export default function AlmadinaApplication() {
 
     remoteMutationInFlight.current = true;
     try {
-      const response = await fetch("/api/almadina/account/password", {
+      const { response, payload: responsePayload } = await requestApiJSON("account/password", {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword, newPassword, confirmPassword, signOutAllDevices }),
       });
-      const payload = await response.json() as Partial<SharedSnapshot> & { success?: boolean; signedOut?: boolean; error?: string };
+      const payload = responsePayload as Partial<SharedSnapshot> & { success?: boolean; signedOut?: boolean; error?: string };
       if (!response.ok || !payload.success) {
         throw new SharedApiError(payload.error ?? "تعذّر تغيير كلمة المرور.", response.status);
       }
@@ -1293,9 +1322,8 @@ export default function AlmadinaApplication() {
     const operationEpoch = sessionEpoch.current;
     remoteMutationInFlight.current = true;
     try {
-      const response = await fetch(`/api/almadina/${path}`, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "تعذّر حفظ الطلب.");
+      const { response, payload: result } = await requestApiJSON(path, { method: "POST", body: JSON.stringify(payload) });
+      if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "تعذّر حفظ الطلب.");
       if (operationEpoch !== sessionEpoch.current) throw new Error("تغيّر الحساب. افتح حالة الطلب في حسابه.");
       // The request endpoint uses the same CAS state as parcels; sync its new revision before further writes.
       try {
@@ -1326,14 +1354,14 @@ export default function AlmadinaApplication() {
 
     remoteMutationInFlight.current = true;
     try {
-      const response = await fetch("/api/almadina/account/delete", {
+      const { response, payload: responsePayload } = await requestApiJSON("account/delete", {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password, confirmation }),
       });
-      const payload = await response.json() as { success?: boolean; error?: string };
+      const payload = responsePayload as { success?: boolean; error?: string };
       if (!response.ok || !payload.success) {
         throw new SharedApiError(payload.error ?? "تعذّر حذف الحساب.", response.status);
       }
@@ -1356,14 +1384,14 @@ export default function AlmadinaApplication() {
   }
 
   async function requestRegistration(values: RegistrationFormValues): Promise<RegistrationChallenge> {
-    const response = await fetch("/api/almadina/register/request", {
+    const { response, payload: responsePayload } = await requestApiJSON("register/request", {
       method: "POST",
       credentials: "same-origin",
       cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(values),
     });
-    const payload = await response.json().catch(() => ({})) as Partial<RegistrationChallenge> & { success?: boolean; error?: string };
+    const payload = responsePayload as Partial<RegistrationChallenge> & { success?: boolean; error?: string };
     if (!response.ok || !payload.success) {
       throw new SharedApiError(payload.error ?? "تعذّر إرسال رمز تأكيد البريد الإلكتروني.", response.status);
     }
@@ -1505,12 +1533,12 @@ export default function AlmadinaApplication() {
   }
 
   const content = !sessionReady
-    ? <main className="session-loading"><Brand /><span className="spinner" /><p>جارٍ التحقق من الجلسة الآمنة...</p></main>
+    ? <BootstrapScreen error={sessionError} onRetry={() => { setSessionError(""); setSessionAttempt((value) => value + 1); }} />
     : user
       ? appLock.locked ? <AppLockScreen /> : <ApplicationShell />
       : <Authentication />;
 
-  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, purgeTrash, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, renameCurrentDevice, deleteAccount, submitDeletionOperation, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
+  return <AppContext.Provider value={{ database, user, view, preferences, phoneNotifications, appLock, selectedOrderId, setSelectedOrderId, setView, updateDatabase, createParcels, assignParcelCode, generateParcelCodes, purgeTrash, updatePreferences, setNotificationSounds, enablePhoneNotifications, disablePhoneNotifications, testPhoneNotifications, enableAppLock, disableAppLock, enableBiometricUnlock, disableBiometricUnlock, verifyAppPin, unlockWithBiometric, refreshAppLock, login, loginWithBiometric, logout, requestRegistration, verifyRegistration, changePassword, listLinkedDevices, revokeLinkedDevice, renameCurrentDevice, deleteAccount, submitDeletionOperation, prepareCollectionInvoice, verifyCollectionCode, broadcastNotice, clearNotices, shipScannedOrder, showToast, serverSync: { busy: syncBusy, error: syncError, offline, retry: () => retrySync.current() }, confirm: setConfirmOptions, notify, openScanner: (callback, options) => setScanner({ callback, purpose: options?.purpose, epoch: sessionEpoch.current }), openAccountSwitcher: () => setAccountSwitcher(true) }}>
     {content}
     {!appLock.locked && confirmOptions && <ConfirmModal options={confirmOptions} onClose={() => setConfirmOptions(null)} />}
     {!appLock.locked && accountSwitcher && user && <Modal title="تبديل الحساب" closeDisabled={accountSwitcherLogoutBusy} onClose={() => setAccountSwitcher(false)} sheet><p className="modal-description">لحماية خصوصيتك، سجّل الخروج ثم استخدم كلمة المرور أو بصمة الجهاز المفعّلة للحساب الآخر.</p><div className="account-list"><div className="account-entry is-active"><Avatar name={user.name} color={user.avatarColor} /><span><strong>{user.name}</strong><small>{user.role === "admin" ? "حساب الإدارة" : user.role === "courier" ? "حساب موظف · مندوب" : user.store}</small></span><Icon name="check" size={20} /></div></div><Button variant="outline" icon="logout" full loading={accountSwitcherLogoutBusy} onClick={() => { void logoutFromAccountSwitcher(); }}>{accountSwitcherLogoutBusy ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج وتبديل الحساب"}</Button></Modal>}

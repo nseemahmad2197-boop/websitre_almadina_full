@@ -1,5 +1,7 @@
 "use client";
 
+import { requestApiJSON, safeApiErrorMessage } from "./api-transport";
+
 export type PhoneNotificationState = {
   ready: boolean;
   supported: boolean;
@@ -113,23 +115,15 @@ function subscriptionUsesKey(subscription: PushSubscription, publicKey: string):
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
-    const response = await fetch(`/api/almadina/${path}`, {
+    const { response, payload } = await requestApiJSON(path, {
       ...options,
-      credentials: "same-origin",
-      cache: "no-store",
       headers: { Accept: "application/json", "Content-Type": "application/json", ...options.headers },
     });
-    let payload: T & { error?: string };
-    try {
-      payload = await response.json() as T & { error?: string };
-    } catch {
-      throw new PhoneNotificationError("failed", "أعاد خادم الإشعارات استجابة غير صالحة. أعد نشر آخر نسخة من الموقع ثم حاول مجددًا.");
-    }
-    if (!response.ok) throw new PhoneNotificationError("failed", payload.error || "تعذّر الاتصال بخدمة إشعارات الهاتف.");
-    return payload;
+    if (!response.ok) throw new PhoneNotificationError("failed", typeof payload.error === "string" ? payload.error : "تعذّر الاتصال بخدمة إشعارات الهاتف.");
+    return payload as T;
   } catch (error) {
     if (error instanceof PhoneNotificationError) throw error;
-    throw new PhoneNotificationError("failed", "تعذّر الاتصال بخدمة إشعارات الهاتف. تحقق من الإنترنت ثم حاول مجددًا.");
+    throw new PhoneNotificationError("failed", safeApiErrorMessage(error, "تعذّر الاتصال بخدمة إشعارات الهاتف. تحقق من الإنترنت ثم حاول مجددًا."));
   }
 }
 

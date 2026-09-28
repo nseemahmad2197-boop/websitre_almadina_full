@@ -10,6 +10,7 @@ import { devicePlatformName } from "../lib/linked-devices";
 import { applicationPermissionDisclosures, LEGAL_DOCUMENT_VERSION, LEGAL_FINAL_NOTICE, privacyPolicySections, termsOfUseSections } from "../lib/legal";
 import { Icon, type IconName } from "./icon";
 import { Button, Field, Modal, PageHeader, SectionCard, Toggle } from "./ui";
+import { LoadingSkeleton, RefreshStatus, RequestFailure } from "./server-state";
 
 function SettingsRow({ icon, title, subtitle, onClick, action, danger = false }: { icon: IconName; title: string; subtitle?: string; onClick?: () => void; action?: ReactNode; danger?: boolean }) {
   return <div className={`settings-row ${danger ? "settings-row--danger" : ""}`} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined} onClick={onClick} onKeyDown={(event) => { if (onClick && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onClick(); } }}><span className="settings-row__icon"><Icon name={icon} size={20} /></span><div><strong>{title}</strong>{subtitle && <small>{subtitle}</small>}</div>{action ?? <Icon name="chevronLeft" size={19} />}</div>;
@@ -181,11 +182,11 @@ function LinkedDevicesContent() {
   const count = devices?.length ?? 0;
   return <div className="page-content linked-devices-page animate-page">
     <PageHeader title="الأجهزة المرتبطة" subtitle="الجلسات المسجّل دخولها إلى حسابك" onBack={() => setView("security")} action={<Button type="button" variant="ghost" icon="refresh" loading={loading} disabled={loading || busy} onClick={() => { void loadDevices(); }}>تحديث</Button>} />
-    <section className="linked-devices-summary" aria-live="polite"><span><Icon name="monitor" size={25} /></span><div><strong>{loading && !devices ? "جارٍ حساب الأجهزة..." : linkedDeviceCountLabel(count)}</strong><small>راجع نوع الجهاز ومنطقة اتصاله التقريبية، وسجّل خروج أي جهاز لا تعرفه.</small></div></section>
+    <section className="linked-devices-summary" aria-live="polite"><span><Icon name="monitor" size={25} /></span><div><strong>{devices !== null ? linkedDeviceCountLabel(count) : "الأجهزة المسجّل دخولها"}</strong><small>راجع نوع الجهاز ومنطقة اتصاله التقريبية، وسجّل خروج أي جهاز لا تعرفه.</small></div></section>
     {mutationError && !editing && <p className="linked-devices-message" role="alert">{mutationError}</p>}
-    {loading && !devices ? <div className="linked-devices-loading" role="status"><span className="spinner" /><p>جارٍ تحميل الأجهزة المرتبطة...</p></div>
-      : failed ? <section className="linked-devices-error" role="alert"><Icon name="alert" size={30} /><h2>تعذّر تحميل الأجهزة</h2><p>تحقق من الاتصال ثم أعد المحاولة.</p><Button type="button" variant="outline" icon="refresh" disabled={busy} onClick={() => { void loadDevices(); }}>إعادة المحاولة</Button></section>
-        : devices?.length ? <div className="linked-device-list">{devices.map((device) => <article className={`linked-device-card ${device.current ? "is-current" : ""}`} key={device.id}>
+    {loading && (devices === null ? <LoadingSkeleton kind="devices" label="جارٍ تحميل الأجهزة المرتبطة…" /> : <RefreshStatus label="جارٍ تحديث الأجهزة المرتبطة…" />)}
+    {failed && <RequestFailure message="تعذّر تحميل الأجهزة. تحقق من الاتصال ثم أعد المحاولة." onRetry={() => void loadDevices()} busy={loading || busy} compact={devices !== null} />}
+    {!!devices?.length && <div className="linked-device-list">{devices.map((device) => <article className={`linked-device-card ${device.current ? "is-current" : ""}`} key={device.id}>
           <span className="linked-device-card__icon"><Icon name={linkedDeviceIcon(device)} size={24} /></span>
           <div className="linked-device-card__details"><div><strong><bdi>{device.label || device.name}</bdi></strong>{device.current && <span className="linked-device-current"><Icon name="check" size={13} />هذا الجهاز</span>}</div>
             <p className="linked-device-platform"><bdi>{devicePlatformName(device)}</bdi>{device.model && <> · <bdi>{device.model}</bdi></>}{device.osVersion && <> · <bdi>{device.osVersion}</bdi></>}</p>
@@ -194,10 +195,10 @@ function LinkedDevicesContent() {
             {device.locationSource === "ip" && device.location && device.locationUpdatedAt && <small>وقت تحديد المنطقة: <time dateTime={device.locationUpdatedAt}>{linkedDeviceDate(device.locationUpdatedAt)}</time></small>}
           </div>
           {device.current ? <Button type="button" variant="outline" disabled={busy || loading} onClick={() => { setLabel(device.label ?? ""); setMutationError(""); setEditing(true); }}>تسمية هذا الجهاز</Button> : <Button type="button" variant="outline" icon="logout" disabled={busy || loading} onClick={() => requestRevoke(device)}>تسجيل الخروج</Button>}
-        </article>)}</div>
-          : <section className="linked-devices-error"><Icon name="monitor" size={34} /><h2>لا توجد أجهزة مرتبطة</h2><p>ستظهر جلسات تسجيل الدخول النشطة هنا.</p></section>}
+        </article>)}</div>}
+    {devices?.length === 0 && !loading && !failed && <section className="linked-devices-error"><Icon name="monitor" size={34} /><h2>لا توجد أجهزة مرتبطة</h2><p>ستظهر جلسات تسجيل الدخول النشطة هنا.</p></section>}
     <SectionCard className="security-note"><p><Icon name="shield" size={18} /> اسم الجهاز اختياري يكتبه مستخدمه، وليس إثباتًا لهوية مالكه. المنطقة تقريبية من شبكة الاتصال وقد تختلف مع VPN أو شبكة الهاتف؛ لا نستخدم GPS ولا نعرض عنوان IP.</p></SectionCard>
-    {editing && <Modal title="تسمية هذا الجهاز" closeDisabled={busy} onClose={() => { if (!mutationActive.current) { setEditing(false); setMutationError(""); } }}><form className="linked-device-name-form" onSubmit={saveLabel}><Field label="اسم الجهاز (اختياري)" aria-label="اسم الجهاز (اختياري)" placeholder="مثل: آيفون نسيم" value={label} onChange={(event) => setLabel(event.target.value)} disabled={busy} maxLength={80} autoComplete="off" hint="اختر اسمًا يساعدك على تمييز هذا الجهاز. اتركه فارغًا لإزالة الاسم المخصص." /><p>يظهر الاسم في حسابك على الموقع والتطبيقين. لا يمكن للتطبيق معرفة اسم المالك الحقيقي تلقائيًا.</p>{mutationError && <p className="linked-devices-message" role="alert">{mutationError}</p>}<Button type="submit" loading={busy} full>حفظ اسم الجهاز</Button></form></Modal>}
+    {editing && <Modal title="تسمية هذا الجهاز" closeDisabled={busy} onClose={() => { if (!mutationActive.current) { setEditing(false); setMutationError(""); } }}><form className="linked-device-name-form" onSubmit={saveLabel}><Field label="اسم الجهاز (اختياري)" aria-label="اسم الجهاز (اختياري)" placeholder="مثل: آيفون نسيم" value={label} onChange={(event) => setLabel(event.target.value)} disabled={busy} maxLength={80} autoComplete="off" hint="اختر اسمًا يساعدك على تمييز هذا الجهاز. اتركه فارغًا لإزالة الاسم المخصص." /><p>يظهر الاسم في حسابك على الموقع والتطبيقين. لا يمكن للتطبيق معرفة اسم المالك الحقيقي تلقائيًا.</p>{mutationError && <p className="linked-devices-message" role="alert">{mutationError}</p>}<Button type="submit" loading={busy} full>{busy ? "جارٍ حفظ اسم الجهاز…" : "حفظ اسم الجهاز"}</Button></form></Modal>}
   </div>;
 }
 

@@ -7,6 +7,7 @@ import type { FollowupCustomer, FollowupCustomerList } from "../lib/followups";
 import { FollowupCollection } from "./followups";
 import { OrderCard } from "./dashboard";
 import { Button, EmptyState, Field, PageHeader } from "./ui";
+import { LoadingSkeleton, RefreshStatus, RequestFailure } from "./server-state";
 
 export function CustomerFollowupsPage() {
   const { user, setView } = useApp();
@@ -45,6 +46,7 @@ function CustomerDirectory({ accountId, query, onSelect }: { accountId: string; 
   const [customers, setCustomers] = useState<FollowupCustomer[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const controller = useRef<AbortController | null>(null);
   const loadNumber = useRef(0);
@@ -63,14 +65,16 @@ function CustomerDirectory({ accountId, query, onSelect }: { accountId: string; 
       if (!Array.isArray(result.customers) || !result.customers.every(validCustomer) || (result.nextCursor !== null && typeof result.nextCursor !== "string")) throw new Error("تعذّر قراءة قائمة المستخدمين.");
       setCustomers((previous) => cursor ? [...previous, ...result.customers.filter((item) => !previous.some((old) => old.id === item.id))] : result.customers);
       setNext(result.nextCursor);
+      setLoaded(true);
     } catch (error) { if (!request.signal.aborted && number === loadNumber.current) setError(error instanceof Error ? error.message : "تعذّر الاتصال. حاول مجددًا."); }
     finally { if (!request.signal.aborted && number === loadNumber.current) setLoading(false); }
   }
   useEffect(() => { void load(); return () => { controller.current?.abort(); }; }, [accountId, query]);
   return <section aria-label="أسماء المستخدمين">
-    <div className="followup-toolbar"><Button variant="ghost" disabled={loading} onClick={() => void load()}>تحديث المستخدمين</Button><span aria-live="polite">{loading ? "جارٍ التحميل…" : `${customers.length.toLocaleString("ar-EG")} مستخدم`}</span></div>
-    {error && <p role="alert" className="followup-error">{error}</p>}
-    {!loading && !error && !customers.length && <EmptyState icon="users" title="لا توجد نتائج" description="جرّب اسم المستخدم أو اسم متجره." />}
+    <div className="followup-toolbar"><Button variant="ghost" disabled={loading} onClick={() => void load()}>تحديث المستخدمين</Button>{loaded && <span aria-live="polite">{customers.length.toLocaleString("ar-EG")} مستخدم</span>}</div>
+    {loading && (loaded ? <RefreshStatus label="جارٍ تحديث المستخدمين…" /> : <LoadingSkeleton kind="customers" label="جارٍ تحميل المستخدمين…" />)}
+    {error && <RequestFailure message={error} onRetry={() => void load()} busy={loading} compact={loaded} />}
+    {loaded && !loading && !error && !customers.length && <EmptyState icon="users" title="لا توجد نتائج" description="جرّب اسم المستخدم أو اسم متجره." />}
     <div className="customer-directory">{customers.map((customer) => <button type="button" className="customer-card" key={customer.id} onClick={() => onSelect(customer)}>
       <strong>{customer.name}</strong><span>{customer.store || "مستخدم"}</span>
       <dl><div><dt>الطرود</dt><dd>{customer.orderCount.toLocaleString("ar-EG")}</dd></div><div><dt>المتابعات</dt><dd>{customer.followupCount.toLocaleString("ar-EG")}</dd></div><div><dt>تحتاج متابعة</dt><dd>{customer.openCount.toLocaleString("ar-EG")}</dd></div></dl><span className="customer-card__open">عرض الطرود والمتابعات</span>

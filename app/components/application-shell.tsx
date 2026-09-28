@@ -15,6 +15,7 @@ import { ParcelCodeBatchesPage } from "./parcel-code-batches";
 import { NewOrder } from "./order-form";
 import { ChangePasswordPage, DeleteAccountPage, HelpPage, LinkedDevicesPage, NotificationSettings, PreferencesPage, PrivacyPage, SecurityPage, SettingsPage } from "./settings-pages";
 import { Icon, type IconName } from "./icon";
+import { RefreshStatus, RequestFailure } from "./server-state";
 import { Avatar, Brand, Button, EmptyState, Field, IconButton, Modal, StatusPill } from "./ui";
 
 function NavigationDrawer({ onClose }: { onClose: () => void }) {
@@ -93,7 +94,7 @@ function CurrentPage() {
     case "change-password": return <ChangePasswordPage />;
     case "linked-devices": return <LinkedDevicesPage />;
     case "deletion-requests": return <DeletionRequestsAdminPage />;
-    case "delete-account": return <DeleteAccountPage />;
+    case "delete-account": return <DeleteAccountPage key={user?.id} />;
     case "notification-settings": return <NotificationSettings />;
     case "preferences": return <PreferencesPage />;
     case "help": return <HelpPage />;
@@ -107,13 +108,14 @@ function CurrentPage() {
 }
 
 export function ApplicationShell() {
-  const { user, view, preferences } = useApp();
+  const { user, view, preferences, serverSync } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const securityFlow = view === "delete-account" || view === "change-password" || view === "linked-devices";
   const showCreate = user?.role === "merchant" && (view === "home" || view === "shipments");
   return <main className={`application ${user?.role === "admin" ? "application--admin" : ""} ${user?.role === "courier" ? "application--employee" : ""} ${securityFlow ? "application--security-flow" : ""} ${showCreate ? "application--with-create" : ""} ${preferences.compact ? "application--compact" : ""}`}>
     <TopBar onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} />
+    <div className="server-connection">{serverSync?.offline ? <RequestFailure compact message="لا يوجد اتصال بالإنترنت. المعروض آخر بيانات تم تحميلها." onRetry={serverSync.retry} busy={serverSync.busy} /> : serverSync?.error ? <RequestFailure compact message={`${serverSync.error} المعروض آخر بيانات تم تحميلها.`} onRetry={serverSync.retry} busy={serverSync.busy} /> : serverSync?.busy ? <RefreshStatus /> : null}</div>
     <CurrentPage />
     {showCreate && !menuOpen && !searchOpen && <NewOrderFloatingButton />}
     {menuOpen && <NavigationDrawer onClose={() => setMenuOpen(false)} />}

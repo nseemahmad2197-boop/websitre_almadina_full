@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
+import { requestApiJSON } from "../lib/api-transport";
 import type { RegistrationChallenge, RegistrationFormValues } from "../lib/app-context";
 import { governorates, normalizeLocation } from "../lib/data";
 import { applicationPermissionDisclosures, LEGAL_DOCUMENT_VERSION, LEGAL_FINAL_NOTICE, privacyPolicySections, termsOfUseSections } from "../lib/legal";
@@ -319,14 +320,13 @@ export function RegistrationFlow({ onCancel, onRequest, onVerify }: Registration
     setError("");
     setStatus("");
     try {
-      const response = await fetch("/api/almadina/geocode/reverse", {
+      const result = await requestApiJSON("geocode/reverse", {
         method: "POST",
-        credentials: "same-origin",
-        cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify(point),
       });
-      const payload = await response.json().catch(() => ({})) as { success?: boolean; address?: ReverseGeocodedAddress; error?: string };
+      const { response } = result;
+      const payload = result.payload as { success?: boolean; address?: ReverseGeocodedAddress; error?: string };
       if (!response.ok || !payload.success || !payload.address) {
         throw new Error(payload.error ?? "تعذّرت قراءة العنوان من الخريطة. يمكنك إكماله يدويًا.");
       }
